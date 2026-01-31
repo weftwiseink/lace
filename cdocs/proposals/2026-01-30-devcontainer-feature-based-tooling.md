@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-features
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_wip
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-5-20251101"
@@ -108,6 +108,8 @@ Replace each tool installation block in the Dockerfile with a corresponding feat
 > The `neovim-apt-get` variant is not viable because Debian bookworm repos only provide v0.7, and we need v0.11+.
 > The homebrew variant should provide newer versions but requires homebrew to be installed in the container (the feature handles this).
 > `ghcr.io/duduribeiro/devcontainer-features/neovim:1` is a fallback if the homebrew overhead is unacceptable.
+>
+> NOTE(mjr): we might also consider AppImage... not sure.
 
 ### Target Dockerfile changes
 

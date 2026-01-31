@@ -4,13 +4,15 @@ first_authored:
   at: 2026-01-30T18:00:00-08:00
 task_list: lace/devcontainer-features
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-5-20251101"
   at: 2026-01-30T18:30:00-08:00
   round: 2
+accepted_by: "@mjr"
+accepted_at: 2026-01-31T08:00:00-08:00
 tags: [devcontainer, features, tooling, composability]
 ---
 

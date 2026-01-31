@@ -1,0 +1,19 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "lace": {
+      "prebuildFeatures": {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+        "ghcr.io/weft/devcontainer-features/wezterm-server:1": {
+          "version": "20240203-110809-5046fc22"
+        }
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  }
+}

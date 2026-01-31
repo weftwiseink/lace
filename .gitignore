@@ -1,1 +1,4 @@
 .vscode
+.lace/
+node_modules/
+dist/

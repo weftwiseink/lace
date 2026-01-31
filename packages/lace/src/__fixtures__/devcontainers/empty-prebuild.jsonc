@@ -1,0 +1,11 @@
+{
+  "build": { "dockerfile": "Dockerfile" },
+  "customizations": {
+    "lace": {
+      "prebuildFeatures": {}
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  }
+}

@@ -19,6 +19,9 @@ importers:
       dockerfile-ast:
         specifier: ^0.7.1
         version: 0.7.1
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
     devDependencies:
       '@types/node':
         specifier: ^25.1.0
@@ -658,6 +661,9 @@ packages:
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
+
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
   jsonfile@6.2.0:
     resolution: {integrity: sha512-FGuPw30AdOIUTRMC2OMRtQV+jkVj2cfPqSeWXv1NEAJ1qZ5zb1X6z1mFhbfOB/iy3ssJCD+3KuZ8r8C3uVFlAg==}
@@ -1478,6 +1484,8 @@ snapshots:
   js-tokens@9.0.1: {}
 
   json-schema-traverse@1.0.0: {}
+
+  jsonc-parser@3.3.1: {}
 
   jsonfile@6.2.0:
     dependencies:

@@ -1,0 +1,15 @@
+{
+  "build": { "dockerfile": "Dockerfile" },
+  "customizations": {
+    "lace": {
+      "prebuildFeatures": {
+        "ghcr.io/devcontainers/features/git:1": {},
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/git:2": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  }
+}

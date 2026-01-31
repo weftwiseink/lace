@@ -1,0 +1,10 @@
+{
+  "image": "node:24",
+  "customizations": {
+    "lace": {
+      "prebuildFeatures": {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+name: "Test Devcontainer Features"
+on:
+  pull_request:
+    paths:
+      - 'devcontainers/features/**'
+  push:
+    branches: [main]
+    paths:
+      - 'devcontainers/features/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Install devcontainer CLI"
+        run: npm install -g @devcontainers/cli
+
+      - name: "Test wezterm-server feature"
+        run: |
+          cd devcontainers/features
+          devcontainer features test --features wezterm-server

@@ -1,0 +1,33 @@
+name: "Release Devcontainer Features"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'devcontainers/features/src/**'
+
+permissions:
+  packages: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Publish features"
+        uses: devcontainers/action@v1
+        with:
+          publish-features: "true"
+          base-path-to-features: "./devcontainers/features/src"
+          features-namespace: "weftwiseink/devcontainer-features"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Create generated docs PR"
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "docs: auto-generate devcontainer feature docs"
+          title: "Auto-generated devcontainer feature docs"
+          branch: "auto-docs/devcontainer-features"

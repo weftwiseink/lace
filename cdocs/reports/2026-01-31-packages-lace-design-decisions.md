@@ -88,3 +88,30 @@ When devcontainer.json uses `"image"` instead of `"build.dockerfile"`, the devco
 Rather than introducing a second rewrite path (mutating devcontainer.json's `image` field) with unclear devcontainer CLI behavior, v1 declares this variant unsupported with a clear error message.
 The Dockerfile rewrite path is the primary and well-understood mechanism.
 `image`-based support can be revisited as a future enhancement if demand warrants.
+
+## Usage Stories
+
+### Developer adds a heavy feature
+
+Developer adds claude-code under `customizations.lace.prebuildFeatures`, runs `lace prebuild`.
+Subsequent `devcontainer up` starts in seconds instead of 90+ with feature installation.
+The Dockerfile's FROM line now points to `lace.local/node:24-bookworm` with claude-code pre-installed.
+
+### CI rebuilds on feature version bumps
+
+CI runs `lace prebuild` after devcontainer.json changes.
+Lock file is committed for reproducibility.
+Unchanged prebuild config (detected via cached context comparison) is a no-op.
+
+### New team member without lace
+
+Clone repo, run `devcontainer up` directly.
+The committed Dockerfile uses the original base image, so the container builds.
+`prebuildFeatures` are not installed (not in `features` block), but the container is functional.
+Install lace later for the speed optimization. Lace is not a hard dependency.
+
+### Branch switching with different feature sets
+
+Branch A: claude-code + wezterm. Branch B: claude-code only.
+`lace prebuild` produces branch-specific `lace.local/*` images.
+`lace restore` returns the Dockerfile to its committed state.

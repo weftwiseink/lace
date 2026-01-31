@@ -5,8 +5,13 @@ first_authored:
 task_list: lace/devcontainer-features
 type: devlog
 state: live
-status: wip
+status: review_ready
 tags: [devcontainer-features, wezterm, implementation, phase-1a, phase-2]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-5-20251101"
+  at: 2026-01-31T23:55:00-08:00
+  round: 2
 ---
 
 # Scaffold devcontainer features with Wezterm Server: Devlog
@@ -45,6 +50,15 @@ Scope for this session: Phase 1a (Debian-only feature) and Phase 2 (CI/CD workfl
 - CI/CD workflows use `paths:` triggers scoped to `devcontainers/features/**` to avoid running on unrelated repo changes.
 - Release workflow uses `features-namespace: "weftwiseink/devcontainer-features"` to publish under the preferred OCI namespace rather than the default `weftwiseink/lace/*`.
 
+### Review round 1 fixes
+
+Addressed all findings from `cdocs/reviews/2026-01-31-review-of-wezterm-server-feature-implementation.md`:
+
+- **[blocking]** Created `no_runtime_dir.sh` scenario-specific test that asserts the runtime dir does NOT exist (shared `test.sh` would have failed for this scenario)
+- Added `common-utils` feature to `no_runtime_dir` scenario so curl is available on bare `debian:bookworm`
+- `detect_arch` now prints the unsupported architecture name to stderr before failing
+- Test workflow now has explicit `permissions: contents: read`
+
 ## Changes Made
 
 | File | Description |
@@ -52,6 +66,7 @@ Scope for this session: Phase 1a (Debian-only feature) and Phase 2 (CI/CD workfl
 | `devcontainers/features/src/wezterm-server/devcontainer-feature.json` | Feature metadata: options (version, createRuntimeDir), installsAfter deps |
 | `devcontainers/features/src/wezterm-server/install.sh` | Debian-only installer with distro/arch detection scaffolding |
 | `devcontainers/features/test/wezterm-server/test.sh` | Feature test: binary presence, version, runtime dir |
+| `devcontainers/features/test/wezterm-server/no_runtime_dir.sh` | Scenario-specific test: asserts runtime dir absent |
 | `devcontainers/features/test/wezterm-server/scenarios.json` | 4 test scenarios: debian, ubuntu, custom version, no runtime dir |
 | `.github/workflows/devcontainer-features-test.yaml` | CI test workflow on PR/push with path trigger |
 | `.github/workflows/devcontainer-features-release.yaml` | Release workflow: publish to GHCR on merge to main |

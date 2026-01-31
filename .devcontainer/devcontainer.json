@@ -1,0 +1,86 @@
+{
+  "name": "Weft Development (Worktrees)",
+  // NOTE: This devcontainer is designed to be opened from the main/ worktree.
+  // It mounts the parent directory (bare repo root) at /workspace, giving access
+  // to all worktrees. The workspaceFolder opens in /workspace/main by default.
+  // See docs/worktree_development.md for details.
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      // NOTE: Tied to mounts[0]
+      "COMMAND_HISTORY_PATH": "/commandhistory",
+      // NOTE: Tied to mounts[1], .containerEnv.CLAUDE_CONFIG_DIR
+      "USERNAME": "node"
+    },
+    "context": ".."
+  },
+  // NOTE: NET_ADMIN/NET_RAW capabilities removed - were only needed for firewall
+  // See docs/reports/2026-01-18_devcontainer_firewall_analysis.md
+  "runArgs": [],
+  // Hopefully work around onCreateCommand not running detatched: https://stackoverflow.com/a/34518145
+  /* There's no way around this we aare GIMPED
+  "onCreateCommand": [ "nohup", "/sculptor_setup/on_create.sh", "2>&1", ">>", "/sculptor_setup/on_create.log", "&", "sleep", "1" ],
+  */
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "prisma.prisma",
+        "ms-vscode.vscode-typescript-next",
+        "christian-kohler.npm-intellisense",
+        "formulahendry.auto-rename-tag",
+        "naumovs.color-highlight",
+        "oderwat.indent-rainbow",
+        "yzhang.markdown-all-in-one",
+        "anthropic.claude-code",
+        "jackiotyu.git-worktree-manager"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "always"
+        },
+        "typescript.updateImportsOnFileMove.enabled": "always",
+        "typescript.preferences.includePackageJsonAutoImports": "on",
+        "editor.tabSize": 2,
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "files.trimFinalNewlines": true,
+        "claude.defaultMode": "bypassPermissions",
+        "claudeCode.allowDangerouslySkipPermissions": true,
+        "files.associations": {
+          ".claude/settings.local.json": "jsonc",
+          ".claude/settings.json": "jsonc"
+        },
+        "git.repositoryScanMaxDepth": 2
+      }
+    }
+  },
+  // Expose sshd port for WezTerm SSH domain multiplexing
+  // See docs/proposals/wezterm_devcontainer_multiplexing.md
+  "appPort": ["2222:2222"],
+  "mounts": [
+    // TODO: Generalize
+    "source=${localEnv:HOME}/code/dev_records/weft/bash/history,target=/commandhistory,type=bind",
+    "source=${localEnv:HOME}/code/dev_records/weft/claude,target=/home/node/.claude,type=bind",
+    // SSH public key for WezTerm SSH domain access (host → container)
+    // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/weft_devcontainer -N ""
+    "source=${localEnv:HOME}/.ssh/weft_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace/main",
+  "postCreateCommand": "git config --global --add safe.directory '*'",
+  // Start wezterm mux daemon for SSH domain multiplexing (sshd is started by the sshd feature)
+  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  }
+}

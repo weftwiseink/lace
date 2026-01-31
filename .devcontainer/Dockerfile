@@ -91,17 +91,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # See docs/reports/2026-01-18_devcontainer_firewall_analysis.md
 # Original: https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh
 
-# Install neovim (Debian bookworm repos only have v0.7, need v0.11+)
-# v0.11+ only publishes tarballs (no .deb), so extract to /opt and symlink.
-ARG NEOVIM_VERSION="v0.11.6"
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
-    curl -fsSL -o /tmp/nvim.tar.gz \
-      "https://github.com/neovim/neovim/releases/download/${NEOVIM_VERSION}/nvim-linux-${ARCH}.tar.gz" && \
-    tar -xzf /tmp/nvim.tar.gz -C /opt && \
-    ln -s "/opt/nvim-linux-${ARCH}/bin/nvim" /usr/local/bin/nvim && \
-    rm /tmp/nvim.tar.gz
-
 # Install wezterm-mux-server for terminal multiplexing via SSH domain
 # Extract from .deb to avoid pulling X11/Wayland GUI dependencies.
 # Only wezterm-mux-server (daemon) and wezterm (CLI) are needed headless.

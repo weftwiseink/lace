@@ -22,6 +22,7 @@
     "no_runtime_dir": {
         "image": "debian:bookworm",
         "features": {
+            "ghcr.io/devcontainers/features/common-utils:2": {},
             "wezterm-server": {
                 "createRuntimeDir": false
             }

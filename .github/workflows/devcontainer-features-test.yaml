@@ -8,6 +8,9 @@ on:
     paths:
       - 'devcontainers/features/**'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

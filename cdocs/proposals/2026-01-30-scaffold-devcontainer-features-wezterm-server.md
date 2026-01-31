@@ -390,6 +390,8 @@ Success criteria:
 
 Dependencies: Phase 2 (feature must be published to GHCR before the Dockerfile can reference it).
 
+> NOTE(mjr): The "feature-based-tooling" proposal is now being worked on in parallel, so we should factor that into our workstream here
+
 ### Phase 4: Additional features
 
 Scope and implement additional devcontainer features extracted from the Dockerfile:
@@ -398,6 +400,8 @@ Scope and implement additional devcontainer features extracted from the Dockerfi
 2. **nushell**: Package nushell installation as a feature.
 3. **git-delta**: Extract the git-delta `.deb` installation (lines 87-90) into a feature.
 4. Each feature follows the same structure: `devcontainer-feature.json`, `install.sh`, `test.sh`, `scenarios.json`.
+
+> NOTE(mjr): This can be cut -we'll let other workstreams focus on this
 
 Success criteria:
 - Each feature passes `devcontainer features test` against the standard base image matrix.

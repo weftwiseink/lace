@@ -9,25 +9,32 @@ status: implementation_ready
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-5-20251101"
-  at: 2026-01-30T19:00:00-08:00
-  round: 2
+  at: 2026-01-31T12:30:00-08:00
+  round: 3
+revised:
+  by: "@claude-opus-4-5-20251101"
+  at: 2026-01-31T12:00:00-08:00
+  reason: "Integrating mjr feedback from round 2 review"
 tags: [devcontainer, cli, prebuild, npm, architecture]
 ---
 
 # packages/lace: Devcontainer Wrapper and Image Prepper
 
-> BLUF: The `lace` CLI tool pre-bakes devcontainer features onto base images at build time, eliminating cold-start installation delays during `devcontainer up`.
-> It reads a `customizations.lace.prebuildFeatures` block from devcontainer.json, runs `devcontainer build --image-name` against a temporary config with those features to produce a `lace.local/<base-image>` tagged image, and rewrites the Dockerfile's first `FROM` line to use it.
-> The rewritten Dockerfile is a local-only modification (gitignored via `.lace/` metadata tracking); the original Dockerfile remains the committed source of truth.
-> Lock file entries from the prebuild step are merged into the project's `devcontainer-lock.json` for reproducibility.
+> BLUF: The `lace` CLI is a devcontainer orchestration tool focused on QoL and performance.
+> Its first major capability is pre-baking devcontainer features onto base images at build time, eliminating cold-start installation delays during `devcontainer up`.
+> It reads a `customizations.lace.prebuildFeatures` block from devcontainer.json, runs `devcontainer build --image-name` against a temporary context cached in `.lace/prebuild/` to produce a `lace.local/<base-image>` tagged image, and rewrites the Dockerfile's first `FROM` line to use it.
+> The rewritten Dockerfile is a local-only modification (`.lace/` is gitignored); the original Dockerfile remains the committed source of truth.
+> Lock file entries from the prebuild are namespaced under `lace.prebuiltFeatures` in `devcontainer-lock.json` to avoid confusing the wrapped devcontainer CLI.
 > The package lives at `packages/lace/` as a pnpm workspace member, published to npm as a TypeScript CLI.
-> Both Dockerfile-based and `image`-based devcontainer configurations are supported.
 
 ## Objective
 
 Provide a CLI tool that reduces devcontainer startup time by pre-building feature layers onto base images.
 Devcontainer features are installed at container creation time by the devcontainer CLI, which can add minutes to every `devcontainer up` invocation.
 The lace CLI shifts this work to a build step whose output is cached as a local Docker image, so subsequent container creations skip feature installation entirely.
+
+The prebuild capability is the first of several planned devcontainer orchestration features in the lace CLI.
+Future capabilities will include host precondition checks (e.g., detecting host wezterm version mismatches before container build), smart cache invalidation (see followup RFP: `cdocs/rfps/`), and other devcontainer workflow automation.
 
 ## Background
 
@@ -85,46 +92,49 @@ Features that should be pre-baked are declared in devcontainer.json under the `c
   }
 }
 ```
-> TOOD(mjr): We should add a feature for exploding on pre-conditions-by-feature, first one being "detect host wezterm version and complain to user"
 
 Features under `prebuildFeatures` are baked into the base image at build time.
-Features under `features` continue to install at container creation time (appropriate for lightweight features or features that need runtime context).
-> NOTE(mjr): the majority of features should not require context etc 
+Features under `features` install at container creation time.
+The majority of features do not require runtime context and are good candidates for prebuild; the `features` block is appropriate for features that genuinely need container-creation-time information (e.g., features that inspect mounted volumes or runtime environment variables).
+
+Setting `"prebuildFeatures": null` explicitly disables prebuild without triggering an informational message from `lace prebuild`, which is useful when the lace CLI is installed for its other capabilities.
+
+### Upfront validation
+
+Before running the prebuild pipeline, lace validates:
+
+1. **No feature overlap**: `prebuildFeatures` and `features` must not contain the same feature (compared version-insensitively by feature identifier, ignoring version tags). Overlapping entries would cause the feature to be installed twice (once in the pre-baked image, once at creation time), wasting time and potentially causing conflicts. If overlap is detected, lace exits with an error listing the duplicates.
+
+2. **Dockerfile parsability**: The Dockerfile is parsed using an npm Dockerfile parsing library (e.g., `dockerfile-ast`) rather than ad-hoc regex. This gives proper syntax validation and structured access to instructions, catching malformed Dockerfiles early with clear error messages rather than failing in obscure ways during the pipeline.
 
 ### The prebuild pipeline
 
 ```mermaid
 flowchart TD
-    A[lace prebuild] --> B[Read devcontainer.json]
+    A[lace prebuild] --> V[Validate: no feature overlap]
+    V --> B[Read devcontainer.json]
     B --> C[Extract prebuildFeatures]
-    C --> D[Parse Dockerfile for first FROM line]
-    D --> E[Create temp Dockerfile: single FROM line]
-    E --> F[Create temp devcontainer.json with prebuildFeatures as features]
-    F --> G["Run devcontainer build --image-name lace.local/base-image"]
-    G --> H[Rewrite original Dockerfile first FROM to use tagged image]
-    H --> I[Merge lock entries into devcontainer-lock.json]
-    I --> J[Store metadata in .lace/]
+    C --> D[Parse Dockerfile AST]
+    D --> E["Create temp context in .lace/prebuild/"]
+    E --> F["Run devcontainer build --image-name lace.local/base:tag"]
+    F --> G[Rewrite original Dockerfile first FROM]
+    G --> H["Merge lock entries under lace.prebuiltFeatures"]
 ```
-> NOTE(mjr):
-> - There may be more necessary in the temp Dockerfile - IE ARG can come before FROM.
->   We want to be thorough/spec compliant when implementing the prebuild, and if there are possible Dockerfile "preludes" we can't handle we should aim to detect them.
-> - The resulting image name version should be versioned just like that in the Dockerfile.
-> - Just like devcontainer, lace prebuild should rebuild on devcontainer.json changes by default.
-> - The lock entries should likely be tucked under a `lace: { prebuiltFeatures: $features }` to avoid confusing the wrapped devcontainer cli.
->   We need to pull them out into our temp devcontainer context for lace building 
-> - the `lace` cli will have more features, and will generally be focused around this kind of devcontainer orchestration and QoL features
+
+The temporary build context is cached in `.lace/prebuild/` (Dockerfile, devcontainer.json, and metadata) so that subsequent runs can diff the cached context against the newly generated one to determine if a rebuild is needed.
 
 Step by step:
 
-1. **Read configuration**: Parse `.devcontainer/devcontainer.json`, extract `customizations.lace.prebuildFeatures`.
-2. **Parse Dockerfile**: Find the first `FROM` line (e.g., `FROM node:24-bookworm`). Handle `FROM ... AS stage` syntax; only the first stage's base image is relevant.
-3. **Generate temporary workspace**: Create a temp directory containing:
-   - A minimal Dockerfile with only the extracted `FROM` line.
-   - A devcontainer.json with `prebuildFeatures` entries as its `features` block.
-4. **Build and tag**: Run `devcontainer build --workspace-folder <temp-dir> --image-name lace.local/<original-from-image>`. The `--image-name` flag combines the build and tag steps into a single operation.
-5. **Rewrite Dockerfile**: Replace the first `FROM` line with `FROM lace.local/<original-from-image>`.
-6. **Merge lock file**: Capture the `devcontainer-lock.json` produced by the build step and merge its feature entries into the project's lock file.
-7. **Record metadata**: Write prebuild state to `.lace/prebuild.json` (original FROM, config hash, timestamp).
+1. **Validate**: Check for feature overlap between `prebuildFeatures` and `features`. Parse the Dockerfile using a Dockerfile AST library to validate syntax and extract structure.
+2. **Read configuration**: Parse `.devcontainer/devcontainer.json` (JSONC), extract `customizations.lace.prebuildFeatures`.
+3. **Parse Dockerfile**: Extract the first `FROM` instruction and any preceding `ARG` instructions (Docker permits `ARG` before `FROM` for build-time variable substitution in the base image reference). Detect and warn about any other unsupported prelude instructions.
+4. **Generate temporary context in `.lace/prebuild/`**: Create:
+   - A Dockerfile containing the `ARG` prelude (if any) and the first `FROM` line.
+   - A devcontainer.json with `prebuildFeatures` promoted to the `features` key. The original `features` entries are excluded from this context (they are not part of the prebuild).
+5. **Build and tag**: Run `devcontainer build --workspace-folder .lace/prebuild/ --image-name lace.local/<image>:<tag>`. The image name preserves the original image reference's tag or version (e.g., `FROM node:24-bookworm` produces `lace.local/node:24-bookworm`).
+6. **Rewrite Dockerfile**: Replace the first `FROM` line with `FROM lace.local/<image>:<tag>`.
+7. **Merge lock file**: Capture the `devcontainer-lock.json` produced by the build step and merge its feature entries into the project's lock file under a `lace.prebuiltFeatures` namespace key. This prevents the entries from confusing the devcontainer CLI (which reads the top-level lock entries for its own features). During prebuild, lace pulls these namespaced entries back into the temp context's lock file.
+8. **Rebuild detection**: By default, lace rebuilds when the devcontainer.json has changed since the last prebuild (comparing the cached `.lace/prebuild/devcontainer.json` against the freshly generated one). A future smart cache-busting enhancement (see RFP) will diff individual fields to skip rebuilds when only non-impactful fields changed.
 
 ### CLI commands
 
@@ -141,6 +151,7 @@ Step by step:
 packages/lace/
   package.json          # name: "lace", bin: { lace: "./dist/index.js" }
   tsconfig.json
+  vite.config.ts        # Vite for building
   src/
     index.ts            # CLI entry point (argument parsing, command dispatch)
     commands/
@@ -148,10 +159,11 @@ packages/lace/
       restore.ts        # Dockerfile restoration
       status.ts         # Prebuild state inspection
     lib/
-      dockerfile.ts     # Dockerfile parsing and rewriting
-      devcontainer.ts   # devcontainer.json reading, temp workspace generation, CLI invocation
-      lockfile.ts       # Lock file merging
-      metadata.ts       # .lace/ directory management
+      dockerfile.ts     # Dockerfile parsing (via dockerfile-ast) and rewriting
+      devcontainer.ts   # devcontainer.json reading (jsonc-parser), temp context generation, CLI invocation
+      lockfile.ts       # Lock file merging with lace.prebuiltFeatures namespacing
+      metadata.ts       # .lace/prebuild/ directory management
+      validation.ts     # Upfront checks (feature overlap, Dockerfile syntax)
 ```
 
 ## Important Design Decisions
@@ -167,9 +179,10 @@ If features were baked into the final image instead, it would require either a m
 **Why:** The devcontainer spec explicitly provides `customizations.<tool>` for tool-specific configuration.
 Keeping prebuild configuration in devcontainer.json keeps all container configuration in one file and follows the established convention (VSCode uses `customizations.vscode`, GitHub Codespaces uses `customizations.codespaces`).
 
-### Decision: Tag pre-baked images as `lace.local/<original-image>` rather than content-addressed hashes
+### Decision: Tag pre-baked images as `lace.local/<image>:<tag>` preserving the original version
 
 **Why:** Human-readable tags make debugging easier: `docker images | grep lace.local` immediately shows what was pre-baked and from which base.
+Preserving the original tag (e.g., `lace.local/node:24-bookworm` from `FROM node:24-bookworm`) makes the lineage immediately clear.
 Content-addressed hashes provide stronger guarantees but are harder to inspect.
 The lock file provides the reproducibility guarantee; the tag provides the human interface.
 
@@ -193,21 +206,31 @@ The `--image-name` flag on `devcontainer build` allows specifying the output ima
 **Why:** The Dockerfile rewrite replaces the first `FROM` line with a reference to a `lace.local/*` image that only exists on the machine where `lace prebuild` was run.
 Committing this rewrite would break `devcontainer up` for anyone who has not run `lace prebuild` (the `lace.local/*` image would not exist on their machine).
 Instead, the original Dockerfile remains the committed source of truth.
-The `.lace/` directory (which tracks the original FROM and prebuild metadata) is gitignored.
+The `.lace/` directory (which tracks the original FROM and full prebuild context) is gitignored.
 New team members who clone the repo can either:
 - Run `lace prebuild` before `devcontainer up` to get the prebaked image benefit.
 - Run `devcontainer up` directly, which works because the committed Dockerfile uses the original base image (features install at creation time, slower but functional).
 This approach means prebuild is a purely local optimization with zero impact on the committed codebase.
 
-The same principle applies to the `image`-based variant: when devcontainer.json uses `image` instead of a Dockerfile, the original `image` value is stored in `.lace/prebuild.json` and the devcontainer.json rewrite is a local-only change managed by `lace restore`.
-Projects using this variant should add `devcontainer.json` changes from lace to their gitignore or use a `.lace/devcontainer.override.json` pattern (future enhancement).
+### Decision: Cache full prebuild context in `.lace/prebuild/` rather than just metadata
 
-### Decision: Store metadata in `.lace/` rather than in devcontainer.json
+**Why:** Storing the complete generated context (Dockerfile, devcontainer.json) alongside metadata enables future smart cache invalidation.
+By diffing the cached context against a freshly generated one, lace can determine field-by-field whether a rebuild is actually needed.
+This also means the temp build directory does not need to be regenerated for inspection or debugging: `ls .lace/prebuild/` shows exactly what was fed to `devcontainer build`.
+The cached devcontainer.json contains only the prebuild features (not the original `features` entries), making it a clean record of what was baked into the image.
 
-**Why:** Prebuild state (original FROM, timestamps, hashes) is ephemeral build metadata, not configuration.
-Storing it in devcontainer.json would mix configuration with state.
-The `.lace/` directory is gitignored (it contains local build state), while devcontainer.json is committed.
-Phase 1 of implementation adds `.lace/` to the project's `.gitignore`.
+### Decision: Namespace prebuild lock entries under `lace.prebuiltFeatures`
+
+**Why:** The devcontainer CLI reads `devcontainer-lock.json` to resolve feature versions and digests.
+If prebuild lock entries were stored at the top level alongside regular feature entries, the devcontainer CLI might attempt to resolve or interact with features that are already baked into the base image.
+Namespacing under `lace.prebuiltFeatures` keeps these entries invisible to the devcontainer CLI while still providing a reproducibility record.
+During `lace prebuild`, the namespaced entries are extracted and placed into the temp context's lock file so the devcontainer CLI can use them for the prebuild step itself.
+
+### Decision: Use a Dockerfile AST parser instead of regex
+
+**Why:** The Dockerfile spec has edge cases that regex cannot handle cleanly: heredoc syntax, multi-line instructions with backslash continuation, parser directives (`# syntax=`), `ARG` before `FROM` with variable substitution, and comments that look like instructions.
+A proper AST parser (e.g., `dockerfile-ast` npm package) handles all of these and provides structured access to instructions.
+If the parser encounters constructs in the prelude (before the first FROM) that lace cannot handle, it should detect and report them clearly rather than silently producing incorrect output.
 
 ## Stories
 
@@ -222,7 +245,7 @@ The Dockerfile's FROM line now points to a local image with claude-code pre-inst
 
 A CI pipeline runs `lace prebuild` after changes to devcontainer.json.
 The lock file is committed, ensuring all developers get the same feature versions.
-If the prebuild config has not changed (detected via config hash), the pipeline skips the build.
+If the prebuild config has not changed (detected via cached context comparison), the pipeline skips the build.
 
 ### New team member onboards without lace installed
 
@@ -241,20 +264,19 @@ Running `lace prebuild` on each branch produces branch-specific local images.
 
 ## Edge Cases / Challenging Scenarios
 
-### Dockerfile has no FROM line
+### Dockerfile has unsupported prelude instructions
 
-The Dockerfile parser should fail with a clear error message: "No FROM instruction found in Dockerfile."
-This is already an invalid Dockerfile, so the error surfaces an existing problem.
-
-> NOTE(mjr): Maybe do a general syntax check/validation instead. In fact if we can use a pre-built Dockerfile npm parsing package that'd be ideal.
+The Dockerfile spec permits `ARG` before the first `FROM` (for variable substitution in the image reference).
+These `ARG` instructions must be included in the temp Dockerfile.
+Other instructions before `FROM` are not valid per the Dockerfile spec except for parser directives (`# syntax=`, `# escape=`).
+If the AST parser finds unexpected instructions before `FROM`, lace should report them clearly and abort rather than producing a potentially incorrect prebuild.
 
 ### Base image uses a digest instead of a tag
 
 `FROM node@sha256:abc123...` should be handled.
-The `lace.local/` tag would use the digest: `lace.local/node@sha256:abc123...`.
-Docker tag syntax does not support `@` in tags, so the tag should substitute it: `lace.local/node__sha256__abc123`.
-
-> NOTE(mjr): Actually... hmm. Can we tag a version instead and do `lace.local/node:from_sha256__abc123`?
+Docker tag syntax does not support `@` in image tags, so the prebuild image uses a colon-separated format: `lace.local/node:from_sha256__abc123...`.
+The `from_` prefix makes the provenance clear (this tag was derived from a digest reference), and `__` substitutes for `:` in the digest.
+`lace restore` maps this tag back to the original `@sha256:` reference using the metadata stored in `.lace/prebuild/`.
 
 ### `devcontainer build` fails
 
@@ -264,53 +286,50 @@ The pipeline should be atomic: either all steps succeed or none take effect.
 
 ### Dockerfile has already been rewritten by a previous prebuild
 
-The metadata in `.lace/prebuild.json` tracks whether a rewrite is active.
-If the current FROM already points to `lace.local/*`, the tool should compare the config hash.
-If the config matches, it is a no-op.
-If the config has changed, it should restore the original FROM first, then re-run the prebuild.
+The cached context in `.lace/prebuild/` tracks the previous prebuild state.
+If the current FROM already points to `lace.local/*`, the tool compares the cached context against a freshly generated one.
+If they match, it is a no-op.
+If the config has changed, it restores the original FROM first, then re-runs the prebuild.
 
-> NOTE(mjr): we should actually just cache the whole temp-data for the build in `.lace/prebuild/`, with corrected context and other path-relative fields.
-> That way we can eventually json diff the old vs new file, and smartly consider the changed fields and if re-prebuild can actually be skipped (ie features _can't_ impact it)
->
-> Oh, please /cdocs:rfp a followup for that filtering & "smart" cache busting functionality, and _also_ make sure we filter out features from the `.lace/prebuild/devcontainer.json`
+For the initial implementation, any change to the generated context triggers a rebuild.
+A future enhancement (see RFP: smart prebuild cache busting) will diff individual fields to determine whether changes actually impact the prebuild result, skipping rebuilds when only non-impactful fields changed (e.g., vscode extensions, mount configuration).
 
-### No `customizations.lace.prebuildFeatures` in devcontainer.json
+### No `customizations.lace` or no `prebuildFeatures` in devcontainer.json
 
-The tool should exit with a helpful message: "No prebuildFeatures configured in devcontainer.json. Nothing to prebuild."
-Exit code 0 (not an error, just nothing to do).
+If `prebuildFeatures` is absent, lace exits with an informational message: "No prebuildFeatures configured in devcontainer.json. Nothing to prebuild." Exit code 0.
 
-> NOTE(mjr): For ease of use, we should allow `prebuildFeatures: null` to disable the exit as we'll likely be doing more with the cli.
+If `prebuildFeatures` is explicitly set to `null`, lace treats this as an intentional opt-out and exits silently with code 0.
+This allows projects to use the lace CLI for its other capabilities without prebuild triggering messages.
 
 ### The devcontainer.json uses `image` instead of `build.dockerfile`
 
-When devcontainer.json specifies `"image": "node:24-bookworm"` instead of a Dockerfile, the prebuild pipeline generates a temporary Dockerfile with `FROM <image>`, runs the prebuild, and stores the result.
-The original `image` value is saved in `.lace/prebuild.json`.
-The devcontainer.json's `image` field is then updated to point to the `lace.local/` tagged image.
-This is a local-only modification, consistent with the Dockerfile rewrite strategy: `lace restore` reverts the `image` field to its original value.
-Since devcontainer.json is typically committed, projects using this variant should consider using a local override mechanism or adding the `image` field change to a local gitignore pattern.
+When devcontainer.json specifies `"image": "node:24-bookworm"` instead of a Dockerfile, the prebuild pipeline generates a Dockerfile with `FROM <image>` in `.lace/prebuild/Dockerfile` and proceeds with the same pipeline.
+The `image` field in devcontainer.json is rewritten to the `lace.local/` equivalent, and `lace restore` reverts it, identically to how the Dockerfile `FROM` rewrite works.
 
-> NOTE(mjr): This seems unnecessary with the `.lace/prebuild/{devcontainer.json, Dockerfile}` approach.
-> We replace `image` with the `lace.local/...` equivalent, and that should be reversable just like the `Dockerfile` `FROM`.
-> If devcontainer ignores the FROM in this case we shoud too I guess...
-> though our prebuild tool might just be incompatible with this field, that's fine too.
+If the devcontainer CLI ignores the generated FROM in favor of the `image` field during a regular `devcontainer up`, then lace's prebuild is not effective for this configuration variant and lace should detect and report this rather than silently producing a non-functional prebuild.
+Declaring `image`-based configs as unsupported for prebuild is an acceptable outcome for the initial implementation.
 
 ### Lock file conflicts during merge
 
-If `devcontainer-lock.json` already contains entries for features that the prebuild also resolves, the prebuild entries take precedence.
-The merge strategy is: prebuild lock entries overwrite matching keys; non-matching keys are preserved.
-
-> NOTE(mjr): We should validate prebuildFeatures don't overlap with features in a version insensitive way upfront.
-> The namespacing discussed elsewhere should resolve this.
+Prebuild lock entries are namespaced under `lace.prebuiltFeatures` in `devcontainer-lock.json`, so they do not conflict with the devcontainer CLI's own lock entries at the top level.
+The upfront validation (no feature overlap between `prebuildFeatures` and `features`) prevents the scenario where the same feature appears in both namespaces.
 
 ## Test Plan
 
+All tests in phases 2+ should be marked with a `// IMPLEMENTATION_VALIDATION` comment by default.
+This signals that the test was written during initial implementation to validate correctness.
+Later, the test suite should be refined for maintainability and semantic coverage, avoiding the trap of equating test volume with quality.
+Tests that survive refinement have their marker removed; tests that are redundant or overly specific are consolidated or removed.
+
 ### Unit tests
 
-- Dockerfile parsing: various FROM formats (simple, with tag, with digest, with `AS` alias, multi-stage, commented-out FROM lines, ARG before FROM).
-- Config extraction: reading `customizations.lace.prebuildFeatures` from devcontainer.json, handling missing or empty blocks.
-- Tag generation: converting image references to valid `lace.local/` tags.
-- Lock file merging: overwrite, preserve, and conflict scenarios.
-- Metadata reading/writing: round-trip `.lace/prebuild.json`.
+- Dockerfile parsing (via AST library): various FROM formats (simple, with tag, with digest, with `AS` alias, multi-stage, commented-out FROM lines, ARG before FROM, parser directives, heredoc syntax).
+- ARG prelude extraction: ARGs before FROM are included in temp Dockerfile; other instructions trigger errors.
+- Config extraction: reading `customizations.lace.prebuildFeatures` from devcontainer.json (JSONC), handling missing, empty, and `null` blocks.
+- Feature overlap validation: detecting duplicate features between `prebuildFeatures` and `features` (version-insensitive comparison).
+- Tag generation: converting image references to valid `lace.local/<image>:<tag>` tags, including digest-to-tag conversion.
+- Lock file merging: namespaced write, namespaced read, preservation of non-lace entries.
+- Metadata reading/writing: round-trip `.lace/prebuild/` directory contents.
 
 ### Integration tests
 
@@ -318,6 +337,7 @@ The merge strategy is: prebuild lock entries overwrite matching keys; non-matchi
 - Idempotency: running prebuild twice produces the same result.
 - Restore: verify Dockerfile returns to original state.
 - Dry-run: verify no filesystem or Docker changes occur.
+- Rebuild detection: modify devcontainer.json, verify rebuild triggers.
 
 ### Manual verification
 
@@ -325,84 +345,91 @@ The merge strategy is: prebuild lock entries overwrite matching keys; non-matchi
 
 ## Implementation Phases
 
-> NOTE(mjr):
-> - Please use arktype, typescript, vite, vitest for tooling. For cli lib, determine a suitable option based on those priors.
-> - We have an extremely testable domain here.
-> - Phases 2 and on should have thoughtful, comprehensive test plans written before code is written.
->   - Part of this thoughtfulness is that tests should be marked as `// IMPLEMENATION_VALIDATION` by default.
->   - This is because initial implementation benefits from an overabundance of tests,
->     but later we want to refine/boil down the test suite for maintainability and semantic content, avoiding the "test volume == quality coverage" fallacy
+Tooling: arktype for runtime type validation, TypeScript, vite for building, vitest for testing.
+For CLI argument parsing, evaluate options compatible with these priors (e.g., `citty`, `cleye`, or `commander`).
+
+This is an extremely testable domain.
+Phases 2+ should have comprehensive test plans written before implementation code, following test-first methodology.
 
 ### Phase 1: Package scaffold
 
 Set up the `packages/lace/` directory as a pnpm workspace member.
 
-- Initialize `package.json` with name, version, bin field, TypeScript dependencies.
+- Initialize `package.json` with name, version, bin field, TypeScript + arktype + vitest dependencies.
 - Configure `tsconfig.json` for Node.js CLI output.
-- Create `src/index.ts` entry point with argument parsing (consider `commander` or `yargs`).
-- Wire up build script (`tsc` or `tsup`) to produce `dist/`.
+- Configure `vite.config.ts` for library/CLI building.
+- Create `src/index.ts` entry point with argument parsing.
+- Wire up build and test scripts.
 - Add `.lace/` to the project's `.gitignore`.
 - Verify `pnpm build` and `pnpm --filter lace exec lace --help` work.
 
-**Success criteria:** `lace --help` prints usage information. `.lace/` is gitignored.
+**Success criteria:** `lace --help` prints usage information. `.lace/` is gitignored. `vitest` runs (even with no tests yet).
 
-### Phase 2: Dockerfile FROM parsing and rewriting
+### Phase 2: Dockerfile parsing and rewriting
 
-Implement `src/lib/dockerfile.ts`.
+Implement `src/lib/dockerfile.ts` and `src/lib/validation.ts`.
 
-- Parse a Dockerfile to extract the first `FROM` instruction, handling:
-  - `FROM image`
-  - `FROM image:tag`
-  - `FROM image:tag AS name`
-  - `FROM image@sha256:digest`
-  - `ARG` instructions before FROM (Docker supports this).
-  - Comments and blank lines.
+Write the test plan first, then implement.
+
+- Use `dockerfile-ast` (or similar npm package) to parse Dockerfiles into a structured AST.
+- Extract the first `FROM` instruction and any preceding `ARG` instructions.
+- Detect and error on unsupported prelude instructions.
 - Rewrite the first FROM line to a new image reference while preserving the rest of the Dockerfile exactly.
+- Generate `lace.local/<image>:<tag>` names, including the `from_sha256__` format for digest references.
 - Restore a rewritten FROM line given the original value.
 
-**Success criteria:** Unit tests pass for all FROM format variants. A round-trip parse/rewrite/restore produces an identical file.
+**Success criteria:** Unit tests (marked `// IMPLEMENTATION_VALIDATION`) pass for all FROM format variants. A round-trip parse/rewrite/restore produces an identical file.
 
-### Phase 3: devcontainer.json reading and temp workspace generation
+### Phase 3: devcontainer.json reading and temp context generation
 
 Implement `src/lib/devcontainer.ts`.
 
-- Read and parse devcontainer.json (handle JSONC: comments and trailing commas). Use the `jsonc-parser` npm package (the same parser used by the devcontainer CLI and VS Code).
-- Extract `customizations.lace.prebuildFeatures`.
-- Generate a temporary directory with:
-  - A minimal Dockerfile containing only the extracted FROM line.
-  - A devcontainer.json with `prebuildFeatures` entries as its `features` block.
-- Handle the `image` variant (no Dockerfile): generate a FROM line from the image field.
+Write the test plan first, then implement.
 
-**Success criteria:** Generated temp workspace files are valid inputs to `devcontainer build`.
+- Read and parse devcontainer.json using `jsonc-parser` (the same parser used by the devcontainer CLI and VS Code) for JSONC support (comments, trailing commas).
+- Extract `customizations.lace.prebuildFeatures`, handling absent, empty, and `null` cases.
+- Validate no feature overlap between `prebuildFeatures` and `features`.
+- Generate `.lace/prebuild/` directory containing:
+  - A Dockerfile with `ARG` prelude (if any) and the first `FROM` line.
+  - A devcontainer.json with `prebuildFeatures` promoted to `features` (original `features` excluded).
+- Handle the `image` variant (no Dockerfile): generate a FROM line from the image field, or report as unsupported if the devcontainer CLI would ignore the generated Dockerfile.
+
+**Success criteria:** Generated context files are valid inputs to `devcontainer build`. Feature overlap detection works correctly.
 
 ### Phase 4: Image tagging and prebuild pipeline orchestration
 
 Implement `src/commands/prebuild.ts` and `src/lib/metadata.ts`.
 
-- Shell out to `devcontainer build --image-name lace.local/<base-image>` with the temp workspace.
-- Rewrite the original Dockerfile's first FROM line.
-- Write metadata to `.lace/prebuild.json`.
-- Implement `--dry-run` flag (log planned actions, skip execution).
-- Implement idempotency check (compare config hash, skip if unchanged).
+Write the test plan first, then implement.
 
-**Success criteria:** Running `lace prebuild` against a test devcontainer.json produces a tagged Docker image and a rewritten Dockerfile. Running it again is a no-op.
+- Shell out to `devcontainer build --workspace-folder .lace/prebuild/ --image-name lace.local/<image>:<tag>`.
+- Rewrite the original Dockerfile's first FROM line.
+- Cache the full generated context in `.lace/prebuild/` for future comparison.
+- Implement `--dry-run` flag (log planned actions, skip execution).
+- Implement rebuild detection: compare cached `.lace/prebuild/` context against freshly generated context. If unchanged, skip rebuild.
+- Default to rebuilding when devcontainer.json has changed (smart field-level diffing is a future enhancement per the RFP).
+
+**Success criteria:** Running `lace prebuild` against a test devcontainer.json produces a tagged Docker image and a rewritten Dockerfile. Running it again is a no-op. Changing prebuildFeatures triggers a rebuild.
 
 ### Phase 5: Lock file merging
 
 Implement `src/lib/lockfile.ts`.
 
-- Read the `devcontainer-lock.json` generated by the prebuild's `devcontainer build`.
-- Merge its entries into the project's existing `devcontainer-lock.json`.
+Write the test plan first, then implement.
+
+- Read the `devcontainer-lock.json` generated by the prebuild's `devcontainer build` in `.lace/prebuild/`.
+- Merge its entries into the project's existing `devcontainer-lock.json` under a `lace.prebuiltFeatures` namespace key.
+- When generating the temp context for a prebuild, extract the namespaced entries from the project lock file and place them as top-level entries in the temp context's lock file.
 - Write the merged result.
 
-**Success criteria:** After prebuild, the project's lock file contains resolved digests for all prebuild features. Existing entries for non-prebuild features are preserved.
+**Success criteria:** After prebuild, the project's lock file contains namespaced resolved digests for all prebuild features. Existing top-level entries for non-prebuild features are preserved. The namespaced entries round-trip correctly through prebuild cycles.
 
 ### Phase 6: restore, status commands, and metadata tracking
 
 Implement `src/commands/restore.ts` and `src/commands/status.ts`.
 
-- `lace restore`: Read `.lace/prebuild.json`, restore the original FROM line in the Dockerfile, clean up metadata.
-- `lace status`: Display current prebuild state: whether a prebuild is active, original vs. current FROM, config hash, timestamp, staleness (config changed since last prebuild).
+- `lace restore`: Read `.lace/prebuild/`, restore the original FROM line in the Dockerfile (or `image` field in devcontainer.json), clean up the cached context.
+- `lace status`: Display current prebuild state: whether a prebuild is active, original vs. current FROM, config staleness (has devcontainer.json changed since last prebuild).
 - Handle edge case: restore when no prebuild is active (no-op with message).
 - Handle edge case: status when `.lace/` does not exist (report "no prebuild active").
 

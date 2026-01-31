@@ -14,6 +14,11 @@ last_reviewed:
   round: 2
 ---
 
+> NOTE(mjr): Main things I see that could be issues here:
+> - Because our setup also depends on sshd we should depend on it.
+> - We sould spin off an rfp on how to add more secure ssh key auto-management to the lace cli being dev'd in parallel
+> - We should make an effort to make our feature cross-platform like other features do
+
 # Scaffold devcontainers/features/ with Wezterm Server Feature
 
 > BLUF: Extract the wezterm-mux-server installation logic from the lace Dockerfile into a standalone devcontainer feature published at `ghcr.io/weft/devcontainer-features/wezterm-server`, following the structure and CI/CD patterns established by the [anthropics/devcontainer-features](https://github.com/anthropics/devcontainer-features) repository.

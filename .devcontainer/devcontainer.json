@@ -81,6 +81,9 @@
   "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/sshd:1": {}
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {
+      "version": "2.1.11"
+    }
   }
 }

@@ -4,9 +4,6 @@ FROM node:24-bookworm
 ARG ELECTRON_VERSION="39.2.7"
 ARG PLAYWRIGHT_VERSION="1.57.0"
 
-# https://www.npmjs.com/package/@anthropic-ai/claude-code?activeTab=versions
-ARG CLAUDE_CODE_VERSION="2.1.11"
- # https://github.com/anthropics/claude-code/blob/main/.devcontainer/Dockerfile#L51
 ARG GIT_DELTA_VERSION="0.18.2"
 
 ARG COMMAND_HISTORY_PATH="/commandhistory"
@@ -155,9 +152,6 @@ RUN pnpm install "electron@${ELECTRON_VERSION}" && \
 
 RUN pnpm install "playwright@${PLAYWRIGHT_VERSION}" && \
     npx playwright install chromium
-
-# Install Claude Code globally as node user (use npm for global installs)
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Copy package files and install dependencies as node user
 COPY --chown=${USERNAME}:${USERNAME} package.json pnpm-lock.yaml pnpm-workspace.yaml ./

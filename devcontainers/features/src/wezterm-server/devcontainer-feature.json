@@ -1,0 +1,24 @@
+{
+    "name": "Wezterm Server",
+    "id": "wezterm-server",
+    "version": "1.0.0",
+    "description": "Installs wezterm-mux-server and wezterm CLI for headless terminal multiplexing via SSH domains. Extracts binaries from platform-native packages to avoid X11/Wayland GUI dependencies.",
+    "options": {
+        "version": {
+            "type": "string",
+            "default": "20240203-110809-5046fc22",
+            "description": "Wezterm release version string (e.g., 20240203-110809-5046fc22)"
+        },
+        "createRuntimeDir": {
+            "type": "boolean",
+            "default": true,
+            "description": "Create /run/user/<uid> runtime directory for wezterm-mux-server (UID resolved from _REMOTE_USER)"
+        }
+    },
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/wezterm-server",
+    "licenseURL": "https://github.com/weftwiseink/lace/blob/main/LICENSE",
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils",
+        "ghcr.io/devcontainers/features/sshd"
+    ]
+}

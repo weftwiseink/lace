@@ -1,0 +1,30 @@
+{
+    "debian_default": {
+        "image": "mcr.microsoft.com/devcontainers/base:debian",
+        "features": {
+            "wezterm-server": {}
+        }
+    },
+    "ubuntu_default": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "features": {
+            "wezterm-server": {}
+        }
+    },
+    "custom_version": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "features": {
+            "wezterm-server": {
+                "version": "20240203-110809-5046fc22"
+            }
+        }
+    },
+    "no_runtime_dir": {
+        "image": "debian:bookworm",
+        "features": {
+            "wezterm-server": {
+                "createRuntimeDir": false
+            }
+        }
+    }
+}

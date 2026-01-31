@@ -15,7 +15,6 @@ ENV TZ="$TZ"
 
 ENV DEVCONTAINER=true
 
-
 # Install essential system tools and Playwright dependencies
 # These are required for:
 # - Playwright e2e tests (pnpm test:e2e)
@@ -162,7 +161,6 @@ RUN pnpm build:electron 2>&1 | tee /tmp/electron_build.log || \
 # setup script to shoehorn in a npm run dev entrypoint-ish bg process via devcontainer onCreateCommand
 # COPY .sculptor/on_create.sh ./on_create.sh
 # RUN chmod a+x ./on_create.sh
-
 
 # Default command (overridden by sculptor anyways)
 # CMD ["npm", "run", "dev"]

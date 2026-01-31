@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-features
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_wip
 tags: [devcontainer-features, wezterm, ci-cd, publishing, infrastructure, oci-namespace, cross-platform]
 last_reviewed:
   status: accepted
@@ -15,21 +15,21 @@ last_reviewed:
 revised:
   by: "@claude-opus-4-5-20251101"
   at: 2026-01-31T17:15:00-08:00
-  reason: "Address round 3 review: fix RPM fc39 hardcoding (route suse to AppImage), add Alpine/musl detection, add Fedora 41 and Arch Linux test scenarios, subshell for RPM cd, document fc39 fragility"
+  reason: "Split Phase 1 into 1a (Debian-only, proven path) and 1b (cross-platform, validated incrementally). Add Phase 0 GHCR prerequisites. Fix org name weft->weftwiseink."
 ---
 
 # Scaffold devcontainers/features/ with Wezterm Server Feature
 
-> BLUF: Extract the wezterm-mux-server installation logic from the lace Dockerfile into a standalone, cross-platform devcontainer feature published at `ghcr.io/weft/devcontainer-features/wezterm-server`, following the structure and CI/CD patterns established by [anthropics/devcontainer-features](https://github.com/anthropics/devcontainer-features).
-> The feature supports Debian/Ubuntu (.deb extraction), Fedora/RHEL (.rpm extraction), and other Linux distros (AppImage extraction), and declares `installsAfter` dependencies on both `common-utils` and `sshd`.
-> The feature directory lives at `devcontainers/features/` within the lace monorepo, with GitHub Actions workflows handling test, validation, and GHCR publishing via `devcontainers/action@v1`.
-> Phase 1 delivers the feature and directory scaffold; Phase 2 adds CI/CD; Phase 3 migrates the lace Dockerfile (coordinated with the parallel feature-based-tooling migration).
+> BLUF: Extract the wezterm-mux-server installation logic from the lace Dockerfile into a standalone devcontainer feature published at `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`, following the structure and CI/CD patterns established by [anthropics/devcontainer-features](https://github.com/anthropics/devcontainer-features).
+> Phase 1a ships the proven Debian/Ubuntu path (`.deb` extraction) to unblock the lace Dockerfile migration. Phase 1b adds cross-platform support (Fedora `.rpm`, AppImage fallback) after the Debian path is validated in production.
+> The feature declares `installsAfter` dependencies on both `common-utils` and `sshd`, lives at `devcontainers/features/` within the lace monorepo, and publishes to GHCR via `devcontainers/action@v1`.
+> Phase 0 verifies GHCR prerequisites; Phase 2 adds CI/CD; Phase 3 migrates the lace Dockerfile (coordinated with the parallel feature-based-tooling migration).
 
 ## Objective
 
 The lace project's Dockerfile contains inline installation logic for wezterm-mux-server that is non-trivial: it downloads the `.deb`, extracts binaries without installing GUI dependencies, and sets up runtime directories.
 This logic should be reusable by any devcontainer, not locked inside a single Dockerfile.
-Publishing it as a devcontainer feature at `ghcr.io/weft/devcontainer-features/wezterm-server` makes it installable with a single JSON line in any `devcontainer.json`.
+Publishing it as a devcontainer feature at `ghcr.io/weftwiseink/devcontainer-features/wezterm-server` makes it installable with a single JSON line in any `devcontainer.json`.
 
 ## Background
 
@@ -135,7 +135,7 @@ devcontainers/
 The `devcontainers/features/` directory contains the feature source and tests.
 The workflow files live at the repo root `.github/workflows/` (the only location GitHub Actions reads) and use `paths:` triggers scoped to `devcontainers/features/**` to avoid running on unrelated changes.
 
-> NOTE(opus/lace-devcontainer-features): If monorepo workflow complexity becomes burdensome, the features can be extracted into a separate `weft/devcontainer-features` repository, which would also simplify the OCI namespace (eliminating the need for the `features-namespace` override).
+> NOTE(opus/lace-devcontainer-features): If monorepo workflow complexity becomes burdensome, the features can be extracted into a separate `weftwiseink/devcontainer-features` repository, which would also simplify the OCI namespace (eliminating the need for the `features-namespace` override).
 
 ### devcontainer-feature.json
 
@@ -157,8 +157,8 @@ The workflow files live at the repo root `.github/workflows/` (the only location
             "description": "Create /run/user/<uid> runtime directory for wezterm-mux-server (UID resolved from _REMOTE_USER)"
         }
     },
-    "documentationURL": "https://github.com/weft/lace/tree/main/devcontainers/features/src/wezterm-server",
-    "licenseURL": "https://github.com/weft/lace/blob/main/LICENSE",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/wezterm-server",
+    "licenseURL": "https://github.com/weftwiseink/lace/blob/main/LICENSE",
     "installsAfter": [
         "ghcr.io/devcontainers/features/common-utils",
         "ghcr.io/devcontainers/features/sshd"
@@ -168,8 +168,11 @@ The workflow files live at the repo root `.github/workflows/` (the only location
 
 ### install.sh
 
-The install script detects the Linux distribution and uses the appropriate package format.
-Three installation paths: `.deb` extraction (Debian/Ubuntu), `.rpm` extraction (Fedora/RHEL), and AppImage extraction (fallback for other glibc-based distros). Alpine (musl libc) is unsupported.
+The install script detects the Linux distribution and routes to the appropriate installation path.
+Phase 1a ships with Debian/Ubuntu support (the proven `.deb` extraction from the existing Dockerfile). Other distros get a clear "not yet supported" message with the distro family detected for future use.
+Phase 1b adds RPM and AppImage paths after validating URL patterns against real wezterm releases.
+
+**Phase 1a version** (Debian/Ubuntu only, with distro detection scaffolding):
 
 ```sh
 #!/bin/sh
@@ -221,7 +224,7 @@ DISTRO_FAMILY=$(detect_distro_family)
 
 echo "Installing wezterm-mux-server and wezterm CLI (version: ${VERSION}, arch: ${ARCH}, distro: ${DISTRO_FAMILY})..."
 
-# Extract binaries from package without installing dependencies
+# Extract binaries from .deb without installing dependencies
 install_from_deb() {
     command -v dpkg >/dev/null 2>&1 || { echo "Error: dpkg not found on Debian-family system."; exit 1; }
     if [ "$ARCH" = "amd64" ]; then
@@ -237,64 +240,15 @@ install_from_deb() {
     rm -rf /tmp/wezterm.deb /tmp/wezterm-extract
 }
 
-install_from_rpm() {
-    # Ensure rpm2cpio and cpio are available
-    for cmd in rpm2cpio cpio; do
-        command -v "$cmd" >/dev/null 2>&1 || {
-            echo "Error: $cmd is required for RPM extraction. Install it with your package manager."
-            exit 1
-        }
-    done
-    RPM_ARCH="$ARCH"
-    if [ "$ARCH" = "amd64" ]; then RPM_ARCH="x86_64"; fi
-    if [ "$ARCH" = "arm64" ]; then RPM_ARCH="aarch64"; fi
-    # Fedora RPM naming convention
-    RPM_NAME="wezterm-${VERSION}-1.fc39.${RPM_ARCH}.rpm"
-    curl -fsSL -o /tmp/wezterm.rpm \
-        "https://github.com/wez/wezterm/releases/download/${VERSION}/${RPM_NAME}" || {
-        # Fallback: try without distro suffix
-        RPM_NAME="wezterm-${VERSION}.${RPM_ARCH}.rpm"
-        curl -fsSL -o /tmp/wezterm.rpm \
-            "https://github.com/wez/wezterm/releases/download/${VERSION}/${RPM_NAME}"
-    }
-    mkdir -p /tmp/wezterm-extract
-    (cd /tmp/wezterm-extract && rpm2cpio /tmp/wezterm.rpm | cpio -idmv 2>/dev/null)
-    install -m755 /tmp/wezterm-extract/usr/bin/wezterm-mux-server /usr/local/bin/
-    install -m755 /tmp/wezterm-extract/usr/bin/wezterm /usr/local/bin/
-    rm -rf /tmp/wezterm.rpm /tmp/wezterm-extract
-}
-
-install_from_appimage() {
-    # AppImage requires glibc; Alpine and other musl-based distros are unsupported
-    if [ -f /etc/alpine-release ] || (ldd --version 2>&1 | grep -qi musl); then
-        echo "Error: wezterm does not publish musl-compatible binaries."
-        echo "Alpine Linux and other musl-based distributions are not supported."
-        echo "Use a glibc-based image (Debian, Ubuntu, Fedora) instead."
-        exit 1
-    fi
-    if [ "$ARCH" != "amd64" ]; then
-        echo "Error: AppImage is only available for x86_64. No wezterm package available for ${ARCH} on ${DISTRO_FAMILY}."
-        exit 1
-    fi
-    APPIMAGE_NAME="WezTerm-${VERSION}-Ubuntu20.04.AppImage"
-    curl -fsSL -o /tmp/wezterm.AppImage \
-        "https://github.com/wez/wezterm/releases/download/${VERSION}/${APPIMAGE_NAME}"
-    chmod +x /tmp/wezterm.AppImage
-    cd /tmp && ./wezterm.AppImage --appimage-extract >/dev/null 2>&1
-    install -m755 /tmp/squashfs-root/usr/bin/wezterm-mux-server /usr/local/bin/
-    install -m755 /tmp/squashfs-root/usr/bin/wezterm /usr/local/bin/
-    rm -rf /tmp/wezterm.AppImage /tmp/squashfs-root
-}
-
 # Route to the appropriate installer
 case "$DISTRO_FAMILY" in
     debian)
         install_from_deb ;;
-    redhat)
-        install_from_rpm ;;
     *)
-        echo "No native package for ${DISTRO_FAMILY}; falling back to AppImage extraction..."
-        install_from_appimage ;;
+        echo "Error: ${DISTRO_FAMILY} is not yet supported by wezterm-server feature."
+        echo "Currently supported: Debian, Ubuntu, and Debian derivatives."
+        echo "Fedora/RHEL (RPM) and AppImage support planned for a future release."
+        exit 1 ;;
 esac
 
 # Optional: create runtime directory
@@ -308,6 +262,33 @@ fi
 echo "wezterm-mux-server and wezterm CLI installed successfully."
 wezterm-mux-server --version || true
 ```
+
+**Phase 1b additions** (after Debian path validated in production):
+
+The `install_from_rpm` and `install_from_appimage` functions are added, and the routing `case` expands to:
+
+```sh
+case "$DISTRO_FAMILY" in
+    debian)
+        install_from_deb ;;
+    redhat)
+        install_from_rpm ;;
+    alpine)
+        echo "Error: wezterm does not publish musl-compatible binaries."
+        echo "Alpine Linux and other musl-based distributions are not supported."
+        echo "Use a glibc-based image (Debian, Ubuntu, Fedora) instead."
+        exit 1 ;;
+    *)
+        echo "No native package for ${DISTRO_FAMILY}; falling back to AppImage extraction..."
+        install_from_appimage ;;
+esac
+```
+
+The RPM and AppImage functions must be validated against actual wezterm release URLs before implementation. Key verification steps:
+
+1. **RPM**: Download `https://github.com/wez/wezterm/releases/download/{VERSION}/` and inspect actual `.rpm` filenames. The Fedora version suffix (`fc39`, `fc41`, etc.) varies between releases.
+2. **AppImage**: Verify `WezTerm-{VERSION}-Ubuntu20.04.AppImage` exists, and that `--appimage-extract` produces binaries at `squashfs-root/usr/bin/`.
+3. **Alpine**: Confirm that wezterm binaries are glibc-linked (they are, based on upstream build system).
 
 ### test.sh
 
@@ -326,6 +307,8 @@ reportResults
 ```
 
 ### scenarios.json
+
+**Phase 1a** (Debian/Ubuntu only):
 
 ```json
 {
@@ -356,7 +339,14 @@ reportResults
                 "createRuntimeDir": false
             }
         }
-    },
+    }
+}
+```
+
+**Phase 1b additions** (after validating URL patterns against real releases):
+
+```json
+{
     "fedora_39": {
         "image": "fedora:39",
         "features": {
@@ -395,7 +385,7 @@ This is coordinated with the feature-based-tooling migration (`cdocs/proposals/2
     },
     "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
     "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
-    "ghcr.io/weft/devcontainer-features/wezterm-server:1": {
+    "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
         "version": "20240203-110809-5046fc22"
     }
 }
@@ -406,15 +396,15 @@ The corresponding Dockerfile lines (ARG WEZTERM_VERSION through the `rm -rf` cle
 ### Publishing namespace
 
 By default, `devcontainers/action@v1` derives the OCI namespace from the source repository: `ghcr.io/<owner>/<repo>/<feature-id>`.
-For the `weft/lace` monorepo, this would produce `ghcr.io/weft/lace/wezterm-server`.
-To publish under the preferred `ghcr.io/weft/devcontainer-features/wezterm-server` address instead, the release workflow uses the action's `features-namespace` input:
+For the `weftwiseink/lace` monorepo, this would produce `ghcr.io/weftwiseink/lace/wezterm-server`.
+To publish under the preferred `ghcr.io/weftwiseink/devcontainer-features/wezterm-server` address instead, the release workflow uses the action's `features-namespace` input:
 
 ```yaml
 - uses: devcontainers/action@v1
   with:
     publish-features: "true"
     base-path-to-features: "./devcontainers/features/src"
-    features-namespace: "weft/devcontainer-features"
+    features-namespace: "weftwiseink/devcontainer-features"
 ```
 
 ## Design Requirements
@@ -422,7 +412,7 @@ To publish under the preferred `ghcr.io/weft/devcontainer-features/wezterm-serve
 > Full rationale for each decision: `cdocs/reports/2026-01-31-wezterm-server-feature-design-decisions.md`
 
 1. **Monorepo subdirectory** (`devcontainers/features/` in lace repo).
-   `features-namespace` override publishes to `ghcr.io/weft/devcontainer-features/*`.
+   `features-namespace` override publishes to `ghcr.io/weftwiseink/devcontainer-features/*`.
 2. **Extract binaries from packages**, not `apt-get install` / `dnf install`.
    Avoids 100+ MB of GUI dependencies in headless containers.
 3. **Cross-platform via distro detection** (`/etc/os-release`).
@@ -474,31 +464,66 @@ If a user does not include sshd in their features list, the `installsAfter` is a
 
 ### GHCR publishing permissions
 
-Publishing to `ghcr.io/weft/devcontainer-features/` requires the `weft` GitHub organization to have packages enabled and the repository's GITHUB_TOKEN to have `packages: write` permission.
+Publishing to `ghcr.io/weftwiseink/devcontainer-features/` requires the `weftwiseink` GitHub organization to have packages enabled and the repository's GITHUB_TOKEN to have `packages: write` permission.
 Mitigation: document the one-time org/repo setup in the feature README.
 
 ## Implementation Phases
 
-### Phase 1: Directory scaffold and wezterm-server feature
+### Phase 0: Verify GHCR prerequisites
 
-Create the directory structure and all feature files. The implementer should work in a develop/test/debug loop using `devcontainer features test` locally.
+Before implementing any feature code, verify the `weftwiseink` GitHub organization is configured for GHCR publishing.
+See `cdocs/reports/2026-01-31-ghcr-publishing-prerequisites.md` for the full checklist.
 
-#### Step 1.1: Create directory scaffold
+#### Step 0.1: Verify org-level Actions permissions
+
+Navigate to `https://github.com/organizations/weftwiseink/settings/actions` and confirm workflow permissions.
+Recommendation: keep restrictive defaults (read-only) and use explicit `permissions` blocks in workflows.
+
+#### Step 0.2: Dummy feature smoke test
+
+Publish a minimal dummy feature to `ghcr.io/weftwiseink/devcontainer-features/dummy-test` using a `workflow_dispatch` workflow.
+This verifies:
+- GITHUB_TOKEN has `packages: write` permission
+- The `features-namespace` override works
+- Package visibility can be set to public
+
+See the GHCR prerequisites report Section 6.2 for the full smoke test procedure.
+
+#### Step 0.3: Clean up
+
+Delete the dummy package from GHCR, remove the test workflow, and delete the test branch.
+
+**Success criteria for Phase 0:**
+
+- Dummy feature publishes successfully to `ghcr.io/weftwiseink/devcontainer-features/dummy-test`
+- Package can be set to public visibility
+- Package can be consumed in a test `devcontainer.json`
+
+**Stop here if smoke test fails.** Resolve all GHCR/permissions issues before proceeding.
+
+### Phase 1a: Directory scaffold and Debian-only feature
+
+Create the directory structure and feature files with Debian/Ubuntu support only.
+The Debian `.deb` extraction path is proven (it is the existing Dockerfile logic). Phase 1a ships the known-working path; cross-platform support is deferred to Phase 1b.
+
+The implementer should work in a develop/test/debug loop using `devcontainer features test` locally.
+
+#### Step 1a.1: Create directory scaffold
 
 ```sh
 mkdir -p devcontainers/features/src/wezterm-server
 mkdir -p devcontainers/features/test/wezterm-server
 ```
 
-#### Step 1.2: Create devcontainer-feature.json
+#### Step 1a.2: Create devcontainer-feature.json
 
 Write `devcontainers/features/src/wezterm-server/devcontainer-feature.json` with the schema defined in the Proposed Solution section above.
 
 Verify the JSON is valid: `cat devcontainer-feature.json | python3 -m json.tool`
 
-#### Step 1.3: Create install.sh
+#### Step 1a.3: Create install.sh
 
-Write `devcontainers/features/src/wezterm-server/install.sh` with the cross-platform install script defined above.
+Write `devcontainers/features/src/wezterm-server/install.sh` with the Debian-only install script defined in the Proposed Solution section (Phase 1a version).
 
 Mark executable: `chmod +x devcontainers/features/src/wezterm-server/install.sh`
 
@@ -506,21 +531,21 @@ Key implementation details:
 - The script must be POSIX `sh` compatible (no bashisms). Test with `shellcheck install.sh`.
 - Use `uname -m` for architecture detection (works everywhere), not `dpkg --print-architecture` (Debian-only).
 - The `/etc/os-release` sourcing pattern should handle missing file gracefully (the `[ -f /etc/os-release ]` check).
-- Each install path (`install_from_deb`, `install_from_rpm`, `install_from_appimage`) is self-contained: downloads, extracts, installs binaries, and cleans up.
-- The RPM path must handle the Fedora URL naming convention, which includes the Fedora version in the filename. Since the exact Fedora version may vary, the script should try common patterns with fallback.
-- AppImage extraction via `--appimage-extract` produces a `squashfs-root/` directory. The binaries are at `squashfs-root/usr/bin/`.
+- The `detect_distro_family` function and `detect_arch` function are included in full even though only the `debian` case is active. This scaffolds the cross-platform structure for Phase 1b.
+- Non-Debian distros hit a clear error message explaining that only Debian/Ubuntu is currently supported, with RPM and AppImage support planned.
+- The `.deb` extraction path is a direct lift from the working Dockerfile: `dpkg -x` extracts without dependency resolution.
 
-#### Step 1.4: Create test.sh
+#### Step 1a.4: Create test.sh
 
 Write `devcontainers/features/test/wezterm-server/test.sh` as defined in the Proposed Solution section.
 
 Mark executable: `chmod +x devcontainers/features/test/wezterm-server/test.sh`
 
-#### Step 1.5: Create scenarios.json
+#### Step 1a.5: Create scenarios.json
 
-Write `devcontainers/features/test/wezterm-server/scenarios.json` as defined in the Proposed Solution section.
+Write `devcontainers/features/test/wezterm-server/scenarios.json` with the Phase 1a scenarios only: `debian_default`, `ubuntu_default`, `custom_version`, and `no_runtime_dir`.
 
-#### Step 1.6: Local testing loop
+#### Step 1a.6: Local testing loop
 
 Prerequisites:
 - Docker daemon running locally
@@ -537,7 +562,7 @@ devcontainer features test \
 
 This runs `test.sh` inside a container built from the specified base image with the feature applied.
 
-**Scenario-based tests** (all scenarios including Fedora):
+**Scenario-based tests** (all Phase 1a scenarios):
 
 ```sh
 cd devcontainers/features
@@ -551,13 +576,12 @@ This runs all scenarios defined in `scenarios.json`. Each scenario specifies its
 
 1. **Read the test output carefully.** The `devcontainer features test` output includes the full install script log. Look for:
    - curl errors (404 = wrong URL, connection errors = network issues)
-   - `dpkg -x` / `rpm2cpio` / `--appimage-extract` errors (corrupt download, missing tools)
+   - `dpkg -x` errors (corrupt download, missing dpkg)
    - `install: cannot stat` errors (binary not found at expected path in extracted package)
    - Permission errors (missing `chmod +x` on install.sh)
 
 2. **Test install.sh interactively.** Start a container and run the script manually:
    ```sh
-   # Debian
    docker run --rm -it mcr.microsoft.com/devcontainers/base:debian bash
    # Inside the container:
    export VERSION="20240203-110809-5046fc22"
@@ -573,33 +597,17 @@ This runs all scenarios defined in `scenarios.json`. Each scenario specifies its
    ls -la /tmp/extract/usr/bin/
    ```
 
-4. **Test the RPM path.** The Fedora RPM naming convention varies between releases. If the default URL fails:
-   ```sh
-   # Inside a Fedora container:
-   docker run --rm -it fedora:39 bash
-   # Check what the actual RPM filename is on the releases page
-   # Adjust the RPM_NAME construction in install.sh accordingly
-   ```
-
-5. **Test the AppImage path.** AppImage extraction requires the AppImage to have executable permission:
-   ```sh
-   # Inside an Alpine container (triggers AppImage fallback):
-   docker run --rm -it alpine:3.19 sh
-   apk add curl
-   # Copy install.sh and run - should hit the AppImage path
-   ```
-
-6. **ShellCheck.** Run `shellcheck install.sh` to catch POSIX compliance issues. Common problems:
+4. **ShellCheck.** Run `shellcheck install.sh` to catch POSIX compliance issues. Common problems:
    - `[[` instead of `[` (bashism)
    - `function` keyword (bashism)
    - Process substitution `<()` (bashism)
    - Arrays (bashism)
 
-**Success criteria for Phase 1:**
+**Success criteria for Phase 1a:**
 
 - `devcontainer features test --features wezterm-server --base-image mcr.microsoft.com/devcontainers/base:debian` passes
 - `devcontainer features test --features wezterm-server --base-image mcr.microsoft.com/devcontainers/base:ubuntu` passes
-- `devcontainer features test --features wezterm-server` (all scenarios) passes, including Fedora 39, Fedora 41 (RPM fallback), and Arch Linux (AppImage)
+- `devcontainer features test --features wezterm-server` (all Phase 1a scenarios) passes
 - `shellcheck install.sh` reports no errors
 - `wezterm-mux-server --version` and `wezterm --version` succeed inside test containers
 - Runtime directory `/run/user/<uid>` exists with correct ownership when `createRuntimeDir=true`
@@ -608,6 +616,35 @@ This runs all scenarios defined in `scenarios.json`. Each scenario specifies its
 **Constraints:**
 - Do not modify the lace Dockerfile yet; the feature must be published before the Dockerfile can reference it.
 - Keep `install.sh` POSIX-compatible (no bashisms).
+- Do not implement RPM or AppImage paths yet; they are Phase 1b.
+
+Dependencies: Phase 0 (GHCR prerequisites verified).
+
+### Phase 1b: Cross-platform support (deferred)
+
+> This phase is deferred until after Phase 3 (Dockerfile migration). The Debian-only feature is sufficient for the lace devcontainer, which uses a Debian base image. Cross-platform support broadens the feature's utility for other consumers but is not on the critical path.
+
+When ready, Phase 1b adds:
+
+1. **RPM path** (`install_from_rpm`): Fedora/RHEL support via `rpm2cpio | cpio` extraction. The RPM filename includes a Fedora version suffix (e.g., `fc39`) that varies between releases; the script tries the versioned name with a generic fallback. Only Fedora is directly tested; openSUSE and other RPM distros route to the AppImage fallback.
+
+2. **AppImage path** (`install_from_appimage`): Universal glibc fallback via `--appimage-extract`. x86_64 only. Includes musl/Alpine detection with a clear error message (wezterm does not publish musl-compatible binaries).
+
+3. **Additional test scenarios**: `fedora_39` (RPM primary path), `fedora_41` (RPM fallback path), `archlinux` (AppImage path).
+
+Key implementation details for Phase 1b:
+- The RPM path must handle the Fedora URL naming convention. Since the exact Fedora version may vary, the script should try common patterns with fallback.
+- AppImage extraction via `--appimage-extract` produces a `squashfs-root/` directory. The binaries are at `squashfs-root/usr/bin/`.
+- Alpine/musl detection should happen early in `install_from_appimage` to exit with a clear error before attempting extraction.
+- RPM extraction should use a subshell for `cd` to avoid changing the parent process working directory.
+
+**Success criteria for Phase 1b:**
+
+- All Phase 1a scenarios continue to pass
+- `devcontainer features test --features wezterm-server` passes for Fedora 39, Fedora 41 (RPM fallback), and Arch Linux (AppImage)
+- Alpine triggers a clear error message, not a confusing dynamic linker failure
+
+Dependencies: Phase 3 (Dockerfile migration complete, proving the Debian path end-to-end).
 
 ### Phase 2: CI/CD workflows
 
@@ -671,7 +708,7 @@ jobs:
         with:
           publish-features: "true"
           base-path-to-features: "./devcontainers/features/src"
-          features-namespace: "weft/devcontainer-features"
+          features-namespace: "weftwiseink/devcontainer-features"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -685,9 +722,11 @@ jobs:
 
 #### Step 2.3: GHCR permissions setup
 
-The `weft` GitHub organization must have:
+Verified during Phase 0. The `weftwiseink` GitHub organization must have:
 - GitHub Packages enabled
 - The repository's Actions workflows must have `packages: write` permission (configured in the workflow yaml above and optionally in repository Settings > Actions > General > Workflow permissions)
+
+See `cdocs/reports/2026-01-31-ghcr-publishing-prerequisites.md` for the full setup checklist.
 
 #### Step 2.4: Verification
 
@@ -695,23 +734,23 @@ The `weft` GitHub organization must have:
 2. Verify the test workflow triggers and passes.
 3. Merge the PR to `main`.
 4. Verify the release workflow triggers and publishes the OCI artifact.
-5. Verify the feature is pullable: `devcontainer features info ghcr.io/weft/devcontainer-features/wezterm-server`
+5. Verify the feature is pullable: `devcontainer features info ghcr.io/weftwiseink/devcontainer-features/wezterm-server`
 
 **Debug workflow when CI fails:**
 
 - **Test job fails:** Read the full log. Most failures will be identical to local test failures. The CI environment is `ubuntu-latest` which has Docker pre-installed.
-- **Publish job fails with 403:** GHCR permissions issue. Check that the workflow has `packages: write` permission and that the `weft` org has packages enabled.
-- **Publish job fails with "namespace not found":** The `features-namespace: "weft/devcontainer-features"` requires the namespace to be writable. This may require a first manual publish or org-level package permission grants.
+- **Publish job fails with 403:** GHCR permissions issue. Check that the workflow has `packages: write` permission and that the `weftwiseink` org has packages enabled. See GHCR prerequisites report for troubleshooting.
+- **Publish job fails with "namespace not found":** The `features-namespace: "weftwiseink/devcontainer-features"` requires the namespace to be writable. This should have been verified during Phase 0's dummy feature smoke test.
 - **Generated docs PR fails:** The `peter-evans/create-pull-request` action requires `contents: write` and `pull-requests: write` permissions.
 
 **Success criteria for Phase 2:**
 
 - Test workflow triggers on PRs modifying `devcontainers/features/**`
 - Release workflow publishes the feature OCI artifact to GHCR on merge to main
-- The feature is pullable via `ghcr.io/weft/devcontainer-features/wezterm-server:1`
+- The feature is pullable via `ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1`
 - The feature info shows the correct version, description, and options
 
-Dependencies: Phase 1 (feature files must exist for workflows to test/publish).
+Dependencies: Phase 1a (feature files must exist for workflows to test/publish).
 
 ### Phase 3: Migrate lace Dockerfile
 
@@ -725,7 +764,7 @@ Once the feature is published to GHCR:
 Add to the `features` block in `.devcontainer/devcontainer.json`:
 
 ```json
-"ghcr.io/weft/devcontainer-features/wezterm-server:1": {
+"ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
     "version": "20240203-110809-5046fc22"
 }
 ```
@@ -750,7 +789,7 @@ Rebuild the devcontainer from scratch and verify:
 
 **Debug workflow if migration fails:**
 
-- **Feature not found during build:** Check that the feature was actually published to GHCR. Run `devcontainer features info ghcr.io/weft/devcontainer-features/wezterm-server:1` from the host.
+- **Feature not found during build:** Check that the feature was actually published to GHCR. Run `devcontainer features info ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1` from the host.
 - **wezterm-mux-server not on PATH:** The feature installs to `/usr/local/bin/`. Verify the feature's install script ran (check container build logs). If it ran but binaries are missing, the extraction path may differ for the specific wezterm version.
 - **Mux server fails to start:** Check `XDG_RUNTIME_DIR` is set correctly. The `postStartCommand` runs as the `node` user; verify `/run/user/1000` exists and is owned by `node`.
 - **SSH connectivity broken:** Verify `sshd` feature is still in the features list and running. Check `authorized_keys` mount is still in place.

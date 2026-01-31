@@ -126,6 +126,16 @@ describe("parseDockerfile: ARG prelude", () => {
   });
 });
 
+// --- Heredoc handling ---
+
+describe("parseDockerfile: heredoc", () => {
+  it("parses Dockerfile with heredoc syntax correctly", () => {
+    const result = parseDockerfile(readFixture("heredoc.Dockerfile"));
+    expect(result.imageName).toBe("node");
+    expect(result.tag).toBe("24");
+  });
+});
+
 // --- Error cases ---
 
 describe("parseDockerfile: errors", () => {
@@ -261,6 +271,7 @@ describe("round-trip: rewrite then restore", () => {
     "platform.Dockerfile",
     "commented-from.Dockerfile",
     "parser-directive.Dockerfile",
+    "registry-port.Dockerfile",
   ];
 
   for (const fixture of validFixtures) {

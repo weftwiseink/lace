@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readMetadata, contextsChanged } from "./metadata.js";
 import { readDevcontainerConfig, extractPrebuildFeatures } from "./devcontainer.js";
-import { parseDockerfile, generateTag, generatePrebuildDockerfile } from "./dockerfile.js";
+import { parseDockerfile, generatePrebuildDockerfile, restoreFrom } from "./dockerfile.js";
 import { generateTempDevcontainerJson } from "./devcontainer.js";
 
 export interface StatusOptions {
@@ -47,16 +47,12 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
     const prebuildResult = extractPrebuildFeatures(config.raw);
 
     if (prebuildResult.kind === "features") {
-      const dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
-      // Parse with the original FROM to generate fresh context
-      const parsed = parseDockerfile(
-        dockerfileContent.includes("lace.local/")
-          ? dockerfileContent.replace(
-              /FROM\s+lace\.local\/\S+/,
-              `FROM ${metadata.originalFrom}`,
-            )
-          : dockerfileContent,
-      );
+      let dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
+      // Restore original FROM before parsing (use AST-based restoreFrom, not regex)
+      if (dockerfileContent.includes("lace.local/")) {
+        dockerfileContent = restoreFrom(dockerfileContent, metadata.originalFrom);
+      }
+      const parsed = parseDockerfile(dockerfileContent);
       const tempDockerfile = generatePrebuildDockerfile(parsed);
       const tempDevcontainerJson = generateTempDevcontainerJson(
         prebuildResult.features,

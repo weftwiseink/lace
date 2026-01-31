@@ -171,9 +171,7 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     "utf-8",
   );
 
-  // Restore lock file entries from previous prebuild into temp context
   const lockFilePath = join(config.configDir, "devcontainer-lock.json");
-  // (Lock file merge handled in Phase 5 — for now, proceed without)
 
   console.log(`Building prebuild image: ${prebuildTag}`);
   console.log(
@@ -207,11 +205,11 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   const rewrittenDockerfile = rewriteFrom(dockerfileContent, prebuildTag);
   writeFileSync(config.dockerfilePath, rewrittenDockerfile, "utf-8");
 
-  // Step 8: Merge lock file (wired in Phase 5)
+  // Step 8: Merge lock file
   try {
     mergeLockFile(lockFilePath, prebuildDir);
-  } catch {
-    // Non-fatal: lock file merge is optional
+  } catch (err) {
+    console.warn(`Warning: lock file merge failed: ${(err as Error).message}`);
   }
 
   // Step 9: Write metadata

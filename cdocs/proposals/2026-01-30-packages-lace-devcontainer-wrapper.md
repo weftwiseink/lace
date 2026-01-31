@@ -110,9 +110,9 @@ flowchart TD
 >   We want to be thorough/spec compliant when implementing the prebuild, and if there are possible Dockerfile "preludes" we can't handle we should aim to detect them.
 > - The resulting image name version should be versioned just like that in the Dockerfile.
 > - Just like devcontainer, lace prebuild should rebuild on devcontainer.json changes by default.
-    Then we can add 
 > - The lock entries should likely be tucked under a `lace: { prebuiltFeatures: $features }` to avoid confusing the wrapped devcontainer cli.
 >   We need to pull them out into our temp devcontainer context for lace building 
+> - the `lace` cli will have more features, and will generally be focused around this kind of devcontainer orchestration and QoL features
 
 Step by step:
 
@@ -246,11 +246,15 @@ Running `lace prebuild` on each branch produces branch-specific local images.
 The Dockerfile parser should fail with a clear error message: "No FROM instruction found in Dockerfile."
 This is already an invalid Dockerfile, so the error surfaces an existing problem.
 
+> NOTE(mjr): Maybe do a general syntax check/validation instead. In fact if we can use a pre-built Dockerfile npm parsing package that'd be ideal.
+
 ### Base image uses a digest instead of a tag
 
 `FROM node@sha256:abc123...` should be handled.
 The `lace.local/` tag would use the digest: `lace.local/node@sha256:abc123...`.
 Docker tag syntax does not support `@` in tags, so the tag should substitute it: `lace.local/node__sha256__abc123`.
+
+> NOTE(mjr): Actually... hmm. Can we tag a version instead and do `lace.local/node:from_sha256__abc123`?
 
 ### `devcontainer build` fails
 
@@ -265,10 +269,17 @@ If the current FROM already points to `lace.local/*`, the tool should compare th
 If the config matches, it is a no-op.
 If the config has changed, it should restore the original FROM first, then re-run the prebuild.
 
+> NOTE(mjr): we should actually just cache the whole temp-data for the build in `.lace/prebuild/`, with corrected context and other path-relative fields.
+> That way we can eventually json diff the old vs new file, and smartly consider the changed fields and if re-prebuild can actually be skipped (ie features _can't_ impact it)
+>
+> Oh, please /cdocs:rfp a followup for that filtering & "smart" cache busting functionality, and _also_ make sure we filter out features from the `.lace/prebuild/devcontainer.json`
+
 ### No `customizations.lace.prebuildFeatures` in devcontainer.json
 
 The tool should exit with a helpful message: "No prebuildFeatures configured in devcontainer.json. Nothing to prebuild."
 Exit code 0 (not an error, just nothing to do).
+
+> NOTE(mjr): For ease of use, we should allow `prebuildFeatures: null` to disable the exit as we'll likely be doing more with the cli.
 
 ### The devcontainer.json uses `image` instead of `build.dockerfile`
 
@@ -278,10 +289,18 @@ The devcontainer.json's `image` field is then updated to point to the `lace.loca
 This is a local-only modification, consistent with the Dockerfile rewrite strategy: `lace restore` reverts the `image` field to its original value.
 Since devcontainer.json is typically committed, projects using this variant should consider using a local override mechanism or adding the `image` field change to a local gitignore pattern.
 
+> NOTE(mjr): This seems unnecessary with the `.lace/prebuild/{devcontainer.json, Dockerfile}` approach.
+> We replace `image` with the `lace.local/...` equivalent, and that should be reversable just like the `Dockerfile` `FROM`.
+> If devcontainer ignores the FROM in this case we shoud too I guess...
+> though our prebuild tool might just be incompatible with this field, that's fine too.
+
 ### Lock file conflicts during merge
 
 If `devcontainer-lock.json` already contains entries for features that the prebuild also resolves, the prebuild entries take precedence.
 The merge strategy is: prebuild lock entries overwrite matching keys; non-matching keys are preserved.
+
+> NOTE(mjr): We should validate prebuildFeatures don't overlap with features in a version insensitive way upfront.
+> The namespacing discussed elsewhere should resolve this.
 
 ## Test Plan
 

@@ -1,4 +1,5 @@
 import { defineCommand } from "citty";
+import { runStatus } from "../lib/status.js";
 
 export const statusCommand = defineCommand({
   meta: {
@@ -7,6 +8,7 @@ export const statusCommand = defineCommand({
       "Show current prebuild state (original image, prebuild image, staleness)",
   },
   run() {
-    console.log("status: not yet implemented");
+    const result = runStatus();
+    process.exitCode = result.exitCode;
   },
 });

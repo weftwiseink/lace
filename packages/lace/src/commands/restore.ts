@@ -1,4 +1,5 @@
 import { defineCommand } from "citty";
+import { runRestore } from "../lib/restore.js";
 
 export const restoreCommand = defineCommand({
   meta: {
@@ -7,6 +8,7 @@ export const restoreCommand = defineCommand({
       "Undo the prebuild FROM rewrite, restoring the original Dockerfile",
   },
   run() {
-    console.log("restore: not yet implemented");
+    const result = runRestore();
+    process.exitCode = result.exitCode;
   },
 });

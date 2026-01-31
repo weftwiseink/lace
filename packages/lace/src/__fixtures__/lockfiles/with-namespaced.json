@@ -1,0 +1,10 @@
+{
+  "features": {},
+  "lace.prebuiltFeatures": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {
+      "version": "1.0.5",
+      "resolved": "ghcr.io/anthropics/devcontainer-features/claude-code@sha256:old",
+      "integrity": "sha256:old"
+    }
+  }
+}

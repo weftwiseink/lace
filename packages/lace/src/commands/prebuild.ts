@@ -1,4 +1,5 @@
 import { defineCommand } from "citty";
+import { runPrebuild, type PrebuildOptions } from "../lib/prebuild.js";
 
 export const prebuildCommand = defineCommand({
   meta: {
@@ -19,7 +20,11 @@ export const prebuildCommand = defineCommand({
     },
   },
   run({ args }) {
-    console.log("prebuild: not yet implemented");
-    console.log("args:", args);
+    const options: PrebuildOptions = {
+      dryRun: args["dry-run"],
+      force: args.force,
+    };
+    const result = runPrebuild(options);
+    process.exitCode = result.exitCode;
   },
 });

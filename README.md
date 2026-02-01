@@ -35,6 +35,29 @@ lace/
 
 **Pre-baked images**: The `lace` CLI can pre-build feature layers onto base images using the devcontainer CLI, caching them as `lace.local/<base-image>` to avoid cold-start installation at container creation time.
 
+## Quick Start: Devcontainer Workspace
+
+Open a WezTerm window connected to the lace devcontainer with a single command:
+
+```bash
+# Standalone: starts container (if needed) and opens WezTerm
+./bin/open-lace-workspace
+
+# Piped: control devcontainer up flags directly
+devcontainer up --workspace-folder . | ./bin/open-lace-workspace
+
+# With rebuild
+devcontainer up --workspace-folder . --build-no-cache | ./bin/open-lace-workspace
+```
+
+**Prerequisites:**
+
+- [WezTerm](https://wezfurlong.org/wezterm/installation.html) installed on the host
+- SSH key pair at `~/.ssh/lace_devcontainer` (`ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""`)
+- [devcontainer CLI](https://github.com/devcontainers/cli) (standalone mode only: `npm install -g @devcontainers/cli`)
+
+The script validates prerequisites, waits for SSH readiness, and opens a new WezTerm window at `/workspace/main` inside the container. See `bin/open-lace-workspace` header comments for exit codes and troubleshooting.
+
 ## Development
 
 ```bash

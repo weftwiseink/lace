@@ -168,6 +168,7 @@ done
 info "connecting WezTerm to lace domain..."
 wezterm connect lace &
 WEZ_PID=$!
+disown "$WEZ_PID"
 
 # Give wezterm a moment to fail on immediate errors (bad config, SSH rejection)
 sleep 2

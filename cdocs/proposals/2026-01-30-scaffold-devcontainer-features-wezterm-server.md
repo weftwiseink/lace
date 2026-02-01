@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-features
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_complete
 tags: [devcontainer-features, wezterm, ci-cd, publishing, infrastructure, oci-namespace, cross-platform]
 last_reviewed:
   status: accepted

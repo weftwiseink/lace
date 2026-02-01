@@ -24,6 +24,11 @@
       "version": "0.1.1",
       "resolved": "ghcr.io/eitsupi/devcontainer-features/nushell@sha256:c35933c78369ee4a9936041c75a3363414c5fd332d95a2b2c7c4cb1b179cd176",
       "integrity": "sha256:c35933c78369ee4a9936041c75a3363414c5fd332d95a2b2c7c4cb1b179cd176"
+    },
+    "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/weftwiseink/devcontainer-features/wezterm-server@sha256:26d48e3b1d748f57019c1c0d845c628e9270b278943adaeecb8a5396f112ed66",
+      "integrity": "sha256:26d48e3b1d748f57019c1c0d845c628e9270b278943adaeecb8a5396f112ed66"
     }
   }
 }

@@ -90,29 +90,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # See docs/reports/2026-01-18_devcontainer_firewall_analysis.md
 # Original: https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh
 
-# Install wezterm-mux-server for terminal multiplexing via SSH domain
-# Extract from .deb to avoid pulling X11/Wayland GUI dependencies.
-# Only wezterm-mux-server (daemon) and wezterm (CLI) are needed headless.
-# See docs/proposals/wezterm_devcontainer_multiplexing.md
-ARG WEZTERM_VERSION="20240203-110809-5046fc22"
-RUN ARCH=$(dpkg --print-architecture) && \
-    # amd64 .deb has no arch suffix; arm64 uses .arm64.deb
-    if [ "$ARCH" = "amd64" ]; then \
-      DEB_NAME="wezterm-${WEZTERM_VERSION}.Debian12.deb"; \
-    else \
-      DEB_NAME="wezterm-${WEZTERM_VERSION}.Debian12.${ARCH}.deb"; \
-    fi && \
-    curl -fsSL -o /tmp/wezterm.deb \
-      "https://github.com/wez/wezterm/releases/download/${WEZTERM_VERSION}/${DEB_NAME}" && \
-    dpkg -x /tmp/wezterm.deb /tmp/wezterm-extract && \
-    install -m755 /tmp/wezterm-extract/usr/bin/wezterm-mux-server /usr/local/bin/ && \
-    install -m755 /tmp/wezterm-extract/usr/bin/wezterm /usr/local/bin/ && \
-    rm -rf /tmp/wezterm.deb /tmp/wezterm-extract
-
-# Ensure wezterm mux server runtime directory exists
-RUN mkdir -p /run/user/1000 && chown ${USERNAME}:${USERNAME} /run/user/1000
-
 # Set up SSH authorized_keys directory for wezterm SSH domain connections
+# NOTE: The sshd feature does not create per-user .ssh directories.
+# This is required for the bind-mounted authorized_keys file.
 RUN mkdir -p /home/${USERNAME}/.ssh && \
     chmod 700 /home/${USERNAME}/.ssh && \
     chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh

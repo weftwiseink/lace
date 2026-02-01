@@ -1,5 +1,6 @@
 name: "Test Devcontainer Features"
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'devcontainers/features/**'

@@ -102,9 +102,9 @@ This is worth noting as a risk in the decision rationale.
 **Finding 10 (blocking): GHCR namespace derivation is unclear for monorepo.**
 The `devcontainers/action@v1` publishes features to `ghcr.io/<owner>/<repo>/<feature-id>`.
 For the anthropics repo, that produces `ghcr.io/anthropics/devcontainer-features/claude-code`.
-For this proposal's monorepo approach, the OCI address would be `ghcr.io/weft/lace/wezterm-server` (derived from the `weft/lace` repo), not `ghcr.io/weft/devcontainer-features/wezterm-server` as stated.
+For this proposal's monorepo approach, the OCI address would be `ghcr.io/weftwiseink/lace/wezterm-server` (derived from the `weftwiseink/lace` repo), not `ghcr.io/weftwiseink/devcontainer-features/wezterm-server` as stated.
 The `devcontainers/action@v1` does not have an option to override the namespace.
-If the desired address is `ghcr.io/weft/devcontainer-features/wezterm-server`, the features may need to live in a `weft/devcontainer-features` repo, or a custom publishing step is needed.
+If the desired address is `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`, the features may need to live in a `weftwiseink/devcontainer-features` repo, or a custom publishing step is needed.
 This is a fundamental issue that could invalidate Decision 1 (monorepo vs. separate repo).
 Fix: verify the actual OCI address that `devcontainers/action@v1` produces for a monorepo and update the proposal accordingly, or switch to a separate repo.
 
@@ -129,13 +129,13 @@ These could be separate phases since migration has a clear success criterion and
 Three blocking issues must be resolved:
 1. The directory layout diagram contradicts Decision 5 about workflow file location.
 2. The `createRuntimeDir` option description hardcodes `/run/user/1000` despite dynamic UID resolution in the install script.
-3. The GHCR namespace `ghcr.io/weft/devcontainer-features/wezterm-server` may be incorrect for a monorepo; `devcontainers/action@v1` derives the namespace from `<owner>/<repo>`, which would produce `ghcr.io/weft/lace/wezterm-server`. This needs verification and may impact the monorepo decision.
+3. The GHCR namespace `ghcr.io/weftwiseink/devcontainer-features/wezterm-server` may be incorrect for a monorepo; `devcontainers/action@v1` derives the namespace from `<owner>/<repo>`, which would produce `ghcr.io/weftwiseink/lace/wezterm-server`. This needs verification and may impact the monorepo decision.
 
 ## Action Items
 
 1. [blocking] Fix the directory layout diagram to either remove the `.github/` subtree (since those files live at repo root) or show the full repo-level layout. Must be consistent with Decision 5.
 2. [blocking] Change the `createRuntimeDir` option description from `"Create /run/user/1000 runtime directory"` to `"Create /run/user/<uid> runtime directory for wezterm-mux-server"` to match the dynamic UID resolution in install.sh.
-3. [blocking] Verify the OCI address that `devcontainers/action@v1` produces for a monorepo (likely `ghcr.io/weft/lace/wezterm-server`, not `ghcr.io/weft/devcontainer-features/wezterm-server`). Update the namespace throughout the proposal, or acknowledge this as a reason to use a separate repository, or document a custom publishing workaround.
+3. [blocking] Verify the OCI address that `devcontainers/action@v1` produces for a monorepo (likely `ghcr.io/weftwiseink/lace/wezterm-server`, not `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`). Update the namespace throughout the proposal, or acknowledge this as a reason to use a separate repository, or document a custom publishing workaround.
 4. [non-blocking] Remove the unused `_REMOTE_USER_HOME` variable from install.sh, or use it.
 5. [non-blocking] Add a curl availability check at the top of install.sh for a clearer error message.
 6. [non-blocking] Note the wezterm version selection rationale in Background (why `20240203-110809-5046fc22` specifically).
@@ -146,7 +146,7 @@ Three blocking issues must be resolved:
 
 Which of the following should the proposal address regarding the GHCR namespace issue?
 
-A) Switch to a separate `weft/devcontainer-features` repository to get the desired `ghcr.io/weft/devcontainer-features/*` namespace.
-B) Accept `ghcr.io/weft/lace/wezterm-server` as the namespace and update all references.
+A) Switch to a separate `weftwiseink/devcontainer-features` repository to get the desired `ghcr.io/weftwiseink/devcontainer-features/*` namespace.
+B) Accept `ghcr.io/weftwiseink/lace/wezterm-server` as the namespace and update all references.
 C) Use a custom OCI publishing step instead of `devcontainers/action@v1` to control the namespace.
 D) Investigate whether `devcontainers/action@v1` has an undocumented namespace override option.

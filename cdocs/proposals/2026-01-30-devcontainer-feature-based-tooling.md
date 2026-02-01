@@ -63,7 +63,7 @@ The current `devcontainer.json` already uses two features:
   The apt-get variant installs from system repos (which on Debian bookworm gives v0.7, too old); the homebrew variant can install newer versions.
   `ghcr.io/duduribeiro/devcontainer-features/neovim:1` is another option that supports specifying versions including `nightly`.
 - **wezterm-server**: No existing feature.
-  A sibling proposal covers scaffolding `ghcr.io/weft/devcontainer-features/wezterm-server:1` in a new features repository.
+  A sibling proposal covers scaffolding `ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1` in a new features repository.
 - **nushell**: `ghcr.io/eitsupi/devcontainer-features/nushell:1` provides nushell installation.
   No nushell feature exists in `devcontainers-extra` (checked: 442 features, nushell not among them).
   Nushell is a structured-data shell useful for build scripting and interactive exploration of JSON/YAML configs.
@@ -99,7 +99,7 @@ Replace each tool installation block in the Dockerfile with a corresponding feat
     "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {
         "version": "0.11.6"
     },
-    "ghcr.io/weft/devcontainer-features/wezterm-server:1": {
+    "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
         "version": "20240203-110809-5046fc22"
     },
     "ghcr.io/eitsupi/devcontainer-features/nushell:1": {}
@@ -155,12 +155,12 @@ The neovim choice requires validation during implementation: the homebrew varian
 
 ### Decision 3: Build our own wezterm-server feature
 
-**Decision**: Create `ghcr.io/weft/devcontainer-features/wezterm-server:1` rather than using a community feature.
+**Decision**: Create `ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1` rather than using a community feature.
 
 **Why**: No community feature exists for headless wezterm-mux-server installation.
 Our use case is specific: we extract only the mux-server and CLI binaries from the .deb, deliberately avoiding GUI dependencies.
 This extraction logic is non-trivial and project-specific enough to warrant a dedicated feature.
-The feature is proposed in a sibling proposal for the weft devcontainer-features repository.
+The feature is proposed in a sibling proposal for the weftwiseink devcontainer-features repository.
 
 ### Decision 4: Add nushell as a new capability rather than replacing bash
 
@@ -284,11 +284,11 @@ Neovim configuration files (if any are mounted or copied) load correctly.
 
 ### Phase 3: Replace wezterm Dockerfile install with weft feature
 
-> NOTE(opus/devcontainer-features): This phase is gated on the sibling proposal for `ghcr.io/weft/devcontainer-features/wezterm-server:1` being implemented and published.
+> NOTE(opus/devcontainer-features): This phase is gated on the sibling proposal for `ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1` being implemented and published.
 
 **Steps**:
 
-1. Add `"ghcr.io/weft/devcontainer-features/wezterm-server:1": { "version": "20240203-110809-5046fc22" }` to `devcontainer.json`.
+1. Add `"ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": { "version": "20240203-110809-5046fc22" }` to `devcontainer.json`.
 2. Remove the `ARG WEZTERM_VERSION` and the wezterm .deb download/extract block (lines 112-125) from the Dockerfile.
 3. Remove line 128 (`mkdir -p /run/user/1000 && chown ...`) from the Dockerfile.
    The wezterm-server feature's install script should handle creating the runtime directory, since this is a wezterm-specific requirement.

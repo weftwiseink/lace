@@ -15,7 +15,7 @@ tags: [rereview_agent, architecture, devcontainer-features, oci-namespace]
 ## Summary Assessment
 
 This is a round 2 review following revision of three blocking issues from round 1.
-All three blocking issues have been resolved: the directory layout now correctly shows workflows at the repo root, the `createRuntimeDir` description uses dynamic `<uid>` instead of hardcoded `1000`, and the GHCR namespace section now documents the `features-namespace` action input for publishing to the preferred `ghcr.io/weft/devcontainer-features/*` address from the monorepo.
+All three blocking issues have been resolved: the directory layout now correctly shows workflows at the repo root, the `createRuntimeDir` description uses dynamic `<uid>` instead of hardcoded `1000`, and the GHCR namespace section now documents the `features-namespace` action input for publishing to the preferred `ghcr.io/weftwiseink/devcontainer-features/*` address from the monorepo.
 The BLUF and Decision 1 were also updated to reflect the `features-namespace` discovery.
 Several non-blocking items from round 1 were also addressed (dead code removal, curl/dpkg checks, version rationale, phase split).
 The proposal is ready for implementation.
@@ -28,7 +28,7 @@ The proposal is ready for implementation.
 |---|--------|------|
 | 1 | Resolved | Directory layout diagram now shows `.github/workflows/` at repo root with `devcontainer-features-*` prefixed filenames. Consistent with Decision 5. |
 | 2 | Resolved | `createRuntimeDir` description changed to `"Create /run/user/<uid> runtime directory for wezterm-mux-server (UID resolved from _REMOTE_USER)"`. |
-| 3 | Resolved | Publishing namespace section now documents the `features-namespace` action input, explains the default `ghcr.io/weft/lace/*` vs. overridden `ghcr.io/weft/devcontainer-features/*` namespace, and includes the workflow YAML snippet. Decision 1 also updated. |
+| 3 | Resolved | Publishing namespace section now documents the `features-namespace` action input, explains the default `ghcr.io/weftwiseink/lace/*` vs. overridden `ghcr.io/weftwiseink/devcontainer-features/*` namespace, and includes the workflow YAML snippet. Decision 1 also updated. |
 | 4 | Resolved | `_REMOTE_USER_HOME` removed from install.sh. |
 | 5 | Resolved | curl and dpkg availability checks added at the top of install.sh with clear error messages. |
 | 6 | Resolved | Version rationale added: `"the latest stable release as of the Dockerfile's authoring and is the proven-working version in the lace devcontainer"`. |
@@ -45,12 +45,12 @@ No issues.
 
 ### Publishing Namespace
 
-The new section clearly explains the default namespace derivation (`ghcr.io/weft/lace/*`), the override mechanism (`features-namespace: "weft/devcontainer-features"`), and includes a concrete workflow YAML snippet.
+The new section clearly explains the default namespace derivation (`ghcr.io/weftwiseink/lace/*`), the override mechanism (`features-namespace: "weftwiseink/devcontainer-features"`), and includes a concrete workflow YAML snippet.
 This resolves the most significant concern from round 1.
 
 **Finding 1 (non-blocking): The `features-namespace` value format.**
-The proposal uses `features-namespace: "weft/devcontainer-features"`.
-This should be verified during Phase 2 implementation to confirm the action interprets this as the full namespace prefix (producing `ghcr.io/weft/devcontainer-features/wezterm-server`) rather than appending it to the owner (which would produce `ghcr.io/weft/devcontainer-features/wezterm-server` in either case, so this is likely correct but worth a smoke test).
+The proposal uses `features-namespace: "weftwiseink/devcontainer-features"`.
+This should be verified during Phase 2 implementation to confirm the action interprets this as the full namespace prefix (producing `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`) rather than appending it to the owner (which would produce `ghcr.io/weftwiseink/devcontainer-features/wezterm-server` in either case, so this is likely correct but worth a smoke test).
 
 ### install.sh
 

@@ -4,8 +4,10 @@ first_authored:
   at: 2026-01-30T18:30:00-08:00
 task_list: lace/devcontainer-features
 type: proposal
-state: live
-status: implementation_complete
+state: archived
+status: implementation_accepted
+accepted_by: "@mjr"
+accepted_at: 2026-02-01T08:15:00-08:00
 tags: [devcontainer-features, wezterm, ci-cd, publishing, infrastructure, oci-namespace, cross-platform]
 last_reviewed:
   status: accepted

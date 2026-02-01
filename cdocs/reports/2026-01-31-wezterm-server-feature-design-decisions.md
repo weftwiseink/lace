@@ -16,16 +16,16 @@ last_reviewed:
 
 # Design Decisions: Wezterm Server Devcontainer Feature
 
-Reference document for the design decisions behind `ghcr.io/weft/devcontainer-features/wezterm-server`.
+Reference document for the design decisions behind `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`.
 See the proposal: `cdocs/proposals/2026-01-30-scaffold-devcontainer-features-wezterm-server.md`.
 
 ## 1. Monorepo subdirectory, not a separate repository
 
 Feature source lives at `devcontainers/features/` within the lace repo.
-The `devcontainers/action@v1` `features-namespace` input overrides the default `<owner>/<repo>` OCI namespace, so the monorepo still publishes to `ghcr.io/weft/devcontainer-features/*`.
+The `devcontainers/action@v1` `features-namespace` input overrides the default `<owner>/<repo>` OCI namespace, so the monorepo still publishes to `ghcr.io/weftwiseink/devcontainer-features/*`.
 
 Lace is the primary consumer. Co-location simplifies iteration during initial development.
-If features later serve multiple unrelated projects, extract into a dedicated `weft/devcontainer-features` repo (which also eliminates the namespace override).
+If features later serve multiple unrelated projects, extract into a dedicated `weftwiseink/devcontainer-features` repo (which also eliminates the namespace override).
 
 ## 2. Extract from .deb/.rpm/AppImage rather than package-manager install
 

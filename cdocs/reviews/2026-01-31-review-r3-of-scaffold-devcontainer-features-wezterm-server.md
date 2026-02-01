@@ -14,7 +14,7 @@ tags: [fresh_agent, cross_platform, install_script, sshd_dependency, test_plan, 
 
 ## Summary Assessment
 
-This proposal extracts wezterm-mux-server installation from the lace Dockerfile into a cross-platform devcontainer feature published at `ghcr.io/weft/devcontainer-features/wezterm-server`, with CI/CD workflows and a phased migration plan coordinated with a parallel feature-based-tooling workstream.
+This proposal extracts wezterm-mux-server installation from the lace Dockerfile into a cross-platform devcontainer feature published at `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`, with CI/CD workflows and a phased migration plan coordinated with a parallel feature-based-tooling workstream.
 The revision since round 2 is substantial: cross-platform distro detection with three install paths, sshd dependency via `installsAfter`, SSH key management spun off as a separate RFP, Phase 4 cut, and a significantly expanded implementation plan with debug workflows.
 The overall quality is high: the install.sh logic is sound across all three paths, the implementation plan is detailed enough for autonomous work, and the coordination with the parallel workstream is clear.
 The most significant findings are: the RPM filename construction uses a hardcoded Fedora version (`fc39`) that will fail on other RPM-based distros without adequate fallback, the Alpine AppImage path has a glibc dependency that is not called out, and the sshd dependency semantics could be more precisely documented.

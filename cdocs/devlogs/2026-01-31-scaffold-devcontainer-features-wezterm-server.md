@@ -4,8 +4,8 @@ first_authored:
   at: 2026-01-31T22:00:00-08:00
 task_list: lace/devcontainer-features
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: completed
 tags: [devcontainer-features, wezterm, implementation, phase-1a, phase-2]
 last_reviewed:
   status: accepted

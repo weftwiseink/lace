@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-01T00:00:00-08:00
 task_list: lace/devcontainer-features
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: completed
 tags: [devcontainer-features, wezterm, dockerfile-migration, phase-3]
 ---
 

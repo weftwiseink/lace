@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-workflow
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [devcontainer, wezterm, developer-experience, workflow-automation, automation]
 last_reviewed:
   status: accepted
@@ -320,7 +320,7 @@ Example raw output may look like:
 To extract only the JSON line, you can pipe through a filter:
 
 ```bash
-devcontainer up --workspace-folder . 2>/dev/null | grep '^\s*{'
+devcontainer up --workspace-folder . 2>/dev/null | grep '^[[:space:]]*{'
 # Or more robustly: find the line containing "outcome"
 devcontainer up --workspace-folder . 2>/dev/null | grep '"outcome"'
 ```

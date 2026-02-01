@@ -1,0 +1,175 @@
+#!/bin/bash
+# Open a WezTerm workspace connected to the lace devcontainer.
+#
+# Usage:
+#   devcontainer up --workspace-folder . | ./bin/open-lace-workspace   (piped mode)
+#   ./bin/open-lace-workspace                                          (standalone mode)
+#
+# Piped mode: reads devcontainer up JSON from stdin, validates success,
+# waits for SSH readiness, and opens a WezTerm window connected to the
+# lace SSH domain.
+#
+# Standalone mode: runs devcontainer up internally, then proceeds as above.
+#
+# Prerequisites:
+#   - wezterm installed on the host
+#   - SSH key pair at ~/.ssh/lace_devcontainer
+#     Generate with: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""
+#   - devcontainer CLI installed (standalone mode only)
+#     Install with: npm install -g @devcontainers/cli
+#
+# Exit codes:
+#   0 - Success (WezTerm window opened)
+#   1 - Prerequisite failure (missing tool or SSH key)
+#   2 - devcontainer up failure (non-success outcome or JSON parse error)
+#   3 - SSH connectivity timeout (sshd not reachable after max retries)
+#   4 - wezterm connect failure (mux server not running or connection error)
+#
+# Design rationale: cdocs/proposals/2026-02-01-devcontainer-auto-attach-wezterm-workspace.md
+
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+
+# --- Resolve repo root using SCRIPT_DIR pattern from bin/nvim ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# --- Configuration constants ---
+SSH_KEY="$HOME/.ssh/lace_devcontainer"
+SSH_PORT=2222
+SSH_USER="node"
+SSH_HOST="localhost"
+MAX_SSH_ATTEMPTS=15
+SSH_RETRY_INTERVAL=1
+
+# --- Helper: print error messages prefixed with script name ---
+err() {
+  echo "${SCRIPT_NAME}: error: $*" >&2
+}
+
+info() {
+  echo "${SCRIPT_NAME}: $*" >&2
+}
+
+# --- Phase A: Prerequisite checks ---
+
+if ! command -v wezterm &>/dev/null; then
+  err "wezterm not found on PATH"
+  err "Install from: https://wezfurlong.org/wezterm/installation.html"
+  exit 1
+fi
+
+if [[ ! -f "$SSH_KEY" ]]; then
+  err "SSH key not found at $SSH_KEY"
+  err "Generate with: ssh-keygen -t ed25519 -f $SSH_KEY -N \"\""
+  exit 1
+fi
+
+# --- Phase B: Obtain devcontainer up JSON ---
+
+if [ ! -t 0 ]; then
+  # --- Piped mode ---
+  info "reading devcontainer up output from stdin..."
+  RAW_INPUT="$(cat)"
+
+  # Extract the JSON line: find the line containing "outcome"
+  JSON_LINE="$(echo "$RAW_INPUT" | grep '"outcome"' | head -1)"
+
+  if [[ -z "$JSON_LINE" ]]; then
+    err "failed to find JSON output in stdin (no line containing '\"outcome\"')"
+    err "raw input (first 5 lines):"
+    echo "$RAW_INPUT" | head -5 >&2
+    exit 2
+  fi
+else
+  # --- Standalone mode ---
+  if ! command -v devcontainer &>/dev/null; then
+    err "devcontainer CLI not found on PATH (required for standalone mode)"
+    err "Install with: npm install -g @devcontainers/cli"
+    err "Or use piped mode: devcontainer up --workspace-folder . | $0"
+    exit 1
+  fi
+
+  info "running devcontainer up --workspace-folder $REPO_ROOT ..."
+  DC_EXIT=0
+  RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" 2>&1)" || DC_EXIT=$?
+
+  # Extract JSON line from mixed output
+  JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1)"
+
+  if [[ -z "$JSON_LINE" ]]; then
+    err "devcontainer up did not produce JSON output (exit code: $DC_EXIT)"
+    err "raw output (last 10 lines):"
+    echo "$RAW_OUTPUT" | tail -10 >&2
+    exit 2
+  fi
+fi
+
+# --- Phase C: Parse JSON and validate outcome ---
+
+if command -v jq &>/dev/null; then
+  OUTCOME="$(echo "$JSON_LINE" | jq -r '.outcome')"
+else
+  # Fallback: extract outcome value using grep + sed
+  OUTCOME="$(echo "$JSON_LINE" | grep -o '"outcome"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')"
+fi
+
+if [[ "$OUTCOME" != "success" ]]; then
+  err "devcontainer up reported outcome: $OUTCOME"
+  if command -v jq &>/dev/null; then
+    MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+  else
+    MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')"
+  fi
+  [[ -n "${MSG:-}" ]] && err "message: $MSG"
+  exit 2
+fi
+
+info "devcontainer up succeeded"
+
+# --- Phase D: SSH readiness polling ---
+
+info "waiting for SSH readiness on port $SSH_PORT..."
+ATTEMPT=0
+while [[ $ATTEMPT -lt $MAX_SSH_ATTEMPTS ]]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if ssh -p "$SSH_PORT" \
+       -i "$SSH_KEY" \
+       -o ConnectTimeout=1 \
+       -o StrictHostKeyChecking=no \
+       -o UserKnownHostsFile=/dev/null \
+       -o LogLevel=ERROR \
+       "${SSH_USER}@${SSH_HOST}" true 2>/dev/null; then
+    info "SSH ready (attempt $ATTEMPT/$MAX_SSH_ATTEMPTS)"
+    break
+  fi
+
+  if [[ $ATTEMPT -eq $MAX_SSH_ATTEMPTS ]]; then
+    err "SSH connectivity timeout after $MAX_SSH_ATTEMPTS attempts"
+    err "troubleshooting:"
+    err "  - verify container is running: docker ps | grep devcontainer"
+    err "  - verify sshd is running: devcontainer exec --workspace-folder $REPO_ROOT -- pgrep -a sshd"
+    err "  - verify port binding: ss -tlnp | grep $SSH_PORT"
+    err "  - test SSH manually: ssh -p $SSH_PORT -i $SSH_KEY -v ${SSH_USER}@${SSH_HOST} true"
+    exit 3
+  fi
+
+  sleep "$SSH_RETRY_INTERVAL"
+done
+
+# --- Phase E: Open WezTerm window ---
+
+info "connecting WezTerm to lace domain..."
+WEZ_EXIT=0
+wezterm connect lace || WEZ_EXIT=$?
+if [[ $WEZ_EXIT -ne 0 ]]; then
+  err "wezterm connect lace failed (exit code: $WEZ_EXIT)"
+  err "troubleshooting:"
+  err "  - verify mux server: devcontainer exec --workspace-folder $REPO_ROOT -- pgrep -a wezterm"
+  err "  - restart mux server: devcontainer exec --workspace-folder $REPO_ROOT -- wezterm-mux-server --daemonize"
+  err "  - debug connection: WEZTERM_LOG=debug wezterm connect lace"
+  exit 4
+fi
+
+info "done"

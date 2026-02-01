@@ -70,6 +70,8 @@ config.ssh_domains = {
     multiplexing = "WezTerm",
     ssh_option = {
       identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
+      stricthostkeychecking = "no",
+      userknownhostsfile = "/dev/null",
     },
   },
 }

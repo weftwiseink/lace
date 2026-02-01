@@ -160,11 +160,22 @@ while [[ $ATTEMPT -lt $MAX_SSH_ATTEMPTS ]]; do
 done
 
 # --- Phase E: Open WezTerm window ---
+#
+# wezterm connect blocks for the lifetime of the GUI window it opens.
+# We background it and briefly check that the process is still alive,
+# which catches immediate connection failures (bad domain, SSH error).
 
 info "connecting WezTerm to lace domain..."
-WEZ_EXIT=0
-wezterm connect lace || WEZ_EXIT=$?
-if [[ $WEZ_EXIT -ne 0 ]]; then
+wezterm connect lace &
+WEZ_PID=$!
+
+# Give wezterm a moment to fail on immediate errors (bad config, SSH rejection)
+sleep 2
+
+if ! kill -0 "$WEZ_PID" 2>/dev/null; then
+  # Process already exited -- retrieve its exit code
+  wait "$WEZ_PID" 2>/dev/null
+  WEZ_EXIT=$?
   err "wezterm connect lace failed (exit code: $WEZ_EXIT)"
   err "troubleshooting:"
   err "  - verify mux server: devcontainer exec --workspace-folder $REPO_ROOT -- pgrep -a wezterm"
@@ -173,4 +184,4 @@ if [[ $WEZ_EXIT -ne 0 ]]; then
   exit 4
 fi
 
-info "done"
+info "WezTerm window opened (pid $WEZ_PID)"

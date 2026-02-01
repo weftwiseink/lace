@@ -80,11 +80,21 @@ Added to devcontainer.json features:
 
 ### Phase 3: Wezterm Feature
 
-**SKIPPED** - gated on sibling proposal.
+**COMPLETED** - commit `6bbfeed` (implemented in a follow-up session).
 
-The sibling proposal (`cdocs/proposals/2026-01-30-scaffold-devcontainer-features-wezterm-server.md`) is `implementation_ready` but has not been implemented yet. The `ghcr.io/weft/devcontainer-features/wezterm-server:1` feature does not exist at this time.
+The wezterm-server feature was published to GHCR in the sibling workstream (`cdocs/devlogs/2026-01-31-scaffold-devcontainer-features-wezterm-server.md`). Phase 3 migration completed in `cdocs/devlogs/2026-02-01-wezterm-dockerfile-migration.md`.
 
-The wezterm installation block (ARG, .deb download/extraction, runtime directory creation) remains in the Dockerfile. It will be removed when the weft feature is published and Phase 3 can proceed.
+Added to devcontainer.json features:
+```json
+"ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+    "version": "20240203-110809-5046fc22"
+}
+```
+
+Removed from Dockerfile:
+- `ARG WEZTERM_VERSION` and the 17-line `.deb` download/extraction RUN block
+- Runtime directory creation (`mkdir -p /run/user/1000`)
+- Retained SSH dir setup (sshd feature does not create per-user `.ssh` dirs)
 
 ### Phase 4: Nushell Feature
 
@@ -110,7 +120,7 @@ Minimal cleanup since Phase 3 was skipped (wezterm blocks remain):
 
 No orphaned ARGs or ENV variables found. No orphaned comments referencing removed blocks. The `USER` directive remains at line 126.
 
-Dockerfile went from 186 lines to 166 lines (20 lines removed). Once Phase 3 is completed, another ~22 lines will be removed.
+Dockerfile went from 186 lines to 166 lines (20 lines removed). Phase 3 completion removed another 20 lines (166 -> 147).
 
 ## Changes Made
 

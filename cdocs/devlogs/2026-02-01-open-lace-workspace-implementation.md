@@ -8,10 +8,10 @@ state: live
 status: review_ready
 tags: [devcontainer, wezterm, developer-experience, workflow-automation]
 last_reviewed:
-  status: revision_requested
+  status: accepted
   by: "@claude-opus-4-5-20251101"
-  at: 2026-02-01T21:00:00-08:00
-  round: 1
+  at: 2026-02-01T22:00:00-08:00
+  round: 2
 ---
 
 # Open Lace Workspace Implementation: Devlog
@@ -51,6 +51,15 @@ Initial testing revealed that `grep` returns exit code 1 when no match is found,
 ### Deviation: wezterm connect blocking behavior
 
 > NOTE(opus/devcontainer-workflow): The proposal implied `wezterm connect` returns after opening the window, but in practice it blocks for the lifetime of the GUI window. Changed to background the process with `&` and check after 2 seconds for immediate failures (SSH rejection, bad config). Mux-server errors are displayed by wezterm in its own GUI window rather than as process exit codes, which aligns with the proposal's Design Decision 4 note about `wezterm connect` handling mux negotiation natively.
+
+### Review R1 Resolutions
+
+R1 review (`cdocs/reviews/2026-02-01-review-of-open-lace-workspace-implementation.md`) returned verdict: Revise. Findings addressed:
+
+- **README.md discrepancy (blocking)**: README updated with Quick Start section documenting standalone/piped modes, prerequisites, and pointer to script header.
+- **disown for backgrounded process**: Added `disown "$WEZ_PID"` after backgrounding `wezterm connect`.
+- **Exit code 4 unreachable for mux failures**: Known limitation documented. `wezterm connect` opens a window with an error dialog for mux failures rather than exiting non-zero. Exit code 4 remains reachable for immediate SSH/config failures (process dies within 2s).
+- **Standalone mode not tested**: The JSON extraction logic is shared between piped and standalone modes. Standalone mode was tested for prerequisite checks but not full E2E (requires clean container state).
 
 ### Deviation: wezterm.lua SSH options
 

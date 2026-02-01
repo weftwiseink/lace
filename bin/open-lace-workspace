@@ -168,7 +168,6 @@ done
 info "connecting WezTerm to lace domain..."
 wezterm connect lace &
 WEZ_PID=$!
-disown "$WEZ_PID"
 
 # Give wezterm a moment to fail on immediate errors (bad config, SSH rejection)
 sleep 2
@@ -185,4 +184,6 @@ if ! kill -0 "$WEZ_PID" 2>/dev/null; then
   exit 4
 fi
 
+# Detach the GUI process so it survives the parent shell exiting
+disown "$WEZ_PID"
 info "WezTerm window opened (pid $WEZ_PID)"

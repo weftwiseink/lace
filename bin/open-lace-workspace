@@ -74,7 +74,8 @@ if [ ! -t 0 ]; then
   RAW_INPUT="$(cat)"
 
   # Extract the JSON line: find the line containing "outcome"
-  JSON_LINE="$(echo "$RAW_INPUT" | grep '"outcome"' | head -1)"
+  # Use || true to prevent set -e from aborting on no match
+  JSON_LINE="$(echo "$RAW_INPUT" | grep '"outcome"' | head -1 || true)"
 
   if [[ -z "$JSON_LINE" ]]; then
     err "failed to find JSON output in stdin (no line containing '\"outcome\"')"
@@ -96,7 +97,7 @@ else
   RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" 2>&1)" || DC_EXIT=$?
 
   # Extract JSON line from mixed output
-  JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1)"
+  JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1 || true)"
 
   if [[ -z "$JSON_LINE" ]]; then
     err "devcontainer up did not produce JSON output (exit code: $DC_EXIT)"
@@ -112,7 +113,7 @@ if command -v jq &>/dev/null; then
   OUTCOME="$(echo "$JSON_LINE" | jq -r '.outcome')"
 else
   # Fallback: extract outcome value using grep + sed
-  OUTCOME="$(echo "$JSON_LINE" | grep -o '"outcome"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')"
+  OUTCOME="$(echo "$JSON_LINE" | grep -o '"outcome"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
 fi
 
 if [[ "$OUTCOME" != "success" ]]; then
@@ -120,7 +121,7 @@ if [[ "$OUTCOME" != "success" ]]; then
   if command -v jq &>/dev/null; then
     MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
   else
-    MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')"
+    MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   fi
   [[ -n "${MSG:-}" ]] && err "message: $MSG"
   exit 2

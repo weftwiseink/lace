@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from "citty";
-import { prebuildCommand } from "./commands/prebuild.js";
-import { restoreCommand } from "./commands/restore.js";
-import { statusCommand } from "./commands/status.js";
+import { prebuildCommand } from "@/commands/prebuild";
+import { restoreCommand } from "@/commands/restore";
+import { statusCommand } from "@/commands/status";
 
 const main = defineCommand({
   meta: {

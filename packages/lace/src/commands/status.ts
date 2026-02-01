@@ -1,5 +1,5 @@
 import { defineCommand } from "citty";
-import { runStatus } from "../lib/status.js";
+import { runStatus } from "@/lib/status";
 
 export const statusCommand = defineCommand({
   meta: {

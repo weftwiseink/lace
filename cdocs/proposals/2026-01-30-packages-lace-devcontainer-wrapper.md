@@ -4,8 +4,8 @@ first_authored:
   at: 2026-01-30T18:30:00-08:00
 task_list: lace/packages-lace-cli
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-5-20251101"
@@ -80,7 +80,7 @@ Features that should be pre-baked are declared in devcontainer.json under the `c
     "lace": {
       "prebuildFeatures": {
         "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-        "ghcr.io/weft/devcontainer-features/wezterm-server:1": {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
           "version": "20240203-110809-5046fc22"
         }
       }
@@ -222,7 +222,7 @@ If the AST parser finds unexpected instructions before `FROM`, lace should repor
 `FROM node@sha256:abc123...` should be handled.
 Docker tag syntax does not support `@` in image tags, so the prebuild image uses a colon-separated format: `lace.local/node:from_sha256__abc123...`.
 The `from_` prefix makes the provenance clear (this tag was derived from a digest reference), and `__` substitutes for `:` in the digest.
-`lace restore` maps this tag back to the original `@sha256:` reference using the metadata stored in `.lace/prebuild/`.
+`lace restore` maps this tag back to the original `@sha256:` reference by parsing the `lace.local/` tag format (see NOTE 3 in Post-Implementation Amendments).
 
 ### `devcontainer build` fails
 
@@ -849,3 +849,28 @@ Each error path should have at least one test.
 
 **Constraints:**
 - Restore only undoes the FROM rewrite; it does not undo lock file changes (the namespaced entries are harmless and useful for re-prebuild).
+
+## Post-Implementation Amendments
+
+The following notes were added after Phases 1-6 were implemented and reviewed, to guide the remainder of the workstream.
+
+### NOTE 1: Preserve `.lace/prebuild/` on restore
+
+`lace restore` should NOT delete `.lace/prebuild/` or its contents. The cached context, metadata, and lock data are useful for re-prebuild, debugging, and potential future tooling that inspects prebuild state. The current implementation cleans up the directory on restore — this should be changed so that restore only rewrites the Dockerfile FROM line.
+
+### NOTE 2: Use Unix file locking (flock)
+
+For any concurrency protection needed (e.g., preventing concurrent prebuilds from corrupting shared state), use the Unix `flock` API. Windows support is not a concern for this project.
+
+### NOTE 3: `lace.local/` transforms must be reversible without metadata
+
+`lace restore` should not _require_ `.lace/prebuild/metadata.json` to determine the original FROM reference. The `lace.local/` tag format should be designed so the original image reference can be recovered from the tag alone:
+
+- `lace.local/node:24-bookworm` → `node:24-bookworm` (strip `lace.local/` prefix)
+- `lace.local/ghcr.io/owner/image:v2` → `ghcr.io/owner/image:v2`
+- `lace.local/node:from_sha256__abc123` → `node@sha256:abc123` (detect `from_` prefix, convert `:` substitution back to `@sha256:`)
+- `lace.local/node:latest` → `node:latest` (minor ambiguity: original may have been untagged `FROM node`, but `node:latest` is semantically equivalent)
+
+This means the tag generation and restoration are a bidirectional pair — `generateTag` and a new `parseTag` function should be inverses. Tests should verify round-trip reversibility for all tag formats.
+
+Adversarial edge cases are acceptable (e.g., if some other system independently produces a `from_sha256__...` tag, lace is not expected to handle that correctly).

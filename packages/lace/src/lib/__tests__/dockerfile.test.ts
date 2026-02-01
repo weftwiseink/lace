@@ -5,11 +5,12 @@ import { join } from "node:path";
 import {
   parseDockerfile,
   generateTag,
+  parseTag,
   rewriteFrom,
   restoreFrom,
   generatePrebuildDockerfile,
   DockerfileParseError,
-} from "../dockerfile.js";
+} from "@/lib/dockerfile";
 
 const FIXTURES = join(import.meta.dirname, "../../__fixtures__/dockerfiles");
 
@@ -206,6 +207,87 @@ describe("generateTag", () => {
   });
 });
 
+// --- parseTag (inverse of generateTag) ---
+
+describe("parseTag", () => {
+  it("returns null for non-lace tags", () => {
+    expect(parseTag("node:24-bookworm")).toBeNull();
+    expect(parseTag("ghcr.io/owner/image:v2")).toBeNull();
+  });
+
+  it("reverses tagged image", () => {
+    expect(parseTag("lace.local/node:24-bookworm")).toBe("node:24-bookworm");
+  });
+
+  it("reverses untagged image (latest)", () => {
+    expect(parseTag("lace.local/node:latest")).toBe("node:latest");
+  });
+
+  it("reverses digest-based reference", () => {
+    expect(parseTag("lace.local/node:from_sha256__abc123def456")).toBe(
+      "node@sha256:abc123def456",
+    );
+  });
+
+  it("reverses registry image with tag", () => {
+    expect(parseTag("lace.local/ghcr.io/owner/image:v2")).toBe(
+      "ghcr.io/owner/image:v2",
+    );
+  });
+
+  it("reverses registry image with digest", () => {
+    expect(parseTag("lace.local/ghcr.io/owner/image:from_sha256__abc")).toBe(
+      "ghcr.io/owner/image@sha256:abc",
+    );
+  });
+
+  it("reverses registry:port image", () => {
+    expect(parseTag("lace.local/registry:5000/myimage:latest")).toBe(
+      "registry:5000/myimage:latest",
+    );
+  });
+
+  it("handles truncated digest tags", () => {
+    const truncatedHash = "a".repeat(50);
+    const result = parseTag(`lace.local/node:from_sha256__${truncatedHash}`);
+    expect(result).toBe(`node@sha256:${truncatedHash}`);
+  });
+});
+
+// --- generateTag → parseTag round-trip ---
+
+describe("generateTag → parseTag round-trip", () => {
+  it("round-trips tagged image", () => {
+    const tag = generateTag("node", "24-bookworm", null);
+    expect(parseTag(tag)).toBe("node:24-bookworm");
+  });
+
+  it("round-trips digest-based image", () => {
+    const tag = generateTag("node", null, "sha256:abc123def456");
+    expect(parseTag(tag)).toBe("node@sha256:abc123def456");
+  });
+
+  it("round-trips untagged image to latest (acceptable ambiguity)", () => {
+    const tag = generateTag("node", null, null);
+    expect(parseTag(tag)).toBe("node:latest");
+  });
+
+  it("round-trips registry image with tag", () => {
+    const tag = generateTag("ghcr.io/owner/image", "v2", null);
+    expect(parseTag(tag)).toBe("ghcr.io/owner/image:v2");
+  });
+
+  it("round-trips registry:port image", () => {
+    const tag = generateTag("registry:5000/myimage", "latest", null);
+    expect(parseTag(tag)).toBe("registry:5000/myimage:latest");
+  });
+
+  it("round-trips ubuntu with version tag", () => {
+    const tag = generateTag("ubuntu", "22.04", null);
+    expect(parseTag(tag)).toBe("ubuntu:22.04");
+  });
+});
+
 // --- Dockerfile rewriting ---
 
 describe("rewriteFrom", () => {
@@ -272,6 +354,8 @@ describe("round-trip: rewrite then restore", () => {
     "commented-from.Dockerfile",
     "parser-directive.Dockerfile",
     "registry-port.Dockerfile",
+    "arg-prelude.Dockerfile",
+    "arg-substitution.Dockerfile",
   ];
 
   for (const fixture of validFixtures) {

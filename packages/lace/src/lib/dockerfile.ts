@@ -139,6 +139,41 @@ export function generateTag(
 }
 
 /**
+ * Parse a lace.local tag back to the original image reference.
+ * Inverse of generateTag. Returns null if the tag doesn't have the lace.local/ prefix.
+ *
+ * Reversals:
+ *   lace.local/node:24-bookworm        → node:24-bookworm
+ *   lace.local/ghcr.io/owner/image:v2  → ghcr.io/owner/image:v2
+ *   lace.local/node:from_sha256__abc   → node@sha256:abc
+ *   lace.local/node:latest             → node:latest  (original may have been untagged)
+ */
+export function parseTag(laceTag: string): string | null {
+  const PREFIX = "lace.local/";
+  if (!laceTag.startsWith(PREFIX)) return null;
+
+  const rest = laceTag.slice(PREFIX.length);
+
+  // Find the tag separator: first colon after the last slash
+  const lastSlash = rest.lastIndexOf("/");
+  const searchFrom = lastSlash >= 0 ? lastSlash + 1 : 0;
+  const tagColon = rest.indexOf(":", searchFrom);
+
+  if (tagColon >= 0) {
+    const tag = rest.slice(tagColon + 1);
+    if (tag.startsWith("from_")) {
+      // Digest encoding: from_sha256__abc → @sha256:abc
+      const imageName = rest.slice(0, tagColon);
+      const digest = tag.slice("from_".length).replace("__", ":");
+      return `${imageName}@${digest}`;
+    }
+  }
+
+  // Non-digest cases: rest is already the original reference
+  return rest;
+}
+
+/**
  * Rewrite the first FROM line in a Dockerfile to use a new image reference.
  * Preserves everything else byte-identical (comments, whitespace, other instructions).
  * Preserves alias (AS ...) and --platform flag.

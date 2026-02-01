@@ -14,7 +14,7 @@ import {
   writeLockFile,
   mergeLockFile,
   extractPrebuiltEntries,
-} from "../lockfile.js";
+} from "@/lib/lockfile";
 
 const FIXTURES = join(import.meta.dirname, "../../__fixtures__/lockfiles");
 

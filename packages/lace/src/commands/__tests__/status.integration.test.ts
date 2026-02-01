@@ -8,9 +8,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runPrebuild } from "../../lib/prebuild.js";
-import { runStatus } from "../../lib/status.js";
-import type { RunSubprocess } from "../../lib/subprocess.js";
+import { runPrebuild } from "@/lib/prebuild";
+import { runRestore } from "@/lib/restore";
+import { runStatus } from "@/lib/status";
+import type { RunSubprocess } from "@/lib/subprocess";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -114,5 +115,22 @@ describe("status: prebuild active, config stale", () => {
     const result = runStatus({ workspaceRoot });
     expect(result.exitCode).toBe(0);
     expect(result.message).toContain("config changed since last prebuild");
+  });
+});
+
+describe("status: prebuild cached (after restore)", () => {
+  it("reports cached state with restore hint", () => {
+    setupWorkspace();
+    runPrebuild({ workspaceRoot, subprocess: createMock() });
+
+    // Restore — cache preserved, Dockerfile restored
+    runRestore({ workspaceRoot });
+
+    const result = runStatus({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Prebuild cached");
+    expect(result.message).toContain("restored");
+    expect(result.message).toContain("lace prebuild");
+    expect(result.message).toContain("up to date");
   });
 });

@@ -5,22 +5,23 @@ import {
   readDevcontainerConfig,
   extractPrebuildFeatures,
   generateTempDevcontainerJson,
-} from "./devcontainer.js";
+} from "@/lib/devcontainer";
 import {
   parseDockerfile,
   generateTag,
+  parseTag,
   rewriteFrom,
   restoreFrom,
   generatePrebuildDockerfile,
-} from "./dockerfile.js";
-import { validateNoOverlap } from "./validation.js";
+} from "@/lib/dockerfile";
+import { validateNoOverlap } from "@/lib/validation";
 import {
   writeMetadata,
   readMetadata,
   contextsChanged,
-} from "./metadata.js";
-import { mergeLockFile } from "./lockfile.js";
-import { runSubprocess, type RunSubprocess } from "./subprocess.js";
+} from "@/lib/metadata";
+import { mergeLockFile, extractPrebuiltEntries, writeLockFile } from "@/lib/lockfile";
+import { runSubprocess, type RunSubprocess } from "@/lib/subprocess";
 
 export interface PrebuildOptions {
   dryRun?: boolean;
@@ -105,19 +106,31 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   let dockerfileContent: string;
   try {
     dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
-  } catch {
-    const msg = `Cannot read Dockerfile: ${config.dockerfilePath}`;
+  } catch (err) {
+    const reason = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+    const msg = `Cannot read Dockerfile: ${config.dockerfilePath} (${reason})`;
     console.error(`Error: ${msg}`);
     return { exitCode: 1, message: msg };
   }
 
   // If the Dockerfile already has a lace.local FROM, restore it first
-  const existingMetadata = readMetadata(prebuildDir);
-  if (existingMetadata && dockerfileContent.includes("lace.local/")) {
-    dockerfileContent = restoreFrom(
-      dockerfileContent,
-      existingMetadata.originalFrom,
-    );
+  if (dockerfileContent.includes("lace.local/")) {
+    // Primary: derive original FROM from lace.local tag (bidirectional)
+    let originalFrom: string | null = null;
+    try {
+      const laceFrom = parseDockerfile(dockerfileContent);
+      originalFrom = parseTag(laceFrom.image);
+    } catch {
+      // fall through to metadata
+    }
+    // Fallback: metadata
+    if (!originalFrom) {
+      const existingMetadata = readMetadata(prebuildDir);
+      originalFrom = existingMetadata?.originalFrom ?? null;
+    }
+    if (originalFrom) {
+      dockerfileContent = restoreFrom(dockerfileContent, originalFrom);
+    }
   }
 
   let parsed;
@@ -142,7 +155,22 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     !options.dryRun &&
     !contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)
   ) {
-    const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+    // Cache is fresh — check if Dockerfile needs reactivation (e.g., after restore)
+    const currentContent = readFileSync(config.dockerfilePath, "utf-8");
+    if (currentContent.includes("lace.local/")) {
+      const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+      console.log(msg);
+      return { exitCode: 0, message: msg };
+    }
+    // Dockerfile was restored but cache is fresh — rewrite FROM without rebuilding
+    const reactivated = rewriteFrom(dockerfileContent, prebuildTag);
+    writeFileSync(config.dockerfilePath, reactivated, "utf-8");
+    writeMetadata(prebuildDir, {
+      originalFrom: parsed.image,
+      timestamp: new Date().toISOString(),
+      prebuildTag,
+    });
+    const msg = `Prebuild reactivated from cache. Dockerfile FROM rewritten to: ${prebuildTag}`;
     console.log(msg);
     return { exitCode: 0, message: msg };
   }
@@ -173,6 +201,14 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
 
   const lockFilePath = join(config.configDir, "devcontainer-lock.json");
 
+  // Seed temp context with prior lock entries for version pinning
+  const priorEntries = extractPrebuiltEntries(lockFilePath);
+  if (Object.keys(priorEntries).length > 0) {
+    writeLockFile(join(prebuildDir, "devcontainer-lock.json"), {
+      features: priorEntries,
+    });
+  }
+
   console.log(`Building prebuild image: ${prebuildTag}`);
   console.log(
     `Features: ${Object.keys(prebuildFeatures).join(", ")}`,
@@ -184,6 +220,8 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
       "build",
       "--workspace-folder",
       prebuildDir,
+      "--config",
+      join(prebuildDir, "devcontainer.json"),
       "--image-name",
       prebuildTag,
     ],

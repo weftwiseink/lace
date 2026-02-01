@@ -1,5 +1,7 @@
 import { defineCommand } from "citty";
-import { runPrebuild, type PrebuildOptions } from "../lib/prebuild.js";
+import { join } from "node:path";
+import { runPrebuild, type PrebuildOptions } from "@/lib/prebuild";
+import { withFlockSync } from "@/lib/flock";
 
 export const prebuildCommand = defineCommand({
   meta: {
@@ -24,7 +26,8 @@ export const prebuildCommand = defineCommand({
       dryRun: args["dry-run"],
       force: args.force,
     };
-    const result = runPrebuild(options);
+    const lockPath = join(process.cwd(), ".lace", "prebuild.lock");
+    const result = withFlockSync(lockPath, () => runPrebuild(options));
     process.exitCode = result.exitCode;
   },
 });

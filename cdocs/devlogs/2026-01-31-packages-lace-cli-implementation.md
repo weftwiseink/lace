@@ -4,14 +4,14 @@ first_authored:
   at: 2026-01-31T14:00:00-08:00
 task_list: lace/packages-lace-cli
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: completed
 tags: [devcontainer, cli, prebuild, npm, typescript, implementation]
 last_reviewed:
-  status: revision_requested
+  status: accepted
   by: "@claude-opus-4-5-20251101"
-  at: 2026-01-31T18:00:00-08:00
-  round: 1
+  at: 2026-01-31T20:30:00-08:00
+  round: 2
 ---
 
 # packages/lace CLI Implementation: Devlog
@@ -28,7 +28,7 @@ Follow the proposal's six implementation phases sequentially:
 
 1. **Phase 1**: Package scaffold — pnpm workspace, TypeScript, Vite, Vitest, CLI skeleton
 2. **Phase 2**: Dockerfile parsing and rewriting — `dockerfile-ast`, FROM extraction, tag generation, rewrite/restore
-3. **Phase 3**: devcontainer.json reading, validation, temp context generation — `jsonc-parser`, arktype, overlap detection
+3. **Phase 3**: devcontainer.json reading, validation, temp context generation — `jsonc-parser`, overlap detection
 4. **Phase 4**: Prebuild pipeline orchestration — metadata, subprocess, cache comparison, --dry-run, --force
 5. **Phase 5**: Lock file merging — namespaced `lace.prebuiltFeatures` entries
 6. **Phase 6**: restore, status commands, end-to-end polish
@@ -55,15 +55,14 @@ Test-first methodology as specified in the proposal. Tests use vitest with fixtu
 - `jsonc-parser` handles comments and trailing commas in devcontainer.json.
 - Discriminated union result for `extractPrebuildFeatures`: features/absent/null/empty.
 - Feature overlap comparison is version-insensitive (strips version tag after last colon).
-- `arktype` imported as a dependency per proposal but not yet used for runtime validation — config shape is validated structurally. Can be wired in for stricter validation in a follow-up.
-
-> NOTE(opus/implementation): arktype is listed as a dependency but not actively used for runtime type validation in this initial implementation. The structural checks are sufficient for v1; arktype schemas can be added for stricter validation without API changes.
+- `arktype` was listed in the proposal but removed during cleanup — structural validation is sufficient for v1, and carrying an unused dependency adds noise.
 
 ### Phase 4: Prebuild pipeline
 - Pipeline is atomic: `devcontainer build` failure leaves Dockerfile untouched.
 - Temp context comparison normalizes JSON whitespace to avoid spurious rebuilds.
 - When Dockerfile already has `lace.local/` FROM (from previous prebuild), it is restored to original before re-prebuild.
 - Subprocess abstracted behind `RunSubprocess` type for clean test injection.
+- The `devcontainer build` invocation requires an explicit `--config` flag because the temp context writes files to `.lace/prebuild/` (not `.lace/prebuild/.devcontainer/`). This was a latent bug found during Docker smoke testing — all prior tests used mocked subprocesses and didn't exercise the real CLI.
 
 ### Phase 5: Lock file merging
 - Prebuild entries namespaced under `lace.prebuiltFeatures` in devcontainer-lock.json.
@@ -82,7 +81,7 @@ Test-first methodology as specified in the proposal. Tests use vitest with fixtu
 | `package.json` | Root workspace package.json |
 | `pnpm-workspace.yaml` | pnpm workspace with packages/* |
 | `.gitignore` | Added .lace/, node_modules/, dist/ |
-| `packages/lace/package.json` | CLI package with citty, arktype, dockerfile-ast, jsonc-parser |
+| `packages/lace/package.json` | CLI package with citty, dockerfile-ast, jsonc-parser |
 | `packages/lace/tsconfig.json` | Node16 ESM strict TypeScript config |
 | `packages/lace/vite.config.ts` | Vite build for Node CLI |
 | `packages/lace/src/index.ts` | CLI entry point with citty subcommands |
@@ -102,6 +101,8 @@ Test-first methodology as specified in the proposal. Tests use vitest with fixtu
 | `packages/lace/src/lib/__tests__/` | Unit tests for dockerfile, devcontainer, validation, metadata, lockfile |
 | `packages/lace/src/commands/__tests__/` | Integration tests for prebuild, restore, status |
 | `packages/lace/src/__tests__/e2e.test.ts` | End-to-end lifecycle tests |
+| `packages/lace/src/__tests__/docker_smoke.test.ts` | Docker smoke tests (real devcontainer CLI + Docker) |
+| `packages/lace/README.md` | Full package documentation |
 
 ## Verification
 
@@ -115,8 +116,8 @@ Test-first methodology as specified in the proposal. Tests use vitest with fixtu
 > lace@0.1.0 build
 > vite build
 ✓ 13 modules transformed.
-dist/index.js  18.02 kB │ gzip: 4.52 kB │ map: 44.94 kB
-✓ built in 81ms
+dist/index.js  18.19 kB │ gzip: 4.56 kB │ map: 45.02 kB
+✓ built in 80ms
 ```
 
 ### Tests
@@ -125,16 +126,31 @@ dist/index.js  18.02 kB │ gzip: 4.52 kB │ map: 44.94 kB
  ✓ src/lib/__tests__/validation.test.ts (10 tests)
  ✓ src/lib/__tests__/lockfile.test.ts (13 tests)
  ✓ src/lib/__tests__/metadata.test.ts (10 tests)
- ✓ src/lib/__tests__/devcontainer.test.ts (17 tests)
- ✓ src/lib/__tests__/dockerfile.test.ts (43 tests)
+ ✓ src/lib/__tests__/devcontainer.test.ts (21 tests)
+ ✓ src/lib/__tests__/dockerfile.test.ts (47 tests)
  ✓ src/commands/__tests__/prebuild.integration.test.ts (12 tests)
  ✓ src/commands/__tests__/restore.integration.test.ts (3 tests)
  ✓ src/commands/__tests__/status.integration.test.ts (4 tests)
  ✓ src/__tests__/e2e.test.ts (4 tests)
+ ✓ src/__tests__/docker_smoke.test.ts (7 tests) 35342ms
 
- Test Files  9 passed (9)
-      Tests  116 passed (116)
+ Test Files  10 passed (10)
+      Tests  131 passed (131)
 ```
+
+### Docker Smoke Tests
+
+7 tests exercise the real `devcontainer` CLI and Docker daemon:
+
+1. Full prebuild lifecycle — verifies Docker image exists, Dockerfile rewritten, metadata written, status reports "up to date"
+2. Prebuild then restore — verifies Dockerfile restored, `.lace/prebuild/` cleaned, status reports inactive
+3. Cache skip (idempotency) — second run with same config returns "up to date"
+4. Force rebuild — `--force` bypasses cache
+5. Config change detection — changing feature options triggers rebuild
+6. Lock file integration — graceful behavior when `devcontainer build` produces no lock file
+7. Dry run — no Docker image created, no filesystem modifications
+
+These tests found a latent bug: the `devcontainer build` invocation was missing the `--config` flag. The temp context at `.lace/prebuild/` writes `devcontainer.json` directly (not under `.devcontainer/`), so the explicit path is required. All prior tests used mocked subprocesses and didn't exercise this code path.
 
 ### CLI Verification
 
@@ -150,8 +166,71 @@ COMMANDS
     status    Show current prebuild state (original image, prebuild image, staleness)
 ```
 
+## Cleanup Round
+
+After the initial implementation and two review rounds, a cleanup pass addressed:
+
+### Code fixes
+- **Bug fix (from Docker smoke tests)**: Added `--config` flag to `devcontainer build` invocation in `prebuild.ts` — latent bug only exposed by real Docker execution.
+- **Error context**: Bare `catch` block in `prebuild.ts` Dockerfile read now captures the underlying error reason (`ENOENT`, `EACCES`, etc.).
+- **Removed unused `arktype` dependency**: Removed from `package.json` and `vite.config.ts` externals. Structural validation is sufficient.
+- **Removed unused imports**: `vi` from `prebuild.integration.test.ts`, `extractPrebuildFeatures` from `restore.ts`.
+
+### Test improvements
+- Added `arg-prelude.Dockerfile` and `arg-substitution.Dockerfile` to the round-trip test suite (core correctness invariant).
+- Added tests exercising 4 previously unused fixtures: `image-based.jsonc`, `overlap.jsonc`, `legacy-dockerfile-field.jsonc`, `nested-build-path.jsonc`.
+- Added Docker smoke test suite (7 tests against real Docker, ~35s).
+
+### Documentation
+- `packages/lace/README.md`: Full package documentation covering usage, configuration, pipeline internals, `lace.local/` convention, API reference, and workflow tips.
+
 ### Deferred Work
 
-- **arktype runtime validation**: Listed as a dependency but not actively used. Config shape is validated structurally. Can add arktype schemas in a follow-up for stricter validation.
-- **Manual verification against real Docker**: Requires Docker daemon. Tagged `// REQUIRES_DOCKER` per proposal. Should be done in a Docker-available environment.
-- **Lock file restoration in temp context**: When running prebuild, the previous namespaced lock entries should be extracted and placed in the temp context's lock file for version pinning. Currently the prebuild works without this (devcontainer CLI resolves fresh), but for lock file reproducibility this should be wired.
+- **Lock file restoration in temp context**: When running prebuild, the previous namespaced lock entries should be extracted and placed in the temp context's lock file for version pinning. Currently the prebuild works without this (devcontainer CLI resolves fresh), but for lock file reproducibility this should be wired. The `extractPrebuiltEntries()` function is tested and ready to wire in.
+
+---
+
+## Checkpoint: Phases 1-6 Complete
+
+**Date**: 2026-01-31
+**State**: All 6 proposal phases implemented, reviewed (2 rounds, accepted), cleanup round complete.
+
+### What's done
+
+- Full prebuild pipeline: config extraction, Dockerfile AST parsing, temp context generation, `devcontainer build` invocation, FROM rewriting, lock file merging, metadata caching.
+- CLI commands: `lace prebuild` (with `--dry-run`, `--force`), `lace restore`, `lace status`.
+- 131 tests across 10 files, including 7 Docker smoke tests against real Docker.
+- README.md with full usage, API, and internals documentation.
+- Clean typecheck, 18KB build.
+
+### What remains (from proposal amendments)
+
+Three post-implementation amendments were added to the proposal to guide the next phase of work:
+
+1. **Preserve `.lace/prebuild/` on restore**: Currently `lace restore` deletes the directory. Change it to only rewrite the Dockerfile FROM line, leaving cached context intact for re-prebuild and debugging.
+
+2. **Unix flock for concurrency**: Add file locking using the Unix `flock` API to prevent concurrent prebuilds from corrupting shared state. No Windows support needed.
+
+3. **Metadata-free restore (bidirectional tags)**: `lace restore` currently depends on `.lace/prebuild/metadata.json` to recover the original FROM reference. The `lace.local/` tag format should be reversible from the tag alone — add a `parseTag` function as the inverse of `generateTag`, and make `lace restore` use it as the primary path (metadata as optional fallback). Add round-trip tests for all tag formats.
+
+Plus the existing deferred item:
+
+4. **Lock file version pinning in temp context**: Wire `extractPrebuiltEntries()` into the prebuild pipeline to feed prior lock entries into the temp context for reproducibility.
+
+### Testing and debugging methodology
+
+The approach used throughout this implementation, for reference when resuming:
+
+**Test structure**: Three tiers — unit tests (pure functions on strings/objects, fixture-based), integration tests (real filesystem with mocked subprocess), and Docker smoke tests (real `devcontainer` CLI + Docker daemon). Unit and integration tests run in ~500ms; smoke tests in ~35s.
+
+**Test-first**: Each module's tests were written before implementation, following the proposal's test plan tables. Tests marked `// IMPLEMENTATION_VALIDATION` per the proposal convention.
+
+**Fixture-based**: Static fixture files in `src/__fixtures__/` (15 Dockerfiles, 8 devcontainer JSONs, 4 lock files) are shared across test suites. New edge cases are added as fixtures, not inline strings, so they're reusable.
+
+**Subprocess injection**: The `RunSubprocess` type in `subprocess.ts` allows integration tests to inject a mock that captures calls and returns canned responses, without patching globals. Docker smoke tests omit this parameter to use the real implementation.
+
+**Round-trip invariant**: The core correctness check is `parse → rewrite → restore = original`, validated for every valid Dockerfile fixture. This catches subtle rewriting bugs that individual assertions might miss.
+
+**Bug surfacing through smoke tests**: The `--config` flag bug was only found by the Docker smoke tests — mocked subprocess tests couldn't detect that the real `devcontainer` CLI needs explicit config paths when the workspace doesn't use `.devcontainer/` layout. This validates the value of the smoke test tier.
+
+**Review-driven iteration**: Two cdocs review rounds caught issues (regex in status.ts, missing test coverage for fixtures, unused imports/dependencies) that were addressed in a cleanup pass before the checkpoint.

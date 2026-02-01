@@ -4,7 +4,7 @@ first_authored:
   at: 2026-01-31T13:00:00-08:00
 task_list: lace/packages-lace-cli
 type: report
-state: live
+state: archived
 status: done
 tags: [devcontainer, cli, prebuild, architecture, design-decisions]
 ---
@@ -115,3 +115,41 @@ Install lace later for the speed optimization. Lace is not a hard dependency.
 Branch A: claude-code + wezterm. Branch B: claude-code only.
 `lace prebuild` produces branch-specific `lace.local/*` images.
 `lace restore` returns the Dockerfile to its committed state.
+
+---
+
+## Post-Implementation Additions (2026-02-01)
+
+The following decisions emerged from post-implementation amendments. They build on decisions #3, #6, and #7 above.
+
+## 11. Bidirectional tag encoding (`parseTag` as inverse of `generateTag`)
+
+`lace restore` does not require `.lace/prebuild/metadata.json` to recover the original FROM reference. The `lace.local/` tag format is designed to be reversible:
+
+- Strip `lace.local/` prefix for tagged images.
+- Detect `from_` prefix and `__` substitution for digest-based images.
+
+This shifts metadata from "required state" to "optional cache." Restore is self-healing: it works even if metadata is missing, corrupted, or from a different lace version. Metadata remains a fallback for edge cases where tag parsing fails.
+
+The trade-off is a minor ambiguity: `lace.local/node:latest` restores to `node:latest`, which is semantically equivalent to the original `FROM node` (untagged) but not byte-identical.
+
+## 12. Preserve `.lace/prebuild/` on restore (cache over cleanup)
+
+Restore only rewrites the Dockerfile FROM line. It does not delete `.lace/prebuild/`. The cached context, metadata, and lock data persist for:
+
+- **Cache reactivation**: `lace prebuild` after `lace restore` detects fresh cache and rewrites the FROM line without calling `devcontainer build`. This makes the `restore → commit → re-prebuild` workflow instant.
+- **Debugging**: `.lace/prebuild/` always shows what the last prebuild used.
+- **Future tooling**: inspecting prebuild state without requiring a rebuild.
+
+The prior approach (delete on restore) meant every `lace prebuild` after `lace restore` was a full Docker build, even when nothing changed. Cache reactivation is the natural consequence of keeping the cache around.
+
+## 13. Concurrency protection at the CLI layer, not the library layer
+
+`withFlockSync` uses the Unix `flock(1)` command to acquire an exclusive lock on `.lace/prebuild.lock`. The lock is applied in the CLI command wrappers (`commands/prebuild.ts`, `commands/restore.ts`), not in the library functions (`lib/prebuild.ts`, `lib/restore.ts`).
+
+This means:
+- Tests call library functions directly, without contention or lock overhead.
+- Library consumers can choose their own locking strategy (or skip locking for single-threaded use).
+- The CLI layer is the natural boundary for process-level mutual exclusion.
+
+The flock implementation uses fd passing via `spawnSync` stdio: the parent opens the lock file, passes the fd as stdio[3] to a child `flock -xn 3` process, and the lock persists on the shared file description after the child exits. This is the standard Unix pattern for in-process flock acquisition without native bindings.

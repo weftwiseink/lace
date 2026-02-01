@@ -1,10 +1,15 @@
 // IMPLEMENTATION_VALIDATION
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readMetadata, contextsChanged } from "./metadata.js";
-import { readDevcontainerConfig, extractPrebuildFeatures } from "./devcontainer.js";
-import { parseDockerfile, generatePrebuildDockerfile, restoreFrom } from "./dockerfile.js";
-import { generateTempDevcontainerJson } from "./devcontainer.js";
+import { readMetadata, contextsChanged } from "@/lib/metadata";
+import { readDevcontainerConfig, extractPrebuildFeatures } from "@/lib/devcontainer";
+import {
+  parseDockerfile,
+  parseTag,
+  generatePrebuildDockerfile,
+  restoreFrom,
+} from "@/lib/dockerfile";
+import { generateTempDevcontainerJson } from "@/lib/devcontainer";
 
 export interface StatusOptions {
   workspaceRoot?: string;
@@ -18,6 +23,11 @@ export interface StatusResult {
 
 /**
  * Show current prebuild state.
+ *
+ * Distinguishes three states:
+ * - No prebuild: no metadata exists
+ * - Prebuild active: metadata exists AND Dockerfile has lace.local reference
+ * - Prebuild cached: metadata exists but Dockerfile has been restored
  */
 export function runStatus(options: StatusOptions = {}): StatusResult {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
@@ -26,7 +36,7 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
     join(workspaceRoot, ".devcontainer", "devcontainer.json");
   const prebuildDir = join(workspaceRoot, ".lace", "prebuild");
 
-  // Check for active prebuild
+  // Check for prebuild metadata
   const metadata = readMetadata(prebuildDir);
   if (!metadata) {
     const msg = "No active prebuild.";
@@ -34,12 +44,27 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
     return { exitCode: 0, message: msg };
   }
 
+  // Determine if Dockerfile currently has the lace.local reference
+  let dockerfileHasLace = false;
+  try {
+    const config = readDevcontainerConfig(configPath);
+    const dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
+    dockerfileHasLace = dockerfileContent.includes("lace.local/");
+  } catch {
+    // Can't read Dockerfile — will report as inactive
+  }
+
+  const header = dockerfileHasLace ? "Prebuild active:" : "Prebuild cached:";
   const lines: string[] = [
-    `Prebuild active:`,
+    header,
     `  Original FROM: ${metadata.originalFrom}`,
     `  Prebuild tag:  ${metadata.prebuildTag}`,
     `  Built at:      ${metadata.timestamp}`,
   ];
+
+  if (!dockerfileHasLace) {
+    lines.push(`  Dockerfile:    restored (run \`lace prebuild\` to reactivate)`);
+  }
 
   // Check staleness
   try {
@@ -48,9 +73,20 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
 
     if (prebuildResult.kind === "features") {
       let dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
-      // Restore original FROM before parsing (use AST-based restoreFrom, not regex)
+      // Restore original FROM before parsing for context comparison
       if (dockerfileContent.includes("lace.local/")) {
-        dockerfileContent = restoreFrom(dockerfileContent, metadata.originalFrom);
+        // Use parseTag (bidirectional) with metadata fallback
+        let originalFrom: string | null = null;
+        try {
+          const parsed = parseDockerfile(dockerfileContent);
+          originalFrom = parseTag(parsed.image);
+        } catch {
+          // fall through
+        }
+        if (!originalFrom) {
+          originalFrom = metadata.originalFrom;
+        }
+        dockerfileContent = restoreFrom(dockerfileContent, originalFrom);
       }
       const parsed = parseDockerfile(dockerfileContent);
       const tempDockerfile = generatePrebuildDockerfile(parsed);

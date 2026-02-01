@@ -1,5 +1,7 @@
 import { defineCommand } from "citty";
-import { runRestore } from "../lib/restore.js";
+import { join } from "node:path";
+import { runRestore } from "@/lib/restore";
+import { withFlockSync } from "@/lib/flock";
 
 export const restoreCommand = defineCommand({
   meta: {
@@ -8,7 +10,8 @@ export const restoreCommand = defineCommand({
       "Undo the prebuild FROM rewrite, restoring the original Dockerfile",
   },
   run() {
-    const result = runRestore();
+    const lockPath = join(process.cwd(), ".lace", "prebuild.lock");
+    const result = withFlockSync(lockPath, () => runRestore());
     process.exitCode = result.exitCode;
   },
 });

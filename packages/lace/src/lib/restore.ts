@@ -1,12 +1,9 @@
 // IMPLEMENTATION_VALIDATION
-import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { readMetadata } from "./metadata.js";
-import { restoreFrom } from "./dockerfile.js";
-import {
-  readDevcontainerConfig,
-  extractPrebuildFeatures,
-} from "./devcontainer.js";
+import { readMetadata } from "@/lib/metadata";
+import { parseDockerfile, parseTag, restoreFrom } from "@/lib/dockerfile";
+import { readDevcontainerConfig } from "@/lib/devcontainer";
 
 export interface RestoreOptions {
   workspaceRoot?: string;
@@ -20,7 +17,12 @@ export interface RestoreResult {
 
 /**
  * Restore the Dockerfile's FROM line to the original base image.
- * Reads the original reference from .lace/prebuild/metadata.json.
+ *
+ * Primary path: derive the original FROM from the lace.local/ tag (bidirectional).
+ * Fallback: read from .lace/prebuild/metadata.json if tag parsing fails.
+ *
+ * Does NOT delete .lace/prebuild/ — the cached context is preserved for
+ * re-prebuild (cache reactivation) and debugging.
  */
 export function runRestore(options: RestoreOptions = {}): RestoreResult {
   const workspaceRoot = resolve(options.workspaceRoot ?? process.cwd());
@@ -28,14 +30,6 @@ export function runRestore(options: RestoreOptions = {}): RestoreResult {
     options.configPath ??
     join(workspaceRoot, ".devcontainer", "devcontainer.json");
   const prebuildDir = join(workspaceRoot, ".lace", "prebuild");
-
-  // Check for active prebuild
-  const metadata = readMetadata(prebuildDir);
-  if (!metadata) {
-    const msg = "No active prebuild. Nothing to restore.";
-    console.log(msg);
-    return { exitCode: 0, message: msg };
-  }
 
   // Read devcontainer config to find the Dockerfile path
   let dockerfilePath: string;
@@ -65,16 +59,32 @@ export function runRestore(options: RestoreOptions = {}): RestoreResult {
     return { exitCode: 0, message: msg };
   }
 
-  // Restore the original FROM
-  const restored = restoreFrom(content, metadata.originalFrom);
-  writeFileSync(dockerfilePath, restored, "utf-8");
-
-  // Clean up prebuild directory
-  if (existsSync(prebuildDir)) {
-    rmSync(prebuildDir, { recursive: true, force: true });
+  // Primary path: derive original FROM from the lace.local tag
+  let originalFrom: string | null = null;
+  try {
+    const parsed = parseDockerfile(content);
+    originalFrom = parseTag(parsed.image);
+  } catch {
+    // parseDockerfile failed — fall through to metadata fallback
   }
 
-  const msg = `Restored Dockerfile FROM to: ${metadata.originalFrom}`;
+  // Fallback: use metadata if tag parsing didn't produce a result
+  if (!originalFrom) {
+    const metadata = readMetadata(prebuildDir);
+    if (!metadata) {
+      const msg =
+        "Cannot determine original FROM reference: tag parsing failed and no metadata available.";
+      console.error(`Error: ${msg}`);
+      return { exitCode: 1, message: msg };
+    }
+    originalFrom = metadata.originalFrom;
+  }
+
+  // Restore the original FROM
+  const restored = restoreFrom(content, originalFrom);
+  writeFileSync(dockerfilePath, restored, "utf-8");
+
+  const msg = `Restored Dockerfile FROM to: ${originalFrom}`;
   console.log(msg);
   return { exitCode: 0, message: msg };
 }

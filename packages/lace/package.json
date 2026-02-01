@@ -14,7 +14,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "arktype": "^2.1.0",
     "citty": "^0.1.6",
     "dockerfile-ast": "^0.7.1",
     "jsonc-parser": "^3.3.1"

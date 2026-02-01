@@ -8,7 +8,7 @@ import {
   resolveDockerfilePath,
   generateTempDevcontainerJson,
   DevcontainerConfigError,
-} from "../devcontainer.js";
+} from "@/lib/devcontainer";
 
 const FIXTURES = join(import.meta.dirname, "../../__fixtures__/devcontainers");
 
@@ -117,11 +117,32 @@ describe("resolveDockerfilePath", () => {
     );
   });
 
+  it("resolves legacy dockerfile field from fixture", () => {
+    const raw = readFixture("legacy-dockerfile-field.jsonc");
+    expect(resolveDockerfilePath(raw, configDir)).toBe(
+      "/workspace/.devcontainer/Dockerfile",
+    );
+  });
+
+  it("resolves nested build path from fixture", () => {
+    const raw = readFixture("nested-build-path.jsonc");
+    expect(resolveDockerfilePath(raw, configDir)).toBe(
+      "/workspace/Dockerfile",
+    );
+  });
+
   it("errors on image-based config", () => {
     const raw = { image: "node:24" };
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
       DevcontainerConfigError,
     );
+    expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
+      /Prebuild requires a Dockerfile-based devcontainer configuration/,
+    );
+  });
+
+  it("errors on image-based config from fixture", () => {
+    const raw = readFixture("image-based.jsonc");
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
       /Prebuild requires a Dockerfile-based devcontainer configuration/,
     );
@@ -139,6 +160,24 @@ describe("resolveDockerfilePath", () => {
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
       /Cannot determine Dockerfile path/,
     );
+  });
+});
+
+// --- Overlap fixture ---
+
+describe("extractPrebuildFeatures: overlap fixture", () => {
+  it("extracts prebuild features even when they overlap with regular features", () => {
+    const raw = readFixture("overlap.jsonc");
+    const result = extractPrebuildFeatures(raw);
+    expect(result.kind).toBe("features");
+    if (result.kind === "features") {
+      expect(result.features).toHaveProperty(
+        "ghcr.io/devcontainers/features/git:1",
+      );
+      expect(result.features).toHaveProperty(
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1",
+      );
+    }
   });
 });
 

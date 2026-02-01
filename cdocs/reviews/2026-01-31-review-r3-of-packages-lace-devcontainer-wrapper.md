@@ -5,7 +5,7 @@ first_authored:
   at: 2026-01-31T12:30:00-08:00
 task_list: lace/packages-lace-cli
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, architecture, cli, prebuild, dockerfile_ast, cache_strategy, lock_namespacing]
 ---

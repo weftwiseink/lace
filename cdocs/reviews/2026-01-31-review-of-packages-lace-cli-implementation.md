@@ -5,7 +5,7 @@ first_authored:
   at: 2026-01-31T18:00:00-08:00
 task_list: lace/packages-lace-cli
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, implementation, code_quality, test_coverage, proposal_conformance, architecture]
 ---

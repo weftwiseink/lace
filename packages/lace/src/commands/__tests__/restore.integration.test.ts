@@ -5,12 +5,13 @@ import {
   rmSync,
   writeFileSync,
   readFileSync,
+  existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runPrebuild } from "../../lib/prebuild.js";
-import { runRestore } from "../../lib/restore.js";
-import type { RunSubprocess } from "../../lib/subprocess.js";
+import { runPrebuild } from "@/lib/prebuild";
+import { runRestore } from "@/lib/restore";
+import type { RunSubprocess } from "@/lib/subprocess";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -79,6 +80,60 @@ describe("restore: after prebuild", () => {
     dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toBe(STANDARD_DOCKERFILE);
   });
+
+  it("preserves .lace/prebuild/ directory after restore", () => {
+    setupWorkspace();
+
+    // Prebuild
+    runPrebuild({ workspaceRoot, subprocess: createMock() });
+    const prebuildDir = join(workspaceRoot, ".lace", "prebuild");
+    expect(existsSync(prebuildDir)).toBe(true);
+
+    // Restore — .lace/prebuild/ should survive
+    runRestore({ workspaceRoot });
+    expect(existsSync(prebuildDir)).toBe(true);
+    expect(existsSync(join(prebuildDir, "metadata.json"))).toBe(true);
+    expect(existsSync(join(prebuildDir, "Dockerfile"))).toBe(true);
+  });
+});
+
+describe("restore: metadata-free (bidirectional tag)", () => {
+  it("restores FROM using parseTag even without metadata", () => {
+    setupWorkspace();
+
+    // Manually write a rewritten Dockerfile (simulating prebuild without metadata)
+    writeFileSync(
+      join(devcontainerDir, "Dockerfile"),
+      "FROM lace.local/node:24-bookworm\nRUN apt-get update\n",
+      "utf-8",
+    );
+    // No .lace/prebuild/metadata.json exists
+
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Restored");
+    expect(result.message).toContain("node:24-bookworm");
+
+    const dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
+    expect(dockerfile).toBe(STANDARD_DOCKERFILE);
+  });
+
+  it("restores digest-based FROM without metadata", () => {
+    setupWorkspace();
+
+    writeFileSync(
+      join(devcontainerDir, "Dockerfile"),
+      "FROM lace.local/node:from_sha256__abc123\nRUN apt-get update\n",
+      "utf-8",
+    );
+
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("node@sha256:abc123");
+
+    const dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
+    expect(dockerfile).toContain("FROM node@sha256:abc123");
+  });
 });
 
 describe("restore: no active prebuild", () => {
@@ -87,7 +142,7 @@ describe("restore: no active prebuild", () => {
 
     const result = runRestore({ workspaceRoot });
     expect(result.exitCode).toBe(0);
-    expect(result.message).toContain("No active prebuild");
+    expect(result.message).toContain("Nothing to restore");
 
     // Dockerfile unchanged
     const dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");

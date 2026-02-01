@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { describe, it, expect } from "vitest";
-import { validateNoOverlap, featureIdentifier } from "../validation.js";
+import { validateNoOverlap, featureIdentifier } from "@/lib/validation";
 
 describe("featureIdentifier", () => {
   it("strips version tag", () => {

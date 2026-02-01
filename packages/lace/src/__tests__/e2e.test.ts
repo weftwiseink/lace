@@ -5,13 +5,14 @@ import {
   rmSync,
   writeFileSync,
   readFileSync,
+  existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runPrebuild } from "../lib/prebuild.js";
-import { runRestore } from "../lib/restore.js";
-import { runStatus } from "../lib/status.js";
-import type { RunSubprocess } from "../lib/subprocess.js";
+import { runPrebuild } from "@/lib/prebuild";
+import { runRestore } from "@/lib/restore";
+import { runStatus } from "@/lib/status";
+import type { RunSubprocess } from "@/lib/subprocess";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -74,7 +75,7 @@ afterEach(() => {
 });
 
 describe("e2e: full lifecycle", () => {
-  it("prebuild → status (active) → restore → status (inactive)", () => {
+  it("prebuild → status (active) → restore → status (cached)", () => {
     setupWorkspace();
     const mock = createMock();
 
@@ -97,9 +98,14 @@ describe("e2e: full lifecycle", () => {
     const dockerfile2 = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile2).toBe(STANDARD_DOCKERFILE);
 
-    // Status shows inactive
+    // .lace/prebuild/ preserved after restore
+    const prebuildDir = join(workspaceRoot, ".lace", "prebuild");
+    expect(existsSync(prebuildDir)).toBe(true);
+
+    // Status shows cached (not deleted)
     const status2 = runStatus({ workspaceRoot });
-    expect(status2.message).toContain("No active prebuild");
+    expect(status2.message).toContain("Prebuild cached");
+    expect(status2.message).toContain("restored");
   });
 });
 
@@ -146,24 +152,32 @@ describe("e2e: prebuild → modify config → prebuild → restore", () => {
   });
 });
 
-describe("e2e: prebuild → restore → prebuild", () => {
-  it("re-prebuild after restore works cleanly", () => {
+describe("e2e: prebuild → restore → prebuild (cache reactivation)", () => {
+  it("re-prebuild after restore reactivates from cache without rebuild", () => {
     setupWorkspace();
     const mock = createMock();
+    let mockCallCount = 0;
+    const countingMock: RunSubprocess = (command, args, opts) => {
+      mockCallCount++;
+      return mock(command, args, opts);
+    };
 
-    // First prebuild
-    runPrebuild({ workspaceRoot, subprocess: mock });
+    // First prebuild — triggers Docker build
+    runPrebuild({ workspaceRoot, subprocess: countingMock });
+    expect(mockCallCount).toBe(1);
     let dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toContain("FROM lace.local/node:24-bookworm");
 
-    // Restore
+    // Restore — Dockerfile restored, cache preserved
     runRestore({ workspaceRoot });
     dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toBe(STANDARD_DOCKERFILE);
 
-    // Re-prebuild
-    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    // Re-prebuild — should reactivate from cache, NOT call Docker build
+    const result = runPrebuild({ workspaceRoot, subprocess: countingMock });
     expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("reactivated from cache");
+    expect(mockCallCount).toBe(1); // Still only 1 — no second Docker build
     dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toContain("FROM lace.local/node:24-bookworm");
   });

@@ -1,5 +1,5 @@
 // IMPLEMENTATION_VALIDATION
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdirSync,
   rmSync,
@@ -9,8 +9,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runPrebuild } from "../../lib/prebuild.js";
-import type { RunSubprocess } from "../../lib/subprocess.js";
+import { runPrebuild } from "@/lib/prebuild";
+import type { RunSubprocess } from "@/lib/subprocess";
 
 let workspaceRoot: string;
 let devcontainerDir: string;

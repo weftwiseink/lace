@@ -7,7 +7,7 @@ import {
   writeMetadata,
   readMetadata,
   contextsChanged,
-} from "../metadata.js";
+} from "@/lib/metadata";
 
 let tempDir: string;
 

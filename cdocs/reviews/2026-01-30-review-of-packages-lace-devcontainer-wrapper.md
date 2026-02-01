@@ -5,7 +5,7 @@ first_authored:
   at: 2026-01-30T18:45:00-08:00
 task_list: lace/packages-lace-cli
 type: review
-state: live
+state: archived
 status: done
 tags: [self, architecture, cli, prebuild, design_decisions, edge_cases]
 ---

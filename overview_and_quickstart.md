@@ -30,7 +30,7 @@ brew install devcontainer
 brew install neovim
 
 # 1. Generate dedicated SSH key for container access
-ssh-keygen -t ed25519 -f ~/.ssh/weft_devcontainer -N "" -C "weft-devcontainer-access"
+ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N "" -C "lace-devcontainer-access"
 
 # 2. Point wezterm at the lace config (symlink or env var)
 ln -s /path/to/weft/main/lace/config/wezterm/wezterm.lua ~/.config/wezterm/wezterm.lua
@@ -51,7 +51,7 @@ devcontainer up --workspace-folder ~/code/apps/weft/main
 # Leader+S  → Fuzzy workspace switcher (switch between open workspaces)
 ```
 
-The SSH domain uses a dedicated key pair (`~/.ssh/weft_devcontainer`) that only grants access to the local container.
+The SSH domain uses a dedicated key pair (`~/.ssh/lace_devcontainer`) that only grants access to the local container.
 No GitHub/production keys enter the container, preserving sandbox isolation.
 
 See [WezTerm Devcontainer Multiplexing](../proposals/wezterm_devcontainer_multiplexing.md) for architecture details.
@@ -219,7 +219,7 @@ For full session save/restore (including pane layouts), enable the resurrect.wez
 ```
 Host WezTerm
 │
-├── [SSH Domain: "weft"] ─── Devcontainer (/workspace/)
+├── [SSH Domain: "lace"] ─── Devcontainer (/workspace/)
 │   │
 │   ├── Workspace: "loro_migration"  (cwd: /workspace/loro_migration)
 │   │   ├── Tab 1: neovim (editing)
@@ -235,7 +235,7 @@ Host WezTerm
     └── Workspace: "scratch"
 ```
 
-- `Leader+D`: Connect to container (opens "weft" workspace)
+- `Leader+D`: Connect to container (opens "lace" workspace)
 - `Leader+W`: Pick a worktree to open as a workspace
 - `Leader+S`: Fuzzy-switch between all open workspaces
 

@@ -5,7 +5,7 @@ first_authored:
   at: 2026-01-31T18:00:00-08:00
 task_list: lace/devcontainer-features
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, cross_platform, install_script, test_plan, blocking_resolution]
 ---

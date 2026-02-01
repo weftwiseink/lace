@@ -63,13 +63,13 @@ config.unix_domains = {
 
 config.ssh_domains = {
   {
-    name = "weft",
+    name = "lace",
     remote_address = "localhost:2222",
     username = "node",
     remote_wezterm_path = "/usr/local/bin/wezterm",
     multiplexing = "WezTerm",
     ssh_option = {
-      identityfile = wezterm.home_dir .. "/.ssh/weft_devcontainer",
+      identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
     },
   },
 }
@@ -133,7 +133,7 @@ config.keys = {
 
 -- =============================================================================
 -- Devcontainer: Connect + Worktree Picker
--- Leader+D: connect to weft devcontainer (SSH domain)
+-- Leader+D: connect to lace devcontainer (SSH domain)
 -- Leader+W: pick a worktree from /workspace/ inside container
 -- =============================================================================
 
@@ -142,9 +142,9 @@ table.insert(config.keys, {
   key = "d",
   mods = "LEADER",
   action = act.SwitchToWorkspace({
-    name = "weft",
+    name = "lace",
     spawn = {
-      domain = { DomainName = "weft" },
+      domain = { DomainName = "lace" },
       cwd = "/workspace/main",
     },
   }),
@@ -155,7 +155,7 @@ local function spawn_worktree_workspace(name)
   return act.SwitchToWorkspace({
     name = name,
     spawn = {
-      domain = { DomainName = "weft" },
+      domain = { DomainName = "lace" },
       cwd = "/workspace/" .. name,
     },
   })
@@ -163,7 +163,7 @@ end
 
 -- Worktree picker: queries /workspace/ in the container, shows fuzzy selector
 wezterm.on("trigger-worktree-picker", function(window, pane)
-  local ssh_key = wezterm.home_dir .. "/.ssh/weft_devcontainer"
+  local ssh_key = wezterm.home_dir .. "/.ssh/lace_devcontainer"
   local success, stdout = wezterm.run_child_process({
     "ssh", "-p", "2222",
     "-i", ssh_key,
@@ -175,7 +175,7 @@ wezterm.on("trigger-worktree-picker", function(window, pane)
   })
 
   if not success then
-    window:toast_notification("weft", "Container not running or SSH failed", nil, 3000)
+    window:toast_notification("lace", "Container not running or SSH failed", nil, 3000)
     return
   end
 

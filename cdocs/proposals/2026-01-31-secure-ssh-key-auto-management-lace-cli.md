@@ -17,7 +17,7 @@ tags: [ssh, security, lace-cli, devcontainer, automation, key-management]
 
 ## Objective
 
-The current wezterm SSH domain setup requires users to manually generate an ed25519 key pair (`ssh-keygen -t ed25519 -f ~/.ssh/weft_devcontainer -N ""`), mount the public key into the container as `authorized_keys`, and configure their host wezterm to use the private key.
+The current wezterm SSH domain setup requires users to manually generate an ed25519 key pair (`ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""`), mount the public key into the container as `authorized_keys`, and configure their host wezterm to use the private key.
 This is error-prone (wrong permissions, forgotten key generation, stale keys) and has no rotation or scope-limiting mechanism.
 
 The lace CLI should provide a `lace ssh` (or similar) subcommand that automates key lifecycle management for devcontainer SSH domain connections.
@@ -47,4 +47,4 @@ The full proposal should explore:
 
 - The devcontainer `sshd` feature (`ghcr.io/devcontainers/features/sshd:1`) handles sshd daemon setup but not client-side key management.
 - VS Code Remote-SSH manages its own SSH connections but uses a different transport than wezterm SSH domains.
-- The current manual setup is documented in the `devcontainer.json` mount comments: `ssh-keygen -t ed25519 -f ~/.ssh/weft_devcontainer -N ""`.
+- The current manual setup is documented in the `devcontainer.json` mount comments: `ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""`.

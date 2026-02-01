@@ -1,5 +1,5 @@
 {
-  "name": "Weft Development (Worktrees)",
+  "name": "Lace Development (Worktrees)",
   // NOTE: This devcontainer is designed to be opened from the main/ worktree.
   // It mounts the parent directory (bare repo root) at /workspace, giving access
   // to all worktrees. The workspaceFolder opens in /workspace/main by default.
@@ -67,8 +67,8 @@
     "source=${localEnv:HOME}/code/dev_records/weft/bash/history,target=/commandhistory,type=bind",
     "source=${localEnv:HOME}/code/dev_records/weft/claude,target=/home/node/.claude,type=bind",
     // SSH public key for WezTerm SSH domain access (host → container)
-    // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/weft_devcontainer -N ""
-    "source=${localEnv:HOME}/.ssh/weft_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
+    // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""
+    "source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",

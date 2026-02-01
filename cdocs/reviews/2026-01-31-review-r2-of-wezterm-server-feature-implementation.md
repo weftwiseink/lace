@@ -5,7 +5,7 @@ first_authored:
   at: 2026-01-31T23:55:00-08:00
 task_list: lace/devcontainer-features
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, implementation_review, install_script, test_coverage, ci_cd, devcontainer_features]
 ---

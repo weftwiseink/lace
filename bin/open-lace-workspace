@@ -308,6 +308,11 @@ if [[ -n "$EXISTING_PANE" ]]; then
   fi
 fi
 
+# Ensure WezTerm uses the lace config (which defines the lace SSH domain).
+# Without this, wezterm connect won't find the domain unless the user has
+# symlinked config/wezterm/wezterm.lua to ~/.config/wezterm/wezterm.lua.
+export WEZTERM_CONFIG_FILE="${WEZTERM_CONFIG_FILE:-$REPO_ROOT/config/wezterm/wezterm.lua}"
+
 info "connecting WezTerm to lace domain..."
 wezterm connect lace &
 WEZ_PID=$!

@@ -141,7 +141,7 @@ else
       echo "" >&2
 
       case "$CHOICE" in
-        r|R)
+        r|R|"")
           info "reconnecting to existing container..."
           SKIP_DC_UP=true
           ;;
@@ -317,8 +317,8 @@ sleep 2
 
 if ! kill -0 "$WEZ_PID" 2>/dev/null; then
   # Process already exited -- retrieve its exit code
-  wait "$WEZ_PID" 2>/dev/null
-  WEZ_EXIT=$?
+  WEZ_EXIT=0
+  wait "$WEZ_PID" 2>/dev/null || WEZ_EXIT=$?
   err "wezterm connect lace failed (exit code: $WEZ_EXIT)"
   err "troubleshooting:"
   err "  - verify mux server: devcontainer exec --workspace-folder $REPO_ROOT -- pgrep -a wezterm"

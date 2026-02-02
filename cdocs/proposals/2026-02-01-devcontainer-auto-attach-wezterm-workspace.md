@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-workflow
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_accepted
 tags: [devcontainer, wezterm, developer-experience, workflow-automation, automation]
 last_reviewed:
   status: accepted

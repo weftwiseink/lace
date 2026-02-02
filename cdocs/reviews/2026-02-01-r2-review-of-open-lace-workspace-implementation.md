@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-01T22:00:00-08:00
 task_list: lace/devcontainer-workflow
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, r1_resolution, disown_wait_interaction, readme_verification]
 ---

@@ -117,17 +117,38 @@ else
 fi
 
 if [[ "$OUTCOME" != "success" ]]; then
-  err "devcontainer up reported outcome: $OUTCOME"
+  # Check if a containerId is present -- the container may be running despite
+  # a lifecycle hook failure (e.g., postStartCommand fails but container is up).
   if command -v jq &>/dev/null; then
-    MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+    CONTAINER_ID="$(echo "$JSON_LINE" | jq -r '.containerId // empty')"
   else
-    MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    CONTAINER_ID="$(echo "$JSON_LINE" | grep -o '"containerId"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   fi
-  [[ -n "${MSG:-}" ]] && err "message: $MSG"
-  exit 2
-fi
 
-info "devcontainer up succeeded"
+  if [[ -n "${CONTAINER_ID:-}" ]]; then
+    # Container is running but a hook failed -- warn and proceed
+    info "warning: devcontainer up reported outcome '$OUTCOME' but container is running"
+    if command -v jq &>/dev/null; then
+      MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+    else
+      MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    fi
+    [[ -n "${MSG:-}" ]] && info "warning: $MSG"
+    info "proceeding with SSH readiness check..."
+  else
+    # No containerId -- genuine failure, container did not start
+    err "devcontainer up reported outcome: $OUTCOME"
+    if command -v jq &>/dev/null; then
+      MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+    else
+      MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    fi
+    [[ -n "${MSG:-}" ]] && err "message: $MSG"
+    exit 2
+  fi
+else
+  info "devcontainer up succeeded"
+fi
 
 # --- Phase D: SSH readiness polling ---
 

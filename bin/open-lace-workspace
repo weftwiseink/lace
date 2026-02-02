@@ -4,12 +4,16 @@
 # Usage:
 #   devcontainer up --workspace-folder . | ./bin/open-lace-workspace   (piped mode)
 #   ./bin/open-lace-workspace                                          (standalone mode)
+#   ./bin/open-lace-workspace --rebuild                                (rebuild container)
 #
 # Piped mode: reads devcontainer up JSON from stdin, validates success,
 # waits for SSH readiness, and opens a WezTerm window connected to the
 # lace SSH domain.
 #
 # Standalone mode: runs devcontainer up internally, then proceeds as above.
+#
+# Options:
+#   --rebuild, --no-cache   Force container image rebuild (standalone mode only)
 #
 # Prerequisites:
 #   - wezterm installed on the host
@@ -43,6 +47,26 @@ SSH_HOST="localhost"
 MAX_SSH_ATTEMPTS=15
 SSH_RETRY_INTERVAL=1
 
+# --- Argument parsing ---
+DC_EXTRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rebuild|--no-cache)
+      DC_EXTRA_ARGS+=("--rebuild")
+      shift
+      ;;
+    -h|--help)
+      head -28 "${BASH_SOURCE[0]}" | tail -n +2 | sed 's/^# \?//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Usage: $0 [--rebuild] [--help]" >&2
+      exit 1
+      ;;
+  esac
+done
+
 # --- Helper: print error messages prefixed with script name ---
 err() {
   echo "${SCRIPT_NAME}: error: $*" >&2
@@ -70,6 +94,9 @@ fi
 
 if [ ! -t 0 ]; then
   # --- Piped mode ---
+  if [[ ${#DC_EXTRA_ARGS[@]} -gt 0 ]]; then
+    info "warning: --rebuild ignored in piped mode (caller controls devcontainer up flags)"
+  fi
   info "reading devcontainer up output from stdin..."
   RAW_INPUT="$(cat)"
 
@@ -92,9 +119,9 @@ else
     exit 1
   fi
 
-  info "running devcontainer up --workspace-folder $REPO_ROOT ..."
+  info "running devcontainer up --workspace-folder $REPO_ROOT ${DC_EXTRA_ARGS[*]+"${DC_EXTRA_ARGS[*]}"} ..."
   DC_EXIT=0
-  RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" 2>&1)" || DC_EXIT=$?
+  RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" ${DC_EXTRA_ARGS[@]+"${DC_EXTRA_ARGS[@]}"} 2>&1)" || DC_EXIT=$?
 
   # Extract JSON line from mixed output
   JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1 || true)"

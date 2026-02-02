@@ -264,6 +264,50 @@ done
 # We background it and briefly check that the process is still alive,
 # which catches immediate connection failures (bad domain, SSH error).
 
+# Check for existing WezTerm connection to the lace domain.
+# wezterm cli list requires a running host mux (unix_domains config).
+# Panes connected to the container have cwd under file:///workspace/.
+EXISTING_PANE=""
+if PANE_LIST="$(timeout 2 wezterm cli list --format json 2>/dev/null)"; then
+  if command -v jq &>/dev/null; then
+    EXISTING_PANE="$(echo "$PANE_LIST" | jq -r '[.[] | select(.cwd | startswith("file:///workspace/"))][0] // empty | .pane_id // empty')"
+  else
+    # Fallback: grep for workspace cwd pattern
+    if echo "$PANE_LIST" | grep -q '"cwd"\s*:\s*"file:///workspace/' 2>/dev/null; then
+      EXISTING_PANE="found"
+    fi
+  fi
+fi
+
+if [[ -n "$EXISTING_PANE" ]]; then
+  info "existing WezTerm connection to lace domain detected"
+  if [ -t 1 ]; then
+    echo "" >&2
+    echo "  [o] Open new window anyway" >&2
+    echo "  [q] Quit (use existing window)" >&2
+    echo "" >&2
+    read -r -n 1 -p "Choose [o/q]: " CHOICE </dev/tty >&2
+    echo "" >&2
+
+    case "$CHOICE" in
+      o|O)
+        info "opening additional WezTerm window..."
+        ;;
+      q|Q|"")
+        info "using existing connection"
+        exit 0
+        ;;
+      *)
+        err "invalid choice: $CHOICE"
+        exit 1
+        ;;
+    esac
+  else
+    info "existing connection found; skipping new window in non-interactive mode"
+    exit 0
+  fi
+fi
+
 info "connecting WezTerm to lace domain..."
 wezterm connect lace &
 WEZ_PID=$!

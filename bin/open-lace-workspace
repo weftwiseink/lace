@@ -119,62 +119,113 @@ else
     exit 1
   fi
 
-  info "running devcontainer up --workspace-folder $REPO_ROOT ${DC_EXTRA_ARGS[*]+"${DC_EXTRA_ARGS[*]}"} ..."
-  DC_EXIT=0
-  RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" ${DC_EXTRA_ARGS[@]+"${DC_EXTRA_ARGS[@]}"} 2>&1)" || DC_EXIT=$?
+  # Check if the container is already running before invoking devcontainer up
+  CONTAINER_RUNNING=""
+  if command -v docker &>/dev/null; then
+    CONTAINER_RUNNING="$(docker ps -q --filter "label=devcontainer.local_folder=$REPO_ROOT" 2>/dev/null || true)"
+  fi
 
-  # Extract JSON line from mixed output
-  JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1 || true)"
+  SKIP_DC_UP=false
+  if [[ -n "$CONTAINER_RUNNING" ]] && [[ ${#DC_EXTRA_ARGS[@]} -eq 0 ]]; then
+    # Container is running and no explicit --rebuild requested
+    info "container is already running ($(echo "$CONTAINER_RUNNING" | head -1 | cut -c1-12))"
 
-  if [[ -z "$JSON_LINE" ]]; then
-    err "devcontainer up did not produce JSON output (exit code: $DC_EXIT)"
-    err "raw output (last 10 lines):"
-    echo "$RAW_OUTPUT" | tail -10 >&2
-    exit 2
+    if [ -t 1 ]; then
+      # Interactive TTY -- prompt the user
+      echo "" >&2
+      echo "  [r] Reconnect (open WezTerm window)" >&2
+      echo "  [b] Rebuild (stop, rebuild, reconnect)" >&2
+      echo "  [q] Quit" >&2
+      echo "" >&2
+      read -r -n 1 -p "Choose [r/b/q]: " CHOICE </dev/tty >&2
+      echo "" >&2
+
+      case "$CHOICE" in
+        r|R)
+          info "reconnecting to existing container..."
+          SKIP_DC_UP=true
+          ;;
+        b|B)
+          info "rebuilding container..."
+          DC_EXTRA_ARGS+=("--rebuild")
+          ;;
+        q|Q)
+          info "quitting"
+          exit 0
+          ;;
+        *)
+          err "invalid choice: $CHOICE"
+          exit 1
+          ;;
+      esac
+    else
+      # Non-interactive -- default to reconnect
+      info "non-interactive mode: reconnecting to existing container"
+      SKIP_DC_UP=true
+    fi
+  fi
+
+  if [[ "$SKIP_DC_UP" == "false" ]]; then
+    info "running devcontainer up --workspace-folder $REPO_ROOT ${DC_EXTRA_ARGS[*]+"${DC_EXTRA_ARGS[*]}"} ..."
+    DC_EXIT=0
+    RAW_OUTPUT="$(devcontainer up --workspace-folder "$REPO_ROOT" ${DC_EXTRA_ARGS[@]+"${DC_EXTRA_ARGS[@]}"} 2>&1)" || DC_EXIT=$?
+
+    # Extract JSON line from mixed output
+    JSON_LINE="$(echo "$RAW_OUTPUT" | grep '"outcome"' | head -1 || true)"
+
+    if [[ -z "$JSON_LINE" ]]; then
+      err "devcontainer up did not produce JSON output (exit code: $DC_EXIT)"
+      err "raw output (last 10 lines):"
+      echo "$RAW_OUTPUT" | tail -10 >&2
+      exit 2
+    fi
   fi
 fi
 
 # --- Phase C: Parse JSON and validate outcome ---
+# Skipped when reconnecting to an already-running container (no devcontainer up output)
 
-if command -v jq &>/dev/null; then
-  OUTCOME="$(echo "$JSON_LINE" | jq -r '.outcome')"
-else
-  # Fallback: extract outcome value using grep + sed
-  OUTCOME="$(echo "$JSON_LINE" | grep -o '"outcome"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
-fi
-
-if [[ "$OUTCOME" != "success" ]]; then
-  # Check if a containerId is present -- the container may be running despite
-  # a lifecycle hook failure (e.g., postStartCommand fails but container is up).
+if [[ -n "${JSON_LINE:-}" ]]; then
   if command -v jq &>/dev/null; then
-    CONTAINER_ID="$(echo "$JSON_LINE" | jq -r '.containerId // empty')"
+    OUTCOME="$(echo "$JSON_LINE" | jq -r '.outcome')"
   else
-    CONTAINER_ID="$(echo "$JSON_LINE" | grep -o '"containerId"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    # Fallback: extract outcome value using grep + sed
+    OUTCOME="$(echo "$JSON_LINE" | grep -o '"outcome"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
   fi
 
-  if [[ -n "${CONTAINER_ID:-}" ]]; then
-    # Container is running but a hook failed -- warn and proceed
-    info "warning: devcontainer up reported outcome '$OUTCOME' but container is running"
+  if [[ "$OUTCOME" != "success" ]]; then
+    # Check if a containerId is present -- the container may be running despite
+    # a lifecycle hook failure (e.g., postStartCommand fails but container is up).
     if command -v jq &>/dev/null; then
-      MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+      CONTAINER_ID="$(echo "$JSON_LINE" | jq -r '.containerId // empty')"
     else
-      MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+      CONTAINER_ID="$(echo "$JSON_LINE" | grep -o '"containerId"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
     fi
-    [[ -n "${MSG:-}" ]] && info "warning: $MSG"
-    info "proceeding with SSH readiness check..."
+
+    if [[ -n "${CONTAINER_ID:-}" ]]; then
+      # Container is running but a hook failed -- warn and proceed
+      info "warning: devcontainer up reported outcome '$OUTCOME' but container is running"
+      if command -v jq &>/dev/null; then
+        MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+      else
+        MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+      fi
+      [[ -n "${MSG:-}" ]] && info "warning: $MSG"
+      info "proceeding with SSH readiness check..."
+    else
+      # No containerId -- genuine failure, container did not start
+      err "devcontainer up reported outcome: $OUTCOME"
+      if command -v jq &>/dev/null; then
+        MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
+      else
+        MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+      fi
+      [[ -n "${MSG:-}" ]] && err "message: $MSG"
+      exit 2
+    fi
   else
-    # No containerId -- genuine failure, container did not start
-    err "devcontainer up reported outcome: $OUTCOME"
-    if command -v jq &>/dev/null; then
-      MSG="$(echo "$JSON_LINE" | jq -r '.message // .description // empty')"
-    else
-      MSG="$(echo "$JSON_LINE" | grep -o '"message"\s*:\s*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' || true)"
-    fi
-    [[ -n "${MSG:-}" ]] && err "message: $MSG"
-    exit 2
+    info "devcontainer up succeeded"
   fi
-else
-  info "devcontainer up succeeded"
 fi
 
 # --- Phase D: SSH readiness polling ---

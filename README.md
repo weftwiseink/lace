@@ -43,12 +43,14 @@ Open a WezTerm window connected to the lace devcontainer with a single command:
 # Standalone: starts container (if needed) and opens WezTerm
 ./bin/open-lace-workspace
 
+# Rebuild container image
+./bin/open-lace-workspace --rebuild
+
 # Piped: control devcontainer up flags directly
 devcontainer up --workspace-folder . | ./bin/open-lace-workspace
-
-# With rebuild
-devcontainer up --workspace-folder . --build-no-cache | ./bin/open-lace-workspace
 ```
+
+If a container is already running, the script prompts to reconnect, rebuild, or quit. It also detects existing WezTerm connections to avoid duplicate windows.
 
 **Prerequisites:**
 
@@ -56,7 +58,7 @@ devcontainer up --workspace-folder . --build-no-cache | ./bin/open-lace-workspac
 - SSH key pair at `~/.ssh/lace_devcontainer` (`ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""`)
 - [devcontainer CLI](https://github.com/devcontainers/cli) (standalone mode only: `npm install -g @devcontainers/cli`)
 
-The script validates prerequisites, waits for SSH readiness, and opens a new WezTerm window at `/workspace/main` inside the container. See `bin/open-lace-workspace` header comments for exit codes and troubleshooting.
+The script validates prerequisites, waits for SSH readiness, and opens a new WezTerm window at `/workspace/main` inside the container. See `bin/open-lace-workspace --help` for full usage, exit codes, and troubleshooting.
 
 ## Development
 

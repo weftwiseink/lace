@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-workflow
 type: devlog
 state: live
-status: handoff
+status: implementation_wip
 tags: [devcontainer, wezterm, developer-experience, workflow-automation]
 ---
 

@@ -326,13 +326,18 @@ fi
 # symlinked config/wezterm/wezterm.lua to ~/.config/wezterm/wezterm.lua.
 export WEZTERM_CONFIG_FILE="${WEZTERM_CONFIG_FILE:-$REPO_ROOT/config/wezterm/wezterm.lua}"
 
-# Connect to the lace domain and start a shell in /workspace/lace.
-# wezterm connect doesn't support --cwd, so we pass a command that cd's first.
+# Connect to the lace domain.
+# The container-side wezterm config sets default_cwd = "/workspace/lace".
+# Redirect wezterm output to a log file to avoid cluttering the terminal with
+# xkbcommon/wayland warnings, while still capturing errors for debugging.
+WEZTERM_LOG_FILE="/tmp/open-lace-workspace-wezterm.log"
 info "connecting WezTerm to lace domain..."
-wezterm connect lace -- bash -c 'cd /workspace/lace && exec bash -l' &
+info "wezterm output logged to: $WEZTERM_LOG_FILE"
+wezterm connect lace >"$WEZTERM_LOG_FILE" 2>&1 &
 WEZ_PID=$!
 
 # Give wezterm a moment to fail on immediate errors (bad config, SSH rejection)
+# Show any errors that appear in the log during startup
 sleep 2
 
 if ! kill -0 "$WEZ_PID" 2>/dev/null; then
@@ -340,6 +345,11 @@ if ! kill -0 "$WEZ_PID" 2>/dev/null; then
   WEZ_EXIT=0
   wait "$WEZ_PID" 2>/dev/null || WEZ_EXIT=$?
   err "wezterm connect lace failed (exit code: $WEZ_EXIT)"
+  # Show log contents to help diagnose the failure
+  if [[ -s "$WEZTERM_LOG_FILE" ]]; then
+    err "wezterm log output:"
+    cat "$WEZTERM_LOG_FILE" >&2
+  fi
   err "troubleshooting:"
   err "  - verify mux server: devcontainer exec --workspace-folder $REPO_ROOT -- pgrep -a wezterm"
   err "  - restart mux server: devcontainer exec --workspace-folder $REPO_ROOT -- wezterm-mux-server --daemonize"

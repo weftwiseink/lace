@@ -97,6 +97,13 @@ RUN mkdir -p /home/${USERNAME}/.ssh && \
     chmod 700 /home/${USERNAME}/.ssh && \
     chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
 
+
+# Set up wezterm config directory for mux server
+# This sets the default working directory when connecting via SSH domain
+RUN mkdir -p /home/${USERNAME}/.config/wezterm && \
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.config
+COPY --chown=${USERNAME}:${USERNAME} .devcontainer/wezterm.lua /home/${USERNAME}/.config/wezterm/wezterm.lua
+
 # Enable passwordless sudo for container user.
 # Required by devcontainer features (e.g. sshd) whose init scripts use `sudo` at runtime.
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \

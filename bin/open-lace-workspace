@@ -326,6 +326,15 @@ fi
 # symlinked config/wezterm/wezterm.lua to ~/.config/wezterm/wezterm.lua.
 export WEZTERM_CONFIG_FILE="${WEZTERM_CONFIG_FILE:-$REPO_ROOT/config/wezterm/wezterm.lua}"
 
+# Remove stale host key entry for localhost:2222 from known_hosts.
+# WezTerm's libssh backend doesn't honor OpenSSH's StrictHostKeyChecking option;
+# it manages its own known_hosts and prompts for new/changed host keys.
+# The container's host key changes on every rebuild, so we pre-emptively remove
+# the old entry to avoid the interactive trust prompt.
+if [[ -f "$HOME/.ssh/known_hosts" ]]; then
+  ssh-keygen -R "[localhost]:$SSH_PORT" 2>/dev/null || true
+fi
+
 # Connect to the lace domain.
 # The container-side wezterm config sets default_cwd = "/workspace/lace".
 # Redirect wezterm output to a log file to avoid cluttering the terminal with

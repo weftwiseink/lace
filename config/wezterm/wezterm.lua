@@ -76,8 +76,10 @@ config.ssh_domains = {
     -- config at ~/.config/wezterm/wezterm.lua (default_cwd = "/workspace/lace").
     ssh_option = {
       identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
-      stricthostkeychecking = "no",
-      userknownhostsfile = "/dev/null",
+      -- Host key verification is handled by pre-populating ~/.ssh/known_hosts
+      -- in bin/open-lace-workspace before connecting.
+      -- Do NOT use userknownhostsfile = "/dev/null" - that makes every
+      -- connection prompt for trust since the host can never be "known".
     },
   },
 }

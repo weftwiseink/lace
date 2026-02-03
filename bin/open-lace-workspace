@@ -13,7 +13,7 @@
 # Standalone mode: runs devcontainer up internally, then proceeds as above.
 #
 # Options:
-#   --rebuild, --no-cache   Force container image rebuild (standalone mode only)
+#   --rebuild, --no-cache   Remove existing container and rebuild image (standalone mode only)
 #
 # Prerequisites:
 #   - wezterm installed on the host
@@ -52,7 +52,7 @@ DC_EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rebuild|--no-cache)
-      DC_EXTRA_ARGS+=("--rebuild")
+      DC_EXTRA_ARGS+=("--remove-existing-container" "--build-no-cache")
       shift
       ;;
     -h|--help)

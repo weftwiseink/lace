@@ -41,6 +41,10 @@ config.scrollback_lines = 99999
 config.enable_scroll_bar = false
 config.check_for_updates = false
 
+-- Disable CSI u key encoding for compatibility with apps that expect traditional sequences.
+-- Without this, shift+space sends [27;2;32~ which some tools (Claude Code) don't handle well.
+config.enable_csi_u_key_encoding = false
+
 -- Note: escape key delay is handled at the terminal/shell/neovim level, not wezterm
 -- For neovim: set timeoutlen=300 and ttimeoutlen=10 in init.lua
 
@@ -68,6 +72,8 @@ config.ssh_domains = {
     username = "node",
     remote_wezterm_path = "/usr/local/bin/wezterm",
     multiplexing = "WezTerm",
+    -- Default working directory when connecting to this domain
+    default_cwd = "/workspace/lace",
     ssh_option = {
       identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
       stricthostkeychecking = "no",

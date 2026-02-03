@@ -264,6 +264,19 @@ done
 # We background it and briefly check that the process is still alive,
 # which catches immediate connection failures (bad domain, SSH error).
 
+# Verify container-side mux server is running (catches silent postStartCommand failures)
+if command -v docker &>/dev/null; then
+  if ! docker exec "$(docker ps -q --filter "label=devcontainer.local_folder=$REPO_ROOT" | head -1)" pgrep -f wezterm-mux-server >/dev/null 2>&1; then
+    info "wezterm-mux-server not detected in container; starting..."
+    if ! docker exec "$(docker ps -q --filter "label=devcontainer.local_folder=$REPO_ROOT" | head -1)" wezterm-mux-server --daemonize 2>/dev/null; then
+      err "failed to start wezterm-mux-server in container"
+      err "try manually: docker exec <container> wezterm-mux-server --daemonize"
+      exit 4
+    fi
+    sleep 1
+  fi
+fi
+
 # Check for existing WezTerm connection to the lace domain.
 # wezterm cli list requires a running host mux (unix_domains config).
 # Panes connected to the container have cwd under file:///workspace/.

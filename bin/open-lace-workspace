@@ -326,8 +326,10 @@ fi
 # symlinked config/wezterm/wezterm.lua to ~/.config/wezterm/wezterm.lua.
 export WEZTERM_CONFIG_FILE="${WEZTERM_CONFIG_FILE:-$REPO_ROOT/config/wezterm/wezterm.lua}"
 
+# Connect to the lace domain and start a shell in /workspace/lace.
+# wezterm connect doesn't support --cwd, so we pass a command that cd's first.
 info "connecting WezTerm to lace domain..."
-wezterm connect lace &
+wezterm connect lace -- bash -c 'cd /workspace/lace && exec bash -l' &
 WEZ_PID=$!
 
 # Give wezterm a moment to fail on immediate errors (bad config, SSH rejection)

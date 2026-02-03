@@ -72,8 +72,9 @@ config.ssh_domains = {
     username = "node",
     remote_wezterm_path = "/usr/local/bin/wezterm",
     multiplexing = "WezTerm",
-    -- Default working directory when connecting to this domain
-    default_cwd = "/workspace/lace",
+    -- Note: SshDomain does not support default_cwd. The working directory is
+    -- set via the spawn command when connecting. See Leader+D keybinding below
+    -- which specifies cwd = "/workspace/main" when spawning into this domain.
     ssh_option = {
       identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
       stricthostkeychecking = "no",

@@ -10,6 +10,11 @@ export type PrebuildFeaturesResult =
   | { kind: "null" }
   | { kind: "empty" };
 
+/** Build source for a devcontainer config - either Dockerfile-based or image-based. */
+export type ConfigBuildSource =
+  | { kind: "dockerfile"; path: string }
+  | { kind: "image"; image: string };
+
 /** Plugin options as declared in devcontainer.json */
 export interface PluginOptions {
   /**
@@ -42,12 +47,19 @@ export class DevcontainerConfigError extends Error {
 export interface DevcontainerConfig {
   /** The raw parsed JSONC object. */
   raw: Record<string, unknown>;
-  /** The resolved Dockerfile path relative to the config directory. */
+  /** The build source (Dockerfile or image). */
+  buildSource: ConfigBuildSource;
+  /**
+   * The resolved Dockerfile path.
+   * @deprecated Use buildSource instead. This will throw for image-based configs.
+   */
   dockerfilePath: string;
   /** Regular features from the `features` key. */
   features: Record<string, Record<string, unknown>>;
   /** The config file's directory (for resolving relative paths). */
   configDir: string;
+  /** The path to the devcontainer.json file. */
+  configPath: string;
 }
 
 /** Minimal parsed devcontainer.json for plugins/mounts (no Dockerfile required). */
@@ -60,21 +72,28 @@ export interface DevcontainerConfigMinimal {
 
 /**
  * Read and parse a devcontainer.json (JSONC) file.
- * This version requires a Dockerfile and is used by prebuild.
+ * This version resolves the build source and is used by prebuild.
  */
 export function readDevcontainerConfig(filePath: string): DevcontainerConfig {
   const minimal = readDevcontainerConfigMinimal(filePath);
-  const dockerfilePath = resolveDockerfilePath(minimal.raw, minimal.configDir);
+  const buildSource = resolveBuildSource(minimal.raw, minimal.configDir);
   const features = (minimal.raw.features ?? {}) as Record<
     string,
     Record<string, unknown>
   >;
 
+  // For backwards compatibility, compute dockerfilePath from buildSource
+  // This will be undefined for image-based configs
+  const dockerfilePath =
+    buildSource.kind === "dockerfile" ? buildSource.path : undefined;
+
   return {
     raw: minimal.raw,
-    dockerfilePath,
+    buildSource,
+    dockerfilePath: dockerfilePath as string, // Type assertion for backwards compat
     features,
     configDir: minimal.configDir,
+    configPath: filePath,
   };
 }
 
@@ -140,36 +159,59 @@ export function extractPrebuildFeatures(
 }
 
 /**
+ * Resolve the build source from a devcontainer config.
+ * Supports `build.dockerfile`, legacy `dockerfile` field, or `image`.
+ * Dockerfile takes precedence over image if both are present.
+ */
+export function resolveBuildSource(
+  raw: Record<string, unknown>,
+  configDir: string,
+): ConfigBuildSource {
+  // Check build.dockerfile first (modern format)
+  const build = raw.build as Record<string, unknown> | undefined;
+  if (build?.dockerfile) {
+    return {
+      kind: "dockerfile",
+      path: resolve(configDir, build.dockerfile as string),
+    };
+  }
+
+  // Check legacy dockerfile field
+  if (raw.dockerfile) {
+    return {
+      kind: "dockerfile",
+      path: resolve(configDir, raw.dockerfile as string),
+    };
+  }
+
+  // Check for image-based config
+  if (raw.image) {
+    return { kind: "image", image: raw.image as string };
+  }
+
+  throw new DevcontainerConfigError(
+    "Cannot determine build source from devcontainer.json. " +
+      "Expected `build.dockerfile`, `dockerfile`, or `image` field.",
+  );
+}
+
+/**
  * Resolve the Dockerfile path from a devcontainer config.
  * Supports `build.dockerfile`, legacy `dockerfile` field.
  * Errors on `image`-based configs without a Dockerfile.
+ * @deprecated Use resolveBuildSource() instead.
  */
 export function resolveDockerfilePath(
   raw: Record<string, unknown>,
   configDir: string,
 ): string {
-  // Check build.dockerfile first (modern format)
-  const build = raw.build as Record<string, unknown> | undefined;
-  if (build?.dockerfile) {
-    return resolve(configDir, build.dockerfile as string);
+  const source = resolveBuildSource(raw, configDir);
+  if (source.kind === "dockerfile") {
+    return source.path;
   }
-
-  // Check legacy dockerfile field
-  if (raw.dockerfile) {
-    return resolve(configDir, raw.dockerfile as string);
-  }
-
-  // Check for image-based config
-  if (raw.image) {
-    throw new DevcontainerConfigError(
-      "Prebuild requires a Dockerfile-based devcontainer configuration. " +
-        "`image`-based configs are not yet supported.",
-    );
-  }
-
   throw new DevcontainerConfigError(
-    "Cannot determine Dockerfile path from devcontainer.json. " +
-      "Expected `build.dockerfile` or `dockerfile` field.",
+    "Prebuild requires a Dockerfile-based devcontainer configuration. " +
+      "`image`-based configs are not yet supported.",
   );
 }
 
@@ -270,4 +312,30 @@ export function parseRepoId(repoId: string): {
     subParts.length > 0 ? subParts.join("/") : undefined;
 
   return { cloneUrl, subdirectory };
+}
+
+/**
+ * Rewrite the `image` field in a devcontainer.json file.
+ * Preserves all other content (comments, formatting where possible).
+ * Returns the modified JSON string.
+ */
+export function rewriteImageField(content: string, newImage: string): string {
+  const edits = jsonc.modify(content, ["image"], newImage, {});
+  return jsonc.applyEdits(content, edits);
+}
+
+/**
+ * Check if devcontainer.json has a lace.local image.
+ */
+export function hasLaceLocalImage(raw: Record<string, unknown>): boolean {
+  const image = raw.image;
+  return typeof image === "string" && image.startsWith("lace.local/");
+}
+
+/**
+ * Get the current image from a devcontainer.json.
+ */
+export function getCurrentImage(raw: Record<string, unknown>): string | null {
+  const image = raw.image;
+  return typeof image === "string" ? image : null;
 }

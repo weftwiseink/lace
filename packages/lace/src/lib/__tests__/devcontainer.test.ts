@@ -9,9 +9,13 @@ import {
   derivePluginName,
   getPluginNameOrAlias,
   parseRepoId,
+  resolveBuildSource,
   resolveDockerfilePath,
   generateTempDevcontainerJson,
   DevcontainerConfigError,
+  rewriteImageField,
+  hasLaceLocalImage,
+  getCurrentImage,
 } from "@/lib/devcontainer";
 
 const FIXTURES = join(import.meta.dirname, "../../__fixtures__/devcontainers");
@@ -162,7 +166,69 @@ describe("resolveDockerfilePath", () => {
   it("errors when neither image nor build specified", () => {
     const raw = {};
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
-      /Cannot determine Dockerfile path/,
+      /Cannot determine build source/,
+    );
+  });
+});
+
+// --- Build source resolution ---
+
+describe("resolveBuildSource", () => {
+  const configDir = "/workspace/.devcontainer";
+
+  it("returns dockerfile kind for build.dockerfile", () => {
+    const raw = { build: { dockerfile: "Dockerfile" } };
+    const result = resolveBuildSource(raw, configDir);
+    expect(result).toEqual({
+      kind: "dockerfile",
+      path: "/workspace/.devcontainer/Dockerfile",
+    });
+  });
+
+  it("returns dockerfile kind for legacy dockerfile field", () => {
+    const raw = { dockerfile: "Dockerfile" };
+    const result = resolveBuildSource(raw, configDir);
+    expect(result).toEqual({
+      kind: "dockerfile",
+      path: "/workspace/.devcontainer/Dockerfile",
+    });
+  });
+
+  it("returns image kind for image field", () => {
+    const raw = { image: "node:24" };
+    const result = resolveBuildSource(raw, configDir);
+    expect(result).toEqual({
+      kind: "image",
+      image: "node:24",
+    });
+  });
+
+  it("dockerfile takes precedence over image", () => {
+    const raw = { build: { dockerfile: "Dockerfile" }, image: "node:24" };
+    const result = resolveBuildSource(raw, configDir);
+    expect(result).toEqual({
+      kind: "dockerfile",
+      path: "/workspace/.devcontainer/Dockerfile",
+    });
+  });
+
+  it("throws DevcontainerConfigError for empty config", () => {
+    const raw = {};
+    expect(() => resolveBuildSource(raw, configDir)).toThrow(
+      DevcontainerConfigError,
+    );
+    expect(() => resolveBuildSource(raw, configDir)).toThrow(
+      /Cannot determine build source/,
+    );
+  });
+
+  it("throws DevcontainerConfigError for config with only features", () => {
+    const raw = { features: {} };
+    expect(() => resolveBuildSource(raw, configDir)).toThrow(
+      DevcontainerConfigError,
+    );
+    expect(() => resolveBuildSource(raw, configDir)).toThrow(
+      /Cannot determine build source/,
     );
   });
 });
@@ -359,5 +425,64 @@ describe("parseRepoId", () => {
 
   it("throws on single segment", () => {
     expect(() => parseRepoId("github.com")).toThrow(DevcontainerConfigError);
+  });
+});
+
+// --- Image field rewriting ---
+
+describe("rewriteImageField", () => {
+  it("rewrites image field in simple JSON", () => {
+    const input = '{"image": "node:24"}';
+    const result = rewriteImageField(input, "lace.local/node:24");
+    expect(JSON.parse(result).image).toBe("lace.local/node:24");
+  });
+
+  it("preserves comments in JSONC", () => {
+    const input = `{
+  // This is a comment
+  "image": "node:24",
+  "features": {}
+}`;
+    const result = rewriteImageField(input, "lace.local/node:24");
+    expect(result).toContain("// This is a comment");
+    expect(result).toContain('"lace.local/node:24"');
+  });
+
+  it("preserves other fields", () => {
+    const input = '{"image": "node:24", "features": {"foo": {}}}';
+    const result = rewriteImageField(input, "lace.local/node:24");
+    const parsed = JSON.parse(result);
+    expect(parsed.image).toBe("lace.local/node:24");
+    expect(parsed.features).toEqual({ foo: {} });
+  });
+});
+
+// --- Lace local image detection ---
+
+describe("hasLaceLocalImage", () => {
+  it("returns true for lace.local image", () => {
+    expect(hasLaceLocalImage({ image: "lace.local/node:24" })).toBe(true);
+  });
+
+  it("returns false for non-lace.local image", () => {
+    expect(hasLaceLocalImage({ image: "node:24" })).toBe(false);
+  });
+
+  it("returns false when image is not a string", () => {
+    expect(hasLaceLocalImage({ image: 123 })).toBe(false);
+    expect(hasLaceLocalImage({})).toBe(false);
+  });
+});
+
+// --- Get current image ---
+
+describe("getCurrentImage", () => {
+  it("returns image when present", () => {
+    expect(getCurrentImage({ image: "node:24" })).toBe("node:24");
+  });
+
+  it("returns null when image is not a string", () => {
+    expect(getCurrentImage({ image: 123 })).toBe(null);
+    expect(getCurrentImage({})).toBe(null);
   });
 });

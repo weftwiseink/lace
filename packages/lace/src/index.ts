@@ -2,6 +2,7 @@
 import { defineCommand, runMain } from "citty";
 import { prebuildCommand } from "@/commands/prebuild";
 import { restoreCommand } from "@/commands/restore";
+import { resolveMountsCommand } from "@/commands/resolve-mounts";
 import { statusCommand } from "@/commands/status";
 
 const main = defineCommand({
@@ -13,6 +14,7 @@ const main = defineCommand({
   subCommands: {
     prebuild: prebuildCommand,
     restore: restoreCommand,
+    "resolve-mounts": resolveMountsCommand,
     status: statusCommand,
   },
 });

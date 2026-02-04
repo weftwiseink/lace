@@ -10,6 +10,27 @@ export type PrebuildFeaturesResult =
   | { kind: "null" }
   | { kind: "empty" };
 
+/** Plugin options as declared in devcontainer.json */
+export interface PluginOptions {
+  /**
+   * Explicit name for this plugin, used in mount path.
+   * Use when multiple plugins would have the same derived name.
+   */
+  alias?: string;
+}
+
+/** Plugin configuration from devcontainer.json */
+export interface PluginsConfig {
+  [repoId: string]: PluginOptions;
+}
+
+/** Discriminated result for plugins extraction. */
+export type PluginsResult =
+  | { kind: "plugins"; plugins: PluginsConfig }
+  | { kind: "absent" }
+  | { kind: "null" }
+  | { kind: "empty" };
+
 export class DevcontainerConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -140,4 +161,88 @@ export function generateTempDevcontainerJson(
     features: prebuildFeatures,
   };
   return JSON.stringify(config, null, 2) + "\n";
+}
+
+/**
+ * Extract plugins configuration from a parsed devcontainer config.
+ */
+export function extractPlugins(raw: Record<string, unknown>): PluginsResult {
+  const customizations = raw.customizations as
+    | Record<string, unknown>
+    | undefined;
+  if (!customizations) return { kind: "absent" };
+
+  const lace = customizations.lace as Record<string, unknown> | undefined;
+  if (!lace) return { kind: "absent" };
+
+  if (!("plugins" in lace)) return { kind: "absent" };
+
+  const plugins = lace.plugins;
+  if (plugins === null) return { kind: "null" };
+  if (typeof plugins === "object" && Object.keys(plugins as object).length === 0) {
+    return { kind: "empty" };
+  }
+
+  return {
+    kind: "plugins",
+    plugins: plugins as PluginsConfig,
+  };
+}
+
+/**
+ * Derive the plugin name from a repo identifier.
+ * Returns the last path segment of the repoId.
+ *
+ * Examples:
+ * - "github.com/user/repo" -> "repo"
+ * - "github.com/user/repo/subdir" -> "subdir"
+ * - "github.com/user/repo/deep/path" -> "path"
+ */
+export function derivePluginName(repoId: string): string {
+  const segments = repoId.split("/").filter((s) => s.length > 0);
+  return segments[segments.length - 1] || repoId;
+}
+
+/**
+ * Get the name or alias for a plugin.
+ * Uses the alias if specified, otherwise derives from repoId.
+ */
+export function getPluginNameOrAlias(
+  repoId: string,
+  options: PluginOptions,
+): string {
+  return options.alias ?? derivePluginName(repoId);
+}
+
+/**
+ * Parse clone URL and subdirectory from a repo identifier.
+ * Format: github.com/user/repo[/subdir/path]
+ *
+ * Returns:
+ * - cloneUrl: https://github.com/user/repo.git
+ * - subdirectory: subdir/path (or undefined if no subdirectory)
+ */
+export function parseRepoId(repoId: string): {
+  cloneUrl: string;
+  subdirectory: string | undefined;
+} {
+  const segments = repoId.split("/");
+
+  // Minimum: host/user/repo (3 segments)
+  if (segments.length < 3) {
+    throw new DevcontainerConfigError(
+      `Invalid repo identifier: ${repoId}. Expected format: github.com/user/repo[/subdir]`,
+    );
+  }
+
+  const [host, user, repo, ...subParts] = segments;
+
+  // Construct clone URL
+  const cloneUrl = `https://${host}/${user}/${repo}.git`;
+
+  // Extract subdirectory if present
+  const subdirectory =
+    subParts.length > 0 ? subParts.join("/") : undefined;
+
+  return { cloneUrl, subdirectory };
 }

@@ -1,0 +1,11 @@
+{
+  "build": { "dockerfile": "Dockerfile" },
+  "customizations": {
+    "lace": {
+      "plugins": {
+        "github.com/user/dotfiles": {},
+        "github.com/user/claude-plugins/plugins/my-plugin": {}
+      }
+    }
+  }
+}

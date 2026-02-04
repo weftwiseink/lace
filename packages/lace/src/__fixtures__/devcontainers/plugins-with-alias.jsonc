@@ -1,0 +1,11 @@
+{
+  "build": { "dockerfile": "Dockerfile" },
+  "customizations": {
+    "lace": {
+      "plugins": {
+        "github.com/alice/utils": { "alias": "alice-utils" },
+        "github.com/bob/utils": { "alias": "bob-utils" }
+      }
+    }
+  }
+}

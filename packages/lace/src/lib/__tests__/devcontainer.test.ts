@@ -5,6 +5,10 @@ import { join } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   extractPrebuildFeatures,
+  extractPlugins,
+  derivePluginName,
+  getPluginNameOrAlias,
+  parseRepoId,
   resolveDockerfilePath,
   generateTempDevcontainerJson,
   DevcontainerConfigError,
@@ -222,5 +226,138 @@ describe("generateTempDevcontainerJson", () => {
       option1: "value1",
       option2: true,
     });
+  });
+});
+
+// --- Plugins extraction ---
+
+describe("extractPlugins", () => {
+  it("returns plugins from standard config", () => {
+    const raw = readFixture("plugins-standard.jsonc");
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("plugins");
+    if (result.kind === "plugins") {
+      expect(Object.keys(result.plugins)).toHaveLength(2);
+      expect(result.plugins).toHaveProperty("github.com/user/dotfiles");
+      expect(result.plugins).toHaveProperty(
+        "github.com/user/claude-plugins/plugins/my-plugin",
+      );
+    }
+  });
+
+  it("returns plugins with aliases", () => {
+    const raw = readFixture("plugins-with-alias.jsonc");
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("plugins");
+    if (result.kind === "plugins") {
+      expect(result.plugins["github.com/alice/utils"].alias).toBe("alice-utils");
+      expect(result.plugins["github.com/bob/utils"].alias).toBe("bob-utils");
+    }
+  });
+
+  it("returns absent when plugins is missing", () => {
+    const raw = readFixture("absent-prebuild.jsonc");
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("absent");
+  });
+
+  it("returns null sentinel when plugins is null", () => {
+    const raw = readFixture("plugins-null.jsonc");
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("null");
+  });
+
+  it("returns empty when plugins is {}", () => {
+    const raw = readFixture("plugins-empty.jsonc");
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("empty");
+  });
+
+  it("returns absent when customizations key is missing", () => {
+    const raw = { build: { dockerfile: "Dockerfile" } };
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("absent");
+  });
+
+  it("returns absent when customizations.lace is missing", () => {
+    const raw = { customizations: { vscode: {} } };
+    const result = extractPlugins(raw);
+    expect(result.kind).toBe("absent");
+  });
+});
+
+// --- Name derivation ---
+
+describe("derivePluginName", () => {
+  it("derives name from simple repo", () => {
+    expect(derivePluginName("github.com/user/repo")).toBe("repo");
+  });
+
+  it("derives name from repo with subdirectory", () => {
+    expect(derivePluginName("github.com/user/repo/subdir")).toBe("subdir");
+  });
+
+  it("derives name from repo with deep path", () => {
+    expect(derivePluginName("github.com/user/repo/deep/path")).toBe("path");
+  });
+
+  it("handles trailing slash", () => {
+    // The filter removes empty segments
+    expect(derivePluginName("github.com/user/repo/")).toBe("repo");
+  });
+});
+
+describe("getPluginNameOrAlias", () => {
+  it("uses alias when provided", () => {
+    expect(
+      getPluginNameOrAlias("github.com/user/utils", { alias: "user-utils" }),
+    ).toBe("user-utils");
+  });
+
+  it("derives name when no alias", () => {
+    expect(getPluginNameOrAlias("github.com/user/repo", {})).toBe("repo");
+  });
+
+  it("derives name from subdirectory when no alias", () => {
+    expect(
+      getPluginNameOrAlias("github.com/user/repo/plugins/foo", {}),
+    ).toBe("foo");
+  });
+});
+
+// --- Repo ID parsing ---
+
+describe("parseRepoId", () => {
+  it("parses simple github repo", () => {
+    const result = parseRepoId("github.com/user/repo");
+    expect(result.cloneUrl).toBe("https://github.com/user/repo.git");
+    expect(result.subdirectory).toBeUndefined();
+  });
+
+  it("parses repo with subdirectory", () => {
+    const result = parseRepoId("github.com/user/repo/subdir");
+    expect(result.cloneUrl).toBe("https://github.com/user/repo.git");
+    expect(result.subdirectory).toBe("subdir");
+  });
+
+  it("parses repo with deep subdirectory path", () => {
+    const result = parseRepoId("github.com/user/repo/plugins/my-plugin");
+    expect(result.cloneUrl).toBe("https://github.com/user/repo.git");
+    expect(result.subdirectory).toBe("plugins/my-plugin");
+  });
+
+  it("parses gitlab repo", () => {
+    const result = parseRepoId("gitlab.com/org/project");
+    expect(result.cloneUrl).toBe("https://gitlab.com/org/project.git");
+    expect(result.subdirectory).toBeUndefined();
+  });
+
+  it("throws on invalid repo id (too few segments)", () => {
+    expect(() => parseRepoId("github.com/user")).toThrow(DevcontainerConfigError);
+    expect(() => parseRepoId("github.com/user")).toThrow(/Invalid repo identifier/);
+  });
+
+  it("throws on single segment", () => {
+    expect(() => parseRepoId("github.com")).toThrow(DevcontainerConfigError);
   });
 });

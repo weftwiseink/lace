@@ -307,6 +307,21 @@ describe("resolve-mounts: --dry-run", () => {
     expect(existsSync(join(laceDir, "resolved-mounts.json"))).toBe(false);
     expect(mockCalls).toHaveLength(0);
   });
+
+  it("detects name conflicts even in dry-run mode", () => {
+    setupWorkspace(CONFLICT_PLUGINS_JSON);
+    setupSettings({});
+
+    const result = runResolveMounts({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      dryRun: true,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("Plugin name conflict");
+    expect(result.message).toContain("alias");
+  });
 });
 
 describe("resolve-mounts: symlink generation", () => {

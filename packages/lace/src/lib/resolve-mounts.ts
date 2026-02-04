@@ -9,6 +9,7 @@ import {
 import { loadSettings, SettingsConfigError } from "./settings";
 import {
   resolvePluginMounts,
+  validateNoConflicts,
   generateMountSpecs,
   generateSymlinkCommands,
   MountsError,
@@ -117,6 +118,19 @@ export function runResolveMounts(
 
   // 4. Derive project ID
   const projectId = deriveProjectId(workspaceFolder);
+
+  // 5. Validate no name conflicts (even in dry-run)
+  try {
+    validateNoConflicts(plugins);
+  } catch (err) {
+    if (err instanceof MountsError) {
+      return {
+        exitCode: 1,
+        message: err.message,
+      };
+    }
+    throw err;
+  }
 
   // Dry run mode
   if (dryRun) {

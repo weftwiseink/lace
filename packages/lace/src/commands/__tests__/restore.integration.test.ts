@@ -53,6 +53,12 @@ function setupWorkspace(
   writeFileSync(join(devcontainerDir, "Dockerfile"), dockerfile, "utf-8");
 }
 
+/** Setup workspace for image-based config (no Dockerfile). */
+function setupImageWorkspace(devcontainerJson: string) {
+  mkdirSync(devcontainerDir, { recursive: true });
+  writeFileSync(join(devcontainerDir, "devcontainer.json"), devcontainerJson, "utf-8");
+}
+
 beforeEach(() => {
   workspaceRoot = join(tmpdir(), `lace-test-restore-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   devcontainerDir = join(workspaceRoot, ".devcontainer");
@@ -166,5 +172,149 @@ describe("restore: preserves non-prebuild edits", () => {
     runRestore({ workspaceRoot });
     dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toBe(modifiedDockerfile);
+  });
+});
+
+// ============================================================================
+// Image-based config restore tests
+// ============================================================================
+
+const IMAGE_JSON = JSON.stringify({
+  image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+  customizations: {
+    lace: {
+      prebuildFeatures: {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+      },
+    },
+  },
+  features: {},
+}, null, 2);
+
+describe("restore: image-based config after prebuild", () => {
+  it("restores devcontainer.json image to original", () => {
+    setupImageWorkspace(IMAGE_JSON);
+
+    // Prebuild
+    runPrebuild({ workspaceRoot, subprocess: createMock() });
+    let config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+
+    // Restore
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Restored");
+    expect(result.message).toContain("devcontainer.json image");
+
+    config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    const parsed = JSON.parse(config);
+    expect(parsed.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+
+  it("preserves .lace/prebuild/ directory after restore", () => {
+    setupImageWorkspace(IMAGE_JSON);
+
+    // Prebuild
+    runPrebuild({ workspaceRoot, subprocess: createMock() });
+    const prebuildDir = join(workspaceRoot, ".lace", "prebuild");
+    expect(existsSync(prebuildDir)).toBe(true);
+
+    // Restore — .lace/prebuild/ should survive
+    runRestore({ workspaceRoot });
+    expect(existsSync(prebuildDir)).toBe(true);
+    expect(existsSync(join(prebuildDir, "metadata.json"))).toBe(true);
+  });
+});
+
+describe("restore: image-based metadata-free (bidirectional tag)", () => {
+  it("restores image using parseTag even without metadata", () => {
+    // Manually write a rewritten devcontainer.json (simulating prebuild without metadata)
+    const rewrittenJson = JSON.stringify({
+      image: "lace.local/mcr.microsoft.com/devcontainers/base:ubuntu",
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+      },
+      features: {},
+    }, null, 2);
+    setupImageWorkspace(rewrittenJson);
+    // No .lace/prebuild/metadata.json exists
+
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Restored");
+    expect(result.message).toContain("mcr.microsoft.com/devcontainers/base:ubuntu");
+
+    const config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+
+  it("restores digest-based image without metadata", () => {
+    const rewrittenJson = JSON.stringify({
+      image: "lace.local/node:from_sha256__abc123",
+      features: {},
+    }, null, 2);
+    setupImageWorkspace(rewrittenJson);
+
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("node@sha256:abc123");
+
+    const config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toBe("node@sha256:abc123");
+  });
+});
+
+describe("restore: image-based no active prebuild", () => {
+  it("exits 0 with informational message", () => {
+    setupImageWorkspace(IMAGE_JSON);
+
+    const result = runRestore({ workspaceRoot });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Nothing to restore");
+
+    // devcontainer.json unchanged
+    const config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+});
+
+describe("restore: image-based preserves other config fields", () => {
+  it("only undoes image rewrite, not other config changes", () => {
+    const configWithExtras = JSON.stringify({
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+        vscode: {
+          extensions: ["ms-python.python"],
+        },
+      },
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      postCreateCommand: "echo hello",
+    }, null, 2);
+    setupImageWorkspace(configWithExtras);
+
+    // Prebuild
+    runPrebuild({ workspaceRoot, subprocess: createMock() });
+    let config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toContain("lace.local/");
+    expect(config.customizations.vscode.extensions).toContain("ms-python.python");
+    expect(config.postCreateCommand).toBe("echo hello");
+
+    // Restore
+    runRestore({ workspaceRoot });
+    config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+    expect(config.customizations.vscode.extensions).toContain("ms-python.python");
+    expect(config.postCreateCommand).toBe("echo hello");
   });
 });

@@ -9,6 +9,8 @@ import {
   rewriteFrom,
   restoreFrom,
   generatePrebuildDockerfile,
+  parseImageRef,
+  generateImageDockerfile,
   DockerfileParseError,
 } from "@/lib/dockerfile";
 
@@ -422,4 +424,100 @@ describe("generatePrebuildDockerfile", () => {
     expect(result).not.toContain("RUN");
     expect(result).toBe("FROM node:24-bookworm\n");
   });
+});
+
+// --- parseImageRef ---
+
+describe("parseImageRef", () => {
+  it("parses image with tag", () => {
+    expect(parseImageRef("node:24-bookworm")).toEqual({
+      imageName: "node",
+      tag: "24-bookworm",
+      digest: null,
+    });
+  });
+
+  it("parses image without tag or digest", () => {
+    expect(parseImageRef("node")).toEqual({
+      imageName: "node",
+      tag: null,
+      digest: null,
+    });
+  });
+
+  it("parses image with digest", () => {
+    expect(parseImageRef("node@sha256:abc123")).toEqual({
+      imageName: "node",
+      tag: null,
+      digest: "sha256:abc123",
+    });
+  });
+
+  it("parses registry image with tag", () => {
+    expect(parseImageRef("ghcr.io/owner/image:v2")).toEqual({
+      imageName: "ghcr.io/owner/image",
+      tag: "v2",
+      digest: null,
+    });
+  });
+
+  it("parses registry:port image with tag", () => {
+    expect(parseImageRef("registry:5000/image:tag")).toEqual({
+      imageName: "registry:5000/image",
+      tag: "tag",
+      digest: null,
+    });
+  });
+
+  it("parses Microsoft devcontainer image with tag", () => {
+    expect(
+      parseImageRef("mcr.microsoft.com/devcontainers/base:ubuntu"),
+    ).toEqual({
+      imageName: "mcr.microsoft.com/devcontainers/base",
+      tag: "ubuntu",
+      digest: null,
+    });
+  });
+});
+
+// --- generateImageDockerfile ---
+
+describe("generateImageDockerfile", () => {
+  it("generates Dockerfile for simple tagged image", () => {
+    expect(generateImageDockerfile("node:24-bookworm")).toBe(
+      "FROM node:24-bookworm\n",
+    );
+  });
+
+  it("generates Dockerfile for Microsoft devcontainer image", () => {
+    expect(
+      generateImageDockerfile("mcr.microsoft.com/devcontainers/base:ubuntu"),
+    ).toBe("FROM mcr.microsoft.com/devcontainers/base:ubuntu\n");
+  });
+});
+
+// --- parseImageRef round-trip with generateTag/parseTag ---
+
+describe("parseImageRef round-trip with generateTag/parseTag", () => {
+  const images = [
+    "node:24-bookworm",
+    "ghcr.io/owner/image:v2",
+    "registry:5000/image:tag",
+    "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "node@sha256:abc123",
+  ];
+
+  for (const image of images) {
+    it(`round-trips: ${image}`, () => {
+      const { imageName, tag, digest } = parseImageRef(image);
+      const laceTag = generateTag(imageName, tag, digest);
+      const restored = parseTag(laceTag);
+      // For untagged images, parseTag returns with :latest
+      if (tag === null && digest === null) {
+        expect(restored).toBe(`${image}:latest`);
+      } else {
+        expect(restored).toBe(image);
+      }
+    });
+  }
 });

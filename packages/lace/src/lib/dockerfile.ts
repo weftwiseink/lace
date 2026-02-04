@@ -221,6 +221,50 @@ export function generatePrebuildDockerfile(parsed: ParsedDockerfile): string {
   return lines.join("\n") + "\n";
 }
 
+/**
+ * Parse an image reference string into its components.
+ * Works for: "node:24", "node@sha256:abc", "ghcr.io/owner/image:v2"
+ */
+export function parseImageRef(image: string): {
+  imageName: string;
+  tag: string | null;
+  digest: string | null;
+} {
+  // Check for digest (@sha256:...)
+  const digestIndex = image.indexOf("@");
+  if (digestIndex >= 0) {
+    return {
+      imageName: image.slice(0, digestIndex),
+      tag: null,
+      digest: image.slice(digestIndex + 1),
+    };
+  }
+
+  // Find tag separator: first colon after the last slash (to handle registry:port)
+  const lastSlash = image.lastIndexOf("/");
+  const searchFrom = lastSlash >= 0 ? lastSlash + 1 : 0;
+  const tagColon = image.indexOf(":", searchFrom);
+
+  if (tagColon >= 0) {
+    return {
+      imageName: image.slice(0, tagColon),
+      tag: image.slice(tagColon + 1),
+      digest: null,
+    };
+  }
+
+  // No tag or digest
+  return { imageName: image, tag: null, digest: null };
+}
+
+/**
+ * Generate a minimal Dockerfile for an image-based config.
+ * Used for the temp prebuild context.
+ */
+export function generateImageDockerfile(image: string): string {
+  return `FROM ${image}\n`;
+}
+
 /** Extract the original text of an instruction from the Dockerfile source. */
 function getInstructionText(content: string, inst: Instruction): string {
   const range = inst.getRange();

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   readDevcontainerConfig,
+  readDevcontainerConfigMinimal,
   extractPlugins,
   extractPrebuildFeatures,
   DevcontainerConfigError,
@@ -63,9 +64,10 @@ export function runUp(options: UpOptions = {}): UpResult {
   );
 
   // Read the devcontainer.json to determine what phases are needed
-  let config;
+  // First try minimal read (no Dockerfile required)
+  let configMinimal;
   try {
-    config = readDevcontainerConfig(devcontainerPath);
+    configMinimal = readDevcontainerConfigMinimal(devcontainerPath);
   } catch (err) {
     if (err instanceof DevcontainerConfigError) {
       return {
@@ -77,9 +79,26 @@ export function runUp(options: UpOptions = {}): UpResult {
     throw err;
   }
 
-  const hasPrebuildFeatures = extractPrebuildFeatures(config.raw).kind === "features";
-  const pluginsResult = extractPlugins(config.raw);
+  const hasPrebuildFeatures = extractPrebuildFeatures(configMinimal.raw).kind === "features";
+  const pluginsResult = extractPlugins(configMinimal.raw);
   const hasPlugins = pluginsResult.kind === "plugins";
+
+  // Only read full config (with Dockerfile) if we need prebuild
+  let config;
+  if (hasPrebuildFeatures) {
+    try {
+      config = readDevcontainerConfig(devcontainerPath);
+    } catch (err) {
+      if (err instanceof DevcontainerConfigError) {
+        return {
+          exitCode: 1,
+          message: err.message,
+          phases: {},
+        };
+      }
+      throw err;
+    }
+  }
 
   // Phase 1: Prebuild (if configured)
   if (hasPrebuildFeatures) {

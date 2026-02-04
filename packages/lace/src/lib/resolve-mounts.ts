@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  readDevcontainerConfig,
+  readDevcontainerConfigMinimal,
   extractPlugins,
   DevcontainerConfigError,
 } from "./devcontainer";
@@ -61,10 +61,10 @@ export function runResolveMounts(
     "devcontainer.json",
   );
 
-  // 1. Read and parse devcontainer.json
+  // 1. Read and parse devcontainer.json (minimal - no Dockerfile required)
   let config;
   try {
-    config = readDevcontainerConfig(devcontainerPath);
+    config = readDevcontainerConfigMinimal(devcontainerPath);
   } catch (err) {
     if (err instanceof DevcontainerConfigError) {
       return {

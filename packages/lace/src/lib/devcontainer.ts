@@ -50,10 +50,41 @@ export interface DevcontainerConfig {
   configDir: string;
 }
 
+/** Minimal parsed devcontainer.json for plugins/mounts (no Dockerfile required). */
+export interface DevcontainerConfigMinimal {
+  /** The raw parsed JSONC object. */
+  raw: Record<string, unknown>;
+  /** The config file's directory (for resolving relative paths). */
+  configDir: string;
+}
+
 /**
  * Read and parse a devcontainer.json (JSONC) file.
+ * This version requires a Dockerfile and is used by prebuild.
  */
 export function readDevcontainerConfig(filePath: string): DevcontainerConfig {
+  const minimal = readDevcontainerConfigMinimal(filePath);
+  const dockerfilePath = resolveDockerfilePath(minimal.raw, minimal.configDir);
+  const features = (minimal.raw.features ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+
+  return {
+    raw: minimal.raw,
+    dockerfilePath,
+    features,
+    configDir: minimal.configDir,
+  };
+}
+
+/**
+ * Read and parse a devcontainer.json (JSONC) file without requiring a Dockerfile.
+ * Used by resolve-mounts and other commands that don't need Dockerfile access.
+ */
+export function readDevcontainerConfigMinimal(
+  filePath: string,
+): DevcontainerConfigMinimal {
   let content: string;
   try {
     content = readFileSync(filePath, "utf-8");
@@ -74,13 +105,7 @@ export function readDevcontainerConfig(filePath: string): DevcontainerConfig {
   }
 
   const configDir = resolve(filePath, "..");
-  const dockerfilePath = resolveDockerfilePath(raw, configDir);
-  const features = (raw.features ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
-
-  return { raw, dockerfilePath, features, configDir };
+  return { raw, configDir };
 }
 
 /**

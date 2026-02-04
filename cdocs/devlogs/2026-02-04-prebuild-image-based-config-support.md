@@ -2,10 +2,15 @@
 first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-04T15:00:00-08:00
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-5-20251101"
+  at: 2026-02-04T16:30:00-08:00
+  round: 1
 task_list: lace/packages-lace-cli
 type: devlog
 state: live
-status: wip
+status: done
 tags: [devcontainer, prebuild, image, lace, implementation]
 ---
 
@@ -87,32 +92,81 @@ Changes:
 
 ### Phase 5: Prebuild Pipeline Integration
 
-_Pending..._
+**Completed** via commit `bd13fca`.
+
+Changes:
+- Updated `runPrebuild()` to branch on `config.buildSource.kind`
+- For image configs: use `parseImageRef()` and `generateImageDockerfile()`
+- For image configs: rewrite devcontainer.json image field (not Dockerfile)
+- Write `configType` to metadata for restore awareness
+- Update dry-run and completion messages to reflect config type
+- Added 8 integration tests for image-based prebuild
 
 ### Phase 6: Restore Pipeline Integration
 
-_Pending..._
+**Completed** via commit `3abc864`.
+
+Changes:
+- Updated `runRestore()` to branch on config type
+- Extracted `restoreDockerfile()` and `restoreImage()` helper functions
+- For image configs: rewrite devcontainer.json image field to original
+- Use bidirectional tag parsing (`parseTag`) as primary restore method
+- Added 6 integration tests for image-based restore
 
 ### Phase 7: Documentation and Polish
 
-_Pending..._
+**Completed** via commit `f82aeac`.
+
+Changes:
+- Added "Supported configuration types" section to prebuild.md
+- Updated pipeline steps to describe branching behavior
+- Added "Image field rewriting" section with examples
+- Noted `lace.local/` prefix reservation
+- Updated cache internals to mention configType in metadata
 
 ## Changes Made
 
 | File | Change |
 |------|--------|
-| _TBD_ | _TBD_ |
+| `packages/lace/src/lib/devcontainer.ts` | Added `ConfigBuildSource` type, `resolveBuildSource()`, `rewriteImageField()`, `hasLaceLocalImage()`, `getCurrentImage()` |
+| `packages/lace/src/lib/dockerfile.ts` | Added `parseImageRef()`, `generateImageDockerfile()` |
+| `packages/lace/src/lib/metadata.ts` | Added optional `configType` field to `PrebuildMetadata` |
+| `packages/lace/src/lib/prebuild.ts` | Updated to handle both Dockerfile and image configs |
+| `packages/lace/src/lib/restore.ts` | Updated to handle both Dockerfile and image configs |
+| `packages/lace/src/lib/__tests__/devcontainer.test.ts` | Added tests for new functions |
+| `packages/lace/src/lib/__tests__/dockerfile.test.ts` | Added tests for `parseImageRef`, `generateImageDockerfile`, round-trips |
+| `packages/lace/src/lib/__tests__/metadata.test.ts` | Added backwards compatibility tests |
+| `packages/lace/src/commands/__tests__/prebuild.integration.test.ts` | Added 8 image-based prebuild tests |
+| `packages/lace/src/commands/__tests__/restore.integration.test.ts` | Added 6 image-based restore tests |
+| `packages/lace/docs/prebuild.md` | Documented image-based config support |
 
 ## Verification
 
-_Pending completion of implementation..._
-
 **Build & Lint:**
 ```
-[Pending]
+$ pnpm tsc --noEmit
+# No output (success)
 ```
 
 **Tests:**
 ```
-[Pending]
+$ pnpm vitest run --exclude '**/docker_smoke.test.ts'
+
+ Test Files  15 passed (15)
+      Tests  290 passed (290)
+   Duration  588ms
 ```
+
+All 290 tests pass, including:
+- 13 new unit tests for `parseImageRef`, `generateImageDockerfile`, `rewriteImageField`, `resolveBuildSource`
+- 3 new metadata backwards compatibility tests
+- 8 new image-based prebuild integration tests
+- 6 new image-based restore integration tests
+
+**Commits:**
+1. `90a0622` - feat(lace): add JSONC-preserving image field rewriting (Phases 1 & 3)
+2. `927c84e` - feat(lace): add configType field to prebuild metadata (Phase 4)
+3. `d79c4e0` - feat(lace): add parseImageRef and generateImageDockerfile functions (Phase 2)
+4. `bd13fca` - feat(lace): integrate image-based config support into prebuild pipeline (Phase 5)
+5. `3abc864` - feat(lace): integrate image-based config support into restore pipeline (Phase 6)
+6. `f82aeac` - docs(lace): document image-based devcontainer prebuild support (Phase 7)

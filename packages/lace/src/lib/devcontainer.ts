@@ -210,8 +210,8 @@ export function resolveDockerfilePath(
     return source.path;
   }
   throw new DevcontainerConfigError(
-    "Prebuild requires a Dockerfile-based devcontainer configuration. " +
-      "`image`-based configs are not yet supported.",
+    "This function only supports Dockerfile-based configs. " +
+      "Use resolveBuildSource() for image-based config support.",
   );
 }
 

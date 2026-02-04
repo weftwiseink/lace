@@ -145,14 +145,14 @@ describe("resolveDockerfilePath", () => {
       DevcontainerConfigError,
     );
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
-      /Prebuild requires a Dockerfile-based devcontainer configuration/,
+      /only supports Dockerfile-based configs/,
     );
   });
 
   it("errors on image-based config from fixture", () => {
     const raw = readFixture("image-based.jsonc");
     expect(() => resolveDockerfilePath(raw, configDir)).toThrow(
-      /Prebuild requires a Dockerfile-based devcontainer configuration/,
+      /only supports Dockerfile-based configs/,
     );
   });
 

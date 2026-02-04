@@ -55,6 +55,12 @@ function setupWorkspace(devcontainerJson: string, dockerfile: string) {
   writeFileSync(join(devcontainerDir, "Dockerfile"), dockerfile, "utf-8");
 }
 
+/** Setup workspace for image-based config (no Dockerfile). */
+function setupImageWorkspace(devcontainerJson: string) {
+  mkdirSync(devcontainerDir, { recursive: true });
+  writeFileSync(join(devcontainerDir, "devcontainer.json"), devcontainerJson, "utf-8");
+}
+
 beforeEach(() => {
   workspaceRoot = join(tmpdir(), `lace-test-prebuild-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   devcontainerDir = join(workspaceRoot, ".devcontainer");
@@ -334,5 +340,222 @@ describe("prebuild: error cases", () => {
     const result = runPrebuild({ workspaceRoot, subprocess: createMock() });
     expect(result.exitCode).toBe(1);
     expect(result.message).toContain("Cannot read devcontainer.json");
+  });
+});
+
+// ============================================================================
+// Image-based config tests
+// ============================================================================
+
+const IMAGE_JSON = JSON.stringify({
+  image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+  customizations: {
+    lace: {
+      prebuildFeatures: {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+      },
+    },
+  },
+  features: {
+    "ghcr.io/devcontainers/features/git:1": {},
+  },
+}, null, 2);
+
+describe("prebuild: image-based config happy path", () => {
+  it("runs full pipeline for image-based config and rewrites devcontainer.json", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Prebuild complete");
+    expect(result.message).toContain("devcontainer.json image");
+
+    // Verify devcontainer.json was rewritten
+    const config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+
+    // Verify temp context
+    expect(existsSync(join(prebuildDir, "Dockerfile"))).toBe(true);
+    const tempDockerfile = readFileSync(join(prebuildDir, "Dockerfile"), "utf-8");
+    expect(tempDockerfile).toBe("FROM mcr.microsoft.com/devcontainers/base:ubuntu\n");
+
+    // Verify metadata includes configType
+    const metadata = JSON.parse(readFileSync(join(prebuildDir, "metadata.json"), "utf-8"));
+    expect(metadata.configType).toBe("image");
+    expect(metadata.originalFrom).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+
+    // Verify devcontainer build was called correctly
+    expect(mockCalls).toHaveLength(1);
+    expect(mockCalls[0].args).toContain("--image-name");
+    expect(mockCalls[0].args).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+});
+
+describe("prebuild: image-based idempotency", () => {
+  it("skips rebuild when image config is unchanged", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock();
+
+    runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(mockCalls).toHaveLength(1);
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("up to date");
+    expect(mockCalls).toHaveLength(1);  // Not called again
+  });
+});
+
+describe("prebuild: image-based dry-run", () => {
+  it("reports planned actions for image config without side effects", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock, dryRun: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("Dry run");
+    expect(result.message).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+    expect(result.message).toContain("image field");
+
+    // No side effects
+    expect(existsSync(prebuildDir)).toBe(false);
+    const config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).not.toContain("lace.local/");
+  });
+});
+
+describe("prebuild: image-based atomicity on failure", () => {
+  it("does not modify devcontainer.json on build failure", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock({ exitCode: 1, stderr: "build failed: OOM" });
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("build failed");
+
+    // devcontainer.json unchanged
+    const config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).toBe(IMAGE_JSON);
+  });
+});
+
+describe("prebuild: image-based absent/null/empty features", () => {
+  it("exits 0 with message when image config has no prebuildFeatures", () => {
+    const json = JSON.stringify({
+      image: "node:24",
+      features: {},
+    }, null, 2);
+    setupImageWorkspace(json);
+
+    const result = runPrebuild({ workspaceRoot, subprocess: createMock() });
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toContain("No prebuildFeatures configured");
+  });
+});
+
+describe("prebuild: mixed config (Dockerfile takes precedence)", () => {
+  it("uses Dockerfile when both Dockerfile and image are present", () => {
+    const json = JSON.stringify({
+      build: { dockerfile: "Dockerfile" },
+      image: "ignored:tag",  // Should be ignored
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+      },
+    }, null, 2);
+    setupWorkspace(json, "FROM node:24-bookworm\n");
+    const mock = createMock();
+
+    runPrebuild({ workspaceRoot, subprocess: mock });
+
+    // Verify Dockerfile was rewritten, not devcontainer.json image field
+    const dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
+    expect(dockerfile).toContain("FROM lace.local/node:24-bookworm");
+
+    const config = JSON.parse(readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8"));
+    expect(config.image).toBe("ignored:tag");  // Unchanged
+
+    // Verify metadata shows dockerfile type
+    const metadata = JSON.parse(readFileSync(join(prebuildDir, "metadata.json"), "utf-8"));
+    expect(metadata.configType).toBe("dockerfile");
+  });
+});
+
+describe("prebuild: image-based rebuild after previous prebuild", () => {
+  it("restores original image before re-prebuild when config changes", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock();
+
+    // First prebuild
+    runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(mockCalls).toHaveLength(1);
+
+    // Verify image was rewritten
+    let config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+
+    // Change prebuildFeatures (triggers rebuild)
+    const newJson = JSON.stringify({
+      image: "lace.local/mcr.microsoft.com/devcontainers/base:ubuntu",  // Already rewritten
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/weft/devcontainer-features/wezterm-server:1": {},  // Changed
+          },
+        },
+      },
+    }, null, 2);
+    writeFileSync(join(devcontainerDir, "devcontainer.json"), newJson, "utf-8");
+
+    // Second prebuild - should restore original first, then rebuild
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+    expect(mockCalls).toHaveLength(2);
+
+    // Should NOT have nested lace.local
+    config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).not.toContain("lace.local/lace.local");
+    expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+
+  it("rebuilds when base image changes", () => {
+    setupImageWorkspace(IMAGE_JSON);
+    const mock = createMock();
+
+    // First prebuild
+    runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(mockCalls).toHaveLength(1);
+
+    // Change base image (but keep same prebuildFeatures)
+    const newJson = JSON.stringify({
+      image: "mcr.microsoft.com/devcontainers/base:jammy",  // Changed from :ubuntu
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+      },
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+    }, null, 2);
+    writeFileSync(join(devcontainerDir, "devcontainer.json"), newJson, "utf-8");
+
+    // Second prebuild - should rebuild due to different base image in temp Dockerfile
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+    expect(mockCalls).toHaveLength(2);
+
+    // Verify the new tag uses the new base image
+    const config = readFileSync(join(devcontainerDir, "devcontainer.json"), "utf-8");
+    expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:jammy");
   });
 });

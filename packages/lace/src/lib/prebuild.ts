@@ -5,6 +5,7 @@ import {
   readDevcontainerConfig,
   extractPrebuildFeatures,
   generateTempDevcontainerJson,
+  rewriteImageField,
 } from "@/lib/devcontainer";
 import {
   parseDockerfile,
@@ -13,6 +14,8 @@ import {
   rewriteFrom,
   restoreFrom,
   generatePrebuildDockerfile,
+  parseImageRef,
+  generateImageDockerfile,
 } from "@/lib/dockerfile";
 import { validateNoOverlap } from "@/lib/validation";
 import {
@@ -102,47 +105,86 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     return { exitCode: 1, message: msg };
   }
 
-  // Step 3: Parse Dockerfile
-  let dockerfileContent: string;
-  try {
-    dockerfileContent = readFileSync(config.dockerfilePath, "utf-8");
-  } catch (err) {
-    const reason = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
-    const msg = `Cannot read Dockerfile: ${config.dockerfilePath} (${reason})`;
-    console.error(`Error: ${msg}`);
-    return { exitCode: 1, message: msg };
-  }
+  // Step 3: Parse build source (Dockerfile or image)
+  let dockerfileContent: string | null = null;
+  let parsed: { imageName: string; tag: string | null; digest: string | null; image: string };
+  let tempDockerfile: string;
 
-  // If the Dockerfile already has a lace.local FROM, restore it first
-  if (dockerfileContent.includes("lace.local/")) {
-    // Primary: derive original FROM from lace.local tag (bidirectional)
-    let originalFrom: string | null = null;
+  if (config.buildSource.kind === "dockerfile") {
+    // Dockerfile-based config
     try {
-      const laceFrom = parseDockerfile(dockerfileContent);
-      originalFrom = parseTag(laceFrom.image);
-    } catch {
-      // fall through to metadata
+      dockerfileContent = readFileSync(config.buildSource.path, "utf-8");
+    } catch (err) {
+      const reason = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+      const msg = `Cannot read Dockerfile: ${config.buildSource.path} (${reason})`;
+      console.error(`Error: ${msg}`);
+      return { exitCode: 1, message: msg };
     }
-    // Fallback: metadata
-    if (!originalFrom) {
-      const existingMetadata = readMetadata(prebuildDir);
-      originalFrom = existingMetadata?.originalFrom ?? null;
-    }
-    if (originalFrom) {
-      dockerfileContent = restoreFrom(dockerfileContent, originalFrom);
-    }
-  }
 
-  let parsed;
-  try {
-    parsed = parseDockerfile(dockerfileContent);
-  } catch (err) {
-    console.error(`Error: ${(err as Error).message}`);
-    return { exitCode: 1, message: (err as Error).message };
+    // If the Dockerfile already has a lace.local FROM, restore it first
+    if (dockerfileContent.includes("lace.local/")) {
+      // Primary: derive original FROM from lace.local tag (bidirectional)
+      let originalFrom: string | null = null;
+      try {
+        const laceFrom = parseDockerfile(dockerfileContent);
+        originalFrom = parseTag(laceFrom.image);
+      } catch {
+        // fall through to metadata
+      }
+      // Fallback: metadata
+      if (!originalFrom) {
+        const existingMetadata = readMetadata(prebuildDir);
+        originalFrom = existingMetadata?.originalFrom ?? null;
+      }
+      if (originalFrom) {
+        dockerfileContent = restoreFrom(dockerfileContent, originalFrom);
+      }
+    }
+
+    let dockerfileParsed;
+    try {
+      dockerfileParsed = parseDockerfile(dockerfileContent);
+    } catch (err) {
+      console.error(`Error: ${(err as Error).message}`);
+      return { exitCode: 1, message: (err as Error).message };
+    }
+
+    parsed = {
+      imageName: dockerfileParsed.imageName,
+      tag: dockerfileParsed.tag,
+      digest: dockerfileParsed.digest,
+      image: dockerfileParsed.image,
+    };
+    tempDockerfile = generatePrebuildDockerfile(dockerfileParsed);
+  } else {
+    // Image-based config
+    let currentImage = config.buildSource.image;
+
+    // If the image already has lace.local prefix, restore it first
+    if (currentImage.startsWith("lace.local/")) {
+      // Primary: derive original image from lace.local tag (bidirectional)
+      let originalImage = parseTag(currentImage);
+      // Fallback: metadata
+      if (!originalImage) {
+        const existingMetadata = readMetadata(prebuildDir);
+        originalImage = existingMetadata?.originalFrom ?? null;
+      }
+      if (originalImage) {
+        currentImage = originalImage;
+      }
+    }
+
+    const imageParsed = parseImageRef(currentImage);
+    parsed = {
+      imageName: imageParsed.imageName,
+      tag: imageParsed.tag,
+      digest: imageParsed.digest,
+      image: currentImage,
+    };
+    tempDockerfile = generateImageDockerfile(currentImage);
   }
 
   // Step 4: Generate temp context
-  const tempDockerfile = generatePrebuildDockerfile(parsed);
   const tempDevcontainerJson = generateTempDevcontainerJson(
     prebuildFeatures,
     "Dockerfile",
@@ -155,22 +197,38 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     !options.dryRun &&
     !contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)
   ) {
-    // Cache is fresh — check if Dockerfile needs reactivation (e.g., after restore)
-    const currentContent = readFileSync(config.dockerfilePath, "utf-8");
-    if (currentContent.includes("lace.local/")) {
-      const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
-      console.log(msg);
-      return { exitCode: 0, message: msg };
+    // Cache is fresh — check if source needs reactivation (e.g., after restore)
+    if (config.buildSource.kind === "dockerfile") {
+      const currentContent = readFileSync(config.buildSource.path, "utf-8");
+      if (currentContent.includes("lace.local/")) {
+        const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+        console.log(msg);
+        return { exitCode: 0, message: msg };
+      }
+      // Dockerfile was restored but cache is fresh — rewrite FROM without rebuilding
+      const reactivated = rewriteFrom(dockerfileContent!, prebuildTag);
+      writeFileSync(config.buildSource.path, reactivated, "utf-8");
+    } else {
+      // Image-based config
+      const currentImage = config.buildSource.image;
+      if (currentImage.startsWith("lace.local/")) {
+        const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+        console.log(msg);
+        return { exitCode: 0, message: msg };
+      }
+      // Image was restored but cache is fresh — rewrite image field without rebuilding
+      const configContent = readFileSync(config.configPath, "utf-8");
+      const reactivated = rewriteImageField(configContent, prebuildTag);
+      writeFileSync(config.configPath, reactivated, "utf-8");
     }
-    // Dockerfile was restored but cache is fresh — rewrite FROM without rebuilding
-    const reactivated = rewriteFrom(dockerfileContent, prebuildTag);
-    writeFileSync(config.dockerfilePath, reactivated, "utf-8");
     writeMetadata(prebuildDir, {
       originalFrom: parsed.image,
       timestamp: new Date().toISOString(),
       prebuildTag,
+      configType: config.buildSource.kind,
     });
-    const msg = `Prebuild reactivated from cache. Dockerfile FROM rewritten to: ${prebuildTag}`;
+    const targetDesc = config.buildSource.kind === "dockerfile" ? "Dockerfile FROM" : "devcontainer.json image";
+    const msg = `Prebuild reactivated from cache. ${targetDesc} rewritten to: ${prebuildTag}`;
     console.log(msg);
     return { exitCode: 0, message: msg };
   }
@@ -178,12 +236,15 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   // Dry-run: report planned actions and exit
   if (options.dryRun) {
     const featureList = Object.keys(prebuildFeatures).join(", ");
+    const targetFile = config.buildSource.kind === "dockerfile"
+      ? `  Dockerfile: ${config.buildSource.path}`
+      : `  Config: ${config.configPath} (image field)`;
     const msg = [
       "Dry run — planned actions:",
       `  Base image: ${parsed.image}`,
       `  Prebuild tag: ${prebuildTag}`,
       `  Features to prebuild: ${featureList}`,
-      `  Dockerfile: ${config.dockerfilePath}`,
+      targetFile,
       `  Temp context: ${prebuildDir}`,
     ].join("\n");
     console.log(msg);
@@ -239,9 +300,16 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     };
   }
 
-  // Step 7: Rewrite Dockerfile FROM
-  const rewrittenDockerfile = rewriteFrom(dockerfileContent, prebuildTag);
-  writeFileSync(config.dockerfilePath, rewrittenDockerfile, "utf-8");
+  // Step 7: Rewrite source file
+  if (config.buildSource.kind === "dockerfile") {
+    const rewrittenDockerfile = rewriteFrom(dockerfileContent!, prebuildTag);
+    writeFileSync(config.buildSource.path, rewrittenDockerfile, "utf-8");
+  } else {
+    // Image-based: rewrite devcontainer.json image field
+    const configContent = readFileSync(config.configPath, "utf-8");
+    const rewrittenConfig = rewriteImageField(configContent, prebuildTag);
+    writeFileSync(config.configPath, rewrittenConfig, "utf-8");
+  }
 
   // Step 8: Merge lock file
   try {
@@ -255,9 +323,11 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     originalFrom: parsed.image,
     timestamp: new Date().toISOString(),
     prebuildTag,
+    configType: config.buildSource.kind,
   });
 
-  const msg = `Prebuild complete. Dockerfile FROM rewritten to: ${prebuildTag}`;
+  const targetDesc = config.buildSource.kind === "dockerfile" ? "Dockerfile FROM" : "devcontainer.json image";
+  const msg = `Prebuild complete. ${targetDesc} rewritten to: ${prebuildTag}`;
   console.log(msg);
   return { exitCode: 0, message: msg };
 }

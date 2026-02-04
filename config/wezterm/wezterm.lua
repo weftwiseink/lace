@@ -23,16 +23,6 @@ config.hide_tab_bar_if_only_one_tab = false
 config.tab_bar_at_bottom = true
 config.use_fancy_tab_bar = false
 
--- Status bar (shows workspace name)
-wezterm.on("update-status", function(window, pane)
-  local workspace = window:active_workspace()
-  window:set_left_status(wezterm.format({
-    { Background = { Color = "#073642" } },
-    { Foreground = { Color = "#2aa198" } },
-    { Text = "  " .. workspace .. " " },
-  }))
-end)
-
 -- =============================================================================
 -- Core Settings
 -- =============================================================================
@@ -58,31 +48,6 @@ config.unix_domains = {
 
 -- Uncomment to auto-connect to mux on startup (enables persistence across restarts)
 -- config.default_gui_startup_args = { "connect", "unix" }
-
--- =============================================================================
--- Multiplexing - SSH Domain (devcontainer access)
--- Connects to wezterm-mux-server running inside the devcontainer via SSH.
--- See docs/proposals/wezterm_devcontainer_multiplexing.md
--- =============================================================================
-
-config.ssh_domains = {
-  {
-    name = "lace",
-    remote_address = "localhost:2222",
-    username = "node",
-    remote_wezterm_path = "/usr/local/bin/wezterm",
-    multiplexing = "WezTerm",
-    -- Note: The default working directory is set by the container-side wezterm
-    -- config at ~/.config/wezterm/wezterm.lua (default_cwd = "/workspace/lace").
-    ssh_option = {
-      identityfile = wezterm.home_dir .. "/.ssh/lace_devcontainer",
-      -- Host key verification is handled by pre-populating ~/.ssh/known_hosts
-      -- in bin/open-lace-workspace before connecting.
-      -- Do NOT use userknownhostsfile = "/dev/null" - that makes every
-      -- connection prompt for trust since the host can never be "known".
-    },
-  },
-}
 
 -- =============================================================================
 -- Keybindings
@@ -142,83 +107,67 @@ config.keys = {
 }
 
 -- =============================================================================
--- Devcontainer: Connect + Worktree Picker
--- Leader+D: connect to lace devcontainer (SSH domain)
--- Leader+W: pick a worktree from /workspace/ inside container
+-- Lace Plugin
+-- Provides SSH domain and worktree picker for lace devcontainer access.
+-- See config/wezterm/lace-plugin/README.md for details.
 -- =============================================================================
 
--- Quick connect to devcontainer at /workspace/main
-table.insert(config.keys, {
-  key = "d",
-  mods = "LEADER",
-  action = act.SwitchToWorkspace({
-    name = "lace",
-    spawn = {
-      domain = { DomainName = "lace" },
-      cwd = "/workspace/main",
-    },
-  }),
-})
-
--- Helper: spawn a workspace connected to a container worktree
-local function spawn_worktree_workspace(name)
-  return act.SwitchToWorkspace({
-    name = name,
-    spawn = {
-      domain = { DomainName = "lace" },
-      cwd = "/workspace/" .. name,
-    },
-  })
-end
-
--- Worktree picker: queries /workspace/ in the container, shows fuzzy selector
-wezterm.on("trigger-worktree-picker", function(window, pane)
-  local ssh_key = wezterm.home_dir .. "/.ssh/lace_devcontainer"
-  local success, stdout = wezterm.run_child_process({
-    "ssh", "-p", "2222",
-    "-i", ssh_key,
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "LogLevel=ERROR",
-    "node@localhost",
-    "ls", "-1", "/workspace",
-  })
-
-  if not success then
-    window:toast_notification("lace", "Container not running or SSH failed", nil, 3000)
-    return
+-- Get the plugin path (works from both host and container)
+local function get_lace_plugin_path()
+  -- Check if we're in a container with lace mounted as a plugin
+  local plugin_mount_path = "/mnt/lace/plugins/lace/config/wezterm/lace-plugin"
+  local f = io.open(plugin_mount_path .. "/plugin/init.lua", "r")
+  if f then
+    f:close()
+    return "file://" .. plugin_mount_path
   end
 
-  local choices = {}
-  for name in stdout:gmatch("[^\n]+") do
-    -- Skip hidden dirs and non-worktree items
-    if not name:match("^%.") and name ~= "node_modules" then
-      table.insert(choices, {
-        id = name,
-        label = name,
-      })
+  -- Try relative path from this config (for lace repo itself)
+  local config_dir = debug.getinfo(1, "S").source:sub(2):match("(.*/)")
+  if config_dir then
+    local relative_path = config_dir .. "lace-plugin"
+    local rf = io.open(relative_path .. "/plugin/init.lua", "r")
+    if rf then
+      rf:close()
+      return "file://" .. relative_path
     end
   end
 
-  window:perform_action(
-    act.InputSelector({
-      title = "Select Worktree",
-      choices = choices,
-      action = wezterm.action_callback(function(win, _, id, label)
-        if id then
-          win:perform_action(spawn_worktree_workspace(id), pane)
-        end
-      end),
-    }),
-    pane
-  )
-end)
+  -- Fallback to absolute host path
+  return "file://" .. wezterm.home_dir .. "/code/weft/lace/config/wezterm/lace-plugin"
+end
 
-table.insert(config.keys, {
-  key = "w",
-  mods = "LEADER",
-  action = act.EmitEvent("trigger-worktree-picker"),
-})
+local ok, lace_plugin = pcall(wezterm.plugin.require, get_lace_plugin_path())
+if ok then
+  lace_plugin.apply_to_config(config, {
+    ssh_key = wezterm.home_dir .. "/.ssh/lace_devcontainer",
+    domain_name = "lace",
+    ssh_port = "localhost:2222",
+    username = "node",
+    workspace_path = "/workspace",
+  })
+
+  -- Add lace-specific keybindings
+  -- Leader+D: Quick connect to lace devcontainer
+  table.insert(config.keys, {
+    key = "d",
+    mods = "LEADER",
+    action = lace_plugin.connect_action({
+      domain_name = "lace",
+      workspace_path = "/workspace",
+      main_worktree = "lace",  -- Use /workspace/lace as default
+    }),
+  })
+
+  -- Leader+W: Worktree picker
+  table.insert(config.keys, {
+    key = "w",
+    mods = "LEADER",
+    action = act.EmitEvent(lace_plugin.get_picker_event("lace")),
+  })
+else
+  wezterm.log_warn("Failed to load lace plugin: " .. tostring(lace_plugin))
+end
 
 -- =============================================================================
 -- Copy Mode Customization

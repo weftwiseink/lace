@@ -109,3 +109,68 @@ describe("contextsChanged", () => {
     expect(contextsChanged(tempDir, dockerfile, pretty)).toBe(false);
   });
 });
+
+describe("metadata configType backwards compatibility", () => {
+  it("writes configType when provided", () => {
+    const dir = join(tmpdir(), `lace-test-metadata-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+
+    try {
+      writeMetadata(dir, {
+        originalFrom: "node:24",
+        timestamp: "2026-02-04T00:00:00Z",
+        prebuildTag: "lace.local/node:24",
+        configType: "image",
+      });
+
+      const metadata = readMetadata(dir);
+      expect(metadata?.configType).toBe("image");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads old metadata without configType", () => {
+    const dir = join(tmpdir(), `lace-test-metadata-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+
+    try {
+      // Write metadata without configType (simulating old format)
+      writeFileSync(
+        join(dir, "metadata.json"),
+        JSON.stringify({
+          originalFrom: "node:24",
+          timestamp: "2026-02-04T00:00:00Z",
+          prebuildTag: "lace.local/node:24",
+        }, null, 2) + "\n",
+        "utf-8"
+      );
+
+      const metadata = readMetadata(dir);
+      expect(metadata).not.toBeNull();
+      expect(metadata?.originalFrom).toBe("node:24");
+      expect(metadata?.configType).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes dockerfile configType", () => {
+    const dir = join(tmpdir(), `lace-test-metadata-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+
+    try {
+      writeMetadata(dir, {
+        originalFrom: "node:24",
+        timestamp: "2026-02-04T00:00:00Z",
+        prebuildTag: "lace.local/node:24",
+        configType: "dockerfile",
+      });
+
+      const metadata = readMetadata(dir);
+      expect(metadata?.configType).toBe("dockerfile");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -9,6 +9,8 @@ export interface PrebuildMetadata {
   timestamp: string;
   /** The lace.local tag that was generated. */
   prebuildTag: string;
+  /** Config type: "dockerfile" or "image". New field, defaults to "dockerfile" for backwards compat. */
+  configType?: "dockerfile" | "image";
 }
 
 const METADATA_FILE = "metadata.json";

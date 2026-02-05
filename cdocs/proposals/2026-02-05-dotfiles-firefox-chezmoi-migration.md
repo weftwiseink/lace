@@ -16,7 +16,7 @@ last_reviewed:
 
 # Dotfiles Firefox Chezmoi Migration
 
-> BLUF: Manage Firefox's `userChrome.css`, `userContent.css`, and associated assets (Breeze window-control SVGs, Firefox logo) through chezmoi by targeting a predictable intermediate path (`~/.config/firefox-chrome/`) and bridging to the unpredictable Firefox profile directory via a one-time symlink. This avoids the fundamental mismatch between chezmoi's deterministic target model and Firefox's randomly-named profile directories (e.g., `h4hh8m1f.default-release`). A chezmoi `run_onchange_` script detects the active profile from `profiles.ini` and creates the symlink automatically, replacing the current manual symlink from the old `setup.sh`. The approach was evaluated against community alternatives discussed in [chezmoi issue #1226](https://github.com/twpayne/chezmoi/issues/1226), including the `profiles.ini` templating approach, and was chosen for its simplicity and minimal disruption to the existing Firefox configuration.
+> BLUF: Manage Firefox's `userChrome.css`, `userContent.css`, and Breeze SVG assets through chezmoi at a predictable intermediate path (`~/.config/firefox-chrome/`), with a `run_onchange_` script that auto-detects the active profile from `profiles.ini` and symlinks `<profile>/chrome/` to that path. This sidesteps the fundamental mismatch between chezmoi's deterministic targets and Firefox's randomly-named profile directories, replacing the current manual symlink from the old `setup.sh`.
 
 ## Objective
 

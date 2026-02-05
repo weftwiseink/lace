@@ -732,23 +732,25 @@ Inside the container, `claude` is immediately available with host credentials.
 - [ ] Existing plugin mounts still work alongside claude access
 - [ ] No regressions in `pnpm test`
 
-## Open Questions
+## Resolved Questions
 
-### Q1: Should claude access require global opt-in before project-level activation?
+> NOTE: These questions were surfaced during Phase 4 (User Clarification) and resolved with user input on 2026-02-05.
 
-Report 2 (Section 9.1) raised a security concern: a cloned project could mount the user's `~/.claude/` credentials via `customizations.lace.claude: true` without explicit user consent beyond running `lace up`. A global opt-in (`settings.json`: `"claude": { "enabled": true }`) would be more secure but adds a setup step. For Phase 1, the proposal proceeds without global opt-in (matching how devcontainer mounts generally work), but this should be revisited before wider adoption.
+### Q1: No global opt-in required (Resolved)
 
-### Q2: Should the devcontainer feature injection be empirically verified before Phase 2?
+**Decision:** Match the standard devcontainer trust model. No global opt-in in settings.json is required. The user trusts the devcontainer config when they run `lace up`. Revisit if adoption widens beyond the current single-user context.
 
-Report 2 (Q1) flagged uncertainty about whether features in the extended config (`.lace/devcontainer.json` passed via `--config`) are processed by the devcontainer CLI. If they are not, the fallback is requiring the user to add the feature to their base devcontainer.json. A quick empirical test before implementation would de-risk Phase 2. This should be the first task in Phase 2.
+### Q2: Feature injection verified inline in Phase 2 (Resolved)
 
-### Q3: Should `.claude.local.md` be generated for all lace containers or only when claude access is enabled?
+**Decision:** Empirical verification of feature injection via extended configs is the first task of Phase 2. If `devcontainer up --config` does not process injected features, the fallback is requiring users to add the feature to their base devcontainer.json (two lines instead of one).
 
-Currently, `.claude.local.md` generation is tied to `customizations.lace.claude`. If a project uses lace plugins but not claude access, agents still lack orientation context. The `LACE_*` environment variables and `.claude.local.md` generation could be extracted into a standalone "lace awareness" feature that always runs. This is deferred to a follow-up proposal.
+### Q3: Claude-only initially, extract later (Resolved)
 
-### Q4: Should claude-tools installation be part of this proposal?
+**Decision:** `LACE_*` environment variables and `.claude.local.md` generation are bundled with claude access initially. Extract into a standalone "lace awareness" feature in a follow-up if a non-claude use case arises. A more detailed specification of `.claude.local.md` content and project-level customization will be covered in the detailed implementation proposal.
 
-Report 3 recommended optional claude-tools installation via `postCreateCommand`. This proposal includes it as an opt-in flag (`installClaudeTools: true`) but does not implement it in any phase. The reason: claude-tools currently has no Linux x86_64 binaries (Section 7.4 of Report 3), making automated installation unreliable for most containers. This should be revisited when Linux binaries are available upstream.
+### Q4: Install claude-tools from source; plan devcontainer feature long-term (Resolved)
+
+**Decision:** The `installClaudeTools` flag is actively implemented (not dormant). The initial approach installs claude-tools from source via `postCreateCommand` (OCaml/opam build). Long-term, claude-tools should be bundled in its own devcontainer feature (analogous to the wezterm server feature at `ghcr.io/weftwiseink/devcontainer-features/wezterm-server`). This changes the scope: Phase 3 now includes claude-tools source installation alongside the session bridge.
 
 ## Related Documents
 

@@ -5,13 +5,13 @@ first_authored:
 task_list: lace/dotfiles-migration
 type: proposal
 state: live
-status: review_ready  # R1 revisions applied
+status: review_ready  # R2 revisions applied (username amendment)
 tags: [dotfiles, devcontainer, wezterm, launcher, port-range, discovery, lace-ecosystem, migration, elimination]
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6"
-  at: 2026-02-05T20:30:00-08:00
-  round: 1
+  at: 2026-02-06T00:10:00-08:00
+  round: 2
 revisions:
   - at: 2026-02-05T21:00:00-08:00
     by: "@claude-opus-4-6"
@@ -24,6 +24,17 @@ revisions:
       - "Added negative test for connecting before SSH is ready"
       - "Added Phase 3 cleanup of old static WezTerm SSH domain and shell aliases referencing port 2223"
       - "Promoted Open Question 4 (username) to resolved Design Decision"
+  - at: 2026-02-06T00:10:00-08:00
+    by: "@claude-opus-4-6"
+    changes:
+      - "Removed Design Decision 6 (override container user to node) -- no longer needed; plugin will handle username lookup via Docker"
+      - "Removed remoteUser: node from devcontainer.json changes -- dotfiles container keeps vscode user"
+      - "Reverted authorized_keys mount target to /home/vscode/ (no longer needs to change to /home/node/)"
+      - "Added dependency on docker user lookup proposal (2026-02-05-lace-wezterm-docker-user-lookup.md)"
+      - "Updated BLUF to remove remoteUser reference"
+      - "Reduced devcontainer.json changes from four to two (port + SSH key)"
+depends_on:
+  - cdocs/proposals/2026-02-05-lace-wezterm-docker-user-lookup.md
 supersedes:
   - cdocs/proposals/2026-02-05-dotfiles-bin-launcher-migration.md
 related_to:
@@ -35,9 +46,7 @@ related_to:
 
 # Eliminate Dotfiles Workspace Launcher Script
 
-> BLUF: The dotfiles project's 374-line `bin/open-dotfiles-workspace` script can be eliminated entirely -- not parameterized, not refactored, but deleted -- by migrating the dotfiles devcontainer to the lace port-range model (22425-22499). The lace ecosystem already provides every capability the launcher script implements: the [lace.wezterm plugin](/home/mjr/code/weft/lace.wezterm/plugin/init.lua) pre-registers SSH domains for ports 22425-22499 and provides a project picker, [`lace-discover`](/var/home/mjr/code/weft/lace/bin/lace-discover) finds running devcontainers via Docker labels, and [`wez-lace-into`](/var/home/mjr/code/weft/lace/bin/wez-lace-into) provides interactive project selection. The only prerequisite is changing the dotfiles devcontainer's SSH port from the fixed `2223` to a port in the lace range and using the same SSH key. The end-state workflow becomes: `devcontainer up` (or `lace up`) to start the container, then the wezterm plugin auto-discovers it via Docker and the user connects through the project picker or `wez-lace-into dotfiles`. No wrapper script, no SSH polling, no mux server startup logic on the host side. Known_hosts management is handled by the plugin's SSH options (`StrictHostKeyChecking=accept-new`), requiring at most a one-time key removal after container rebuilds.
->
-> **Key insight:** The [superseded proposal](2026-02-05-dotfiles-bin-launcher-migration.md) asked "how do we deduplicate the launcher?" The correct question is "why does dotfiles need a launcher at all?" The answer: it does not, because the lace ecosystem already solves all five problems the launcher addresses. The launcher was written before the port-range discovery system existed.
+> BLUF: The dotfiles project's 374-line `bin/open-dotfiles-workspace` launcher can be deleted entirely by migrating the dotfiles devcontainer to the lace port-range model (port 22426, shared SSH key). The lace ecosystem -- plugin-registered SSH domains, `lace-discover`, `wez-lace-into`, and the project picker -- already provides every capability the launcher implements. The dotfiles container keeps its native `vscode` user; the lace.wezterm plugin's [docker user lookup enhancement](2026-02-05-lace-wezterm-docker-user-lookup.md) handles username resolution at connection time. The key insight is that the launcher was written before port-range discovery existed; it solves problems that the lace ecosystem now handles generically.
 
 ## Objective
 
@@ -98,7 +107,7 @@ From [`dotfiles/.devcontainer/devcontainer.json`](/home/mjr/code/personal/dotfil
 Key observations:
 - Uses fixed port 2223 (outside the lace range 22425-22499)
 - Uses a separate SSH key (`dotfiles_devcontainer` vs `lace_devcontainer`)
-- Uses `vscode` user (vs lace's `node`) -- the lace.wezterm plugin registers all domains with `username = "node"`, so this must be aligned
+- Uses `vscode` user (vs lace's `node`) -- the lace.wezterm plugin's [docker user lookup enhancement](2026-02-05-lace-wezterm-docker-user-lookup.md) resolves the correct username per container at connection time
 - Already runs `wezterm-mux-server` via `postStartCommand` (mux server startup is already handled)
 
 ### Current Lace Devcontainer Configuration
@@ -136,7 +145,7 @@ dotfiles/                                  dotfiles/
 
 ### Changes to dotfiles devcontainer.json
 
-Four changes to `devcontainer.json`:
+Two changes to `devcontainer.json`:
 
 **1. Port: 2223 -> 22426 (a port in the lace range)**
 
@@ -157,21 +166,12 @@ Port 22426 is chosen as the second port in the lace range (22425 is reserved for
 "source=${localEnv:HOME}/.ssh/dotfiles_devcontainer.pub,target=/home/vscode/.ssh/authorized_keys,type=bind,readonly"
 
 // After:
-"source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
+"source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/vscode/.ssh/authorized_keys,type=bind,readonly"
 ```
 
-The lace.wezterm plugin configures all SSH domains with the `lace_devcontainer` key. Using the same key for dotfiles means no additional SSH configuration is needed. The mount target changes from `/home/vscode/` to `/home/node/` to match the `remoteUser` override (see change 3 below). The separate `dotfiles_devcontainer` key provided no security benefit (both keys are on the same host, accessing containers on the same host).
+The lace.wezterm plugin configures all SSH domains with the `lace_devcontainer` key. Using the same key for dotfiles means no additional SSH configuration is needed. The mount target stays at `/home/vscode/` -- the container keeps its native `vscode` user. The lace.wezterm plugin's [docker user lookup enhancement](2026-02-05-lace-wezterm-docker-user-lookup.md) resolves the correct username (`vscode`) at connection time via `docker inspect`. The separate `dotfiles_devcontainer` key provided no security benefit (both keys are on the same host, accessing containers on the same host).
 
-**3. Container user: override remoteUser to `node`**
-
-```json
-// Add to devcontainer.json:
-"remoteUser": "node"
-```
-
-The lace.wezterm plugin registers all SSH domains with `username = "node"` (the plugin's default). The `lace:PORT` domains have a fixed username baked in at WezTerm config load time -- neither `wez-lace-into` nor the project picker can override it per-connection. The dotfiles devcontainer currently uses `vscode` as the default user (from the `base:ubuntu` image). To align with the lace ecosystem, the devcontainer must use `node` for SSH access. Adding `"remoteUser": "node"` ensures the container creates and configures the `node` user. The authorized_keys mount target must also change from `/home/vscode/.ssh/authorized_keys` to `/home/node/.ssh/authorized_keys`. See Decision 6 for the full rationale.
-
-**4. No other changes needed**
+**3. No other changes needed**
 
 - The `postStartCommand` already starts `wezterm-mux-server --daemonize` -- this is the correct behavior and matches lace's configuration.
 - The `devcontainer.local_folder` label is set automatically by the devcontainer CLI, so `lace-discover` will find it.
@@ -243,18 +243,13 @@ This is zero lines of project-specific code in the dotfiles repository.
 
 **Tradeoff acknowledged:** The current launcher provides a single-command workflow (`bin/open-dotfiles-workspace` does everything). The proposed replacement requires two steps: start the container, then connect. This is a deliberate tradeoff -- the two-step workflow is simpler, more transparent, and composes with the rest of the lace ecosystem, but it is slightly less convenient for the "cold start" case. For the common "reconnect to running container" case, it is a single command (`wez-lace-into dotfiles` or the project picker).
 
-### Decision 6: Override Dotfiles Container User to `node`
+### Decision 6: Rely on Plugin Docker User Lookup (Replaces Previous `remoteUser: node` Override)
 
-**Decision:** Add `"remoteUser": "node"` to the dotfiles devcontainer.json and change the authorized_keys mount to `/home/node/.ssh/authorized_keys`.
+**Decision:** The dotfiles container keeps its native `vscode` user. The lace.wezterm plugin's [docker user lookup enhancement](2026-02-05-lace-wezterm-docker-user-lookup.md) resolves the correct SSH username per container at connection time via `docker inspect`.
 
-**Why:** The lace.wezterm plugin registers all 75 SSH domains with a single username (defaulting to `"node"`). The username is baked into the SSH domain at WezTerm config load time and cannot be overridden per-connection by `wez-lace-into` or the project picker. The dotfiles container currently uses `vscode` (the default from `mcr.microsoft.com/devcontainers/base:ubuntu`). If the container uses `vscode` but WezTerm connects as `node`, the SSH connection will be rejected because `node`'s `authorized_keys` would not exist.
+**Why (previous approach was wrong):** The previous revision of this proposal added `"remoteUser": "node"` to force the dotfiles container to use `node`, aligning with the plugin's hardcoded username. This was a workaround for a plugin limitation, not a correct solution. The dotfiles image (`mcr.microsoft.com/devcontainers/base:ubuntu`) has a `vscode` user, not `node`. Forcing a different user is fragile and unnecessary now that the plugin can query Docker for the actual container user.
 
-Three options were considered:
-- **A. Change the container user to `node`** (chosen): Simple, aligns with lace convention, requires only `devcontainer.json` changes.
-- **B. Modify the plugin to support per-port username overrides**: More general but requires plugin code changes and a configuration mechanism that does not yet exist.
-- **C. Configure sshd in the container to accept any user**: Non-standard, fragile.
-
-Option A is chosen because the dotfiles devcontainer has no dependency on the `vscode` username. The container uses a generic base image, and the only user-specific configuration is the authorized_keys mount path. Changing to `node` is a one-line addition to devcontainer.json.
+**Dependency:** This proposal depends on the [docker user lookup proposal](2026-02-05-lace-wezterm-docker-user-lookup.md) being implemented first. The plugin enhancement must be in place before the dotfiles container can be migrated to the lace port range.
 
 ### Decision 5: Migrate Dotfiles Before Lace
 
@@ -364,7 +359,7 @@ Team member clones dotfiles, runs `devcontainer up --workspace-folder .`, loads 
 | # | Scenario | Pass Criteria |
 |---|----------|---------------|
 | 1 | `devcontainer up` with new port | Container starts, port 22426 is bound on host |
-| 2 | SSH connectivity | `ssh -p 22426 -i ~/.ssh/lace_devcontainer node@localhost true` succeeds |
+| 2 | SSH connectivity | `ssh -p 22426 -i ~/.ssh/lace_devcontainer vscode@localhost true` succeeds |
 | 3 | Mux server running | `docker exec <container> pgrep -f wezterm-mux-server` returns a PID |
 | 4 | Docker label present | `docker ps --filter "label=devcontainer.local_folder=/home/mjr/code/personal/dotfiles"` shows the container |
 
@@ -372,7 +367,7 @@ Team member clones dotfiles, runs `devcontainer up --workspace-folder .`, loads 
 
 | # | Scenario | Pass Criteria |
 |---|----------|---------------|
-| 1 | `lace-discover` finds dotfiles | Output includes `dotfiles:22426:node:/home/mjr/code/personal/dotfiles` |
+| 1 | `lace-discover` finds dotfiles | Output includes `dotfiles:22426:vscode:/home/mjr/code/personal/dotfiles` |
 | 2 | `wez-lace-into --status` shows dotfiles | Output includes `[*] dotfiles (:22426)` |
 | 3 | `wez-lace-into dotfiles` connects | WezTerm window opens, terminal is inside container |
 | 4 | Project picker shows dotfiles | Ctrl+Shift+P in WezTerm lists dotfiles as an option |
@@ -401,11 +396,10 @@ Team member clones dotfiles, runs `devcontainer up --workspace-folder .`, loads 
 
 **Scope:**
 - Change `appPort` from `"2223:2222"` to `"22426:2222"` in `dotfiles/.devcontainer/devcontainer.json`
-- Change SSH key mount from `dotfiles_devcontainer.pub` to `lace_devcontainer.pub`
-- Change SSH key mount target from `/home/vscode/.ssh/authorized_keys` to `/home/node/.ssh/authorized_keys`
-- Add `"remoteUser": "node"` to align with the lace.wezterm plugin's SSH domain username
+- Change SSH key mount from `dotfiles_devcontainer.pub` to `lace_devcontainer.pub` (mount target stays at `/home/vscode/.ssh/authorized_keys`)
 
-**Prerequisite (lace.wezterm plugin):**
+**Prerequisites (lace.wezterm plugin):**
+- The [docker user lookup enhancement](2026-02-05-lace-wezterm-docker-user-lookup.md) must be implemented first, so the plugin correctly resolves `vscode` as the SSH username for the dotfiles container
 - Add `StrictHostKeyChecking = "accept-new"` to the `ssh_option` table in `setup_port_domains()` in `lace.wezterm/plugin/init.lua`
 
 **Files modified (in dotfiles repo):**
@@ -420,9 +414,9 @@ Team member clones dotfiles, runs `devcontainer up --workspace-folder .`, loads 
 
 **Success criteria:**
 - Container starts with port 22426 bound
-- SSH works with `lace_devcontainer` key as user `node`
+- SSH works with `lace_devcontainer` key as user `vscode`
 - `postStartCommand` starts the mux server as before
-- Container user is `node` (verify with `whoami` inside container)
+- Container user is `vscode` (verify with `whoami` inside container)
 
 ### Phase 2: Verify Lace Ecosystem Discovery
 

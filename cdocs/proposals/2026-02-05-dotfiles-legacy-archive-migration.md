@@ -5,14 +5,15 @@ first_authored:
 task_list: dotfiles/legacy-archive
 type: proposal
 state: live
-status: review_ready
+status: evolved
+superseded_by: cdocs/proposals/2026-02-05-dotfiles-legacy-archive-clean.md
 tags: [dotfiles, migration, archive, symlinks, bash, tmux, vscode, blackbox, legacy]
 parent: cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"
-  at: 2026-02-05T21:45:00-08:00
-  round: 4
+  at: 2026-02-05T22:45:00-08:00
+  round: 5
 revisions:
   - at: 2026-02-05T12:50:00-08:00
     by: "@claude-opus-4-6"
@@ -45,11 +46,22 @@ revisions:
       - "Removed edge cases that only applied to chezmoi: state drift, apply-between-phases, local modifications to managed files"
       - "Simplified Phase 5: removed .chezmoiignore update and chezmoi managed verification steps"
       - "Updated BLUF and Background to reflect that files are from old setup.sh symlink approach, not chezmoi"
+  - at: 2026-02-05T22:30:00-08:00
+    by: "@claude-opus-4-6"
+    changes:
+      - "Restored chezmoi as the deployment mechanism: chezmoi IS the plan going forward, it just hasn't been applied on this machine yet"
+      - "Added Phase 1.5 (chezmoi bootstrap): chezmoi init, chezmoi diff, first chezmoi apply to establish chezmoi as the deployment mechanism before any migration work"
+      - "Updated Phase 2: replaced manual cp with chezmoi apply after editing dot_bashrc in the source repo"
+      - "Reworked run_once script handling: KEEP starship script at repo root (still wanted for nushell), ARCHIVE blesh (bash-specific) and tpm (tmux-specific) to archive/legacy/"
+      - "Restored .chezmoiignore update step in Phase 5: ensure archive/legacy/ is ignored by chezmoi"
+      - "Restored edge case: chezmoi apply between phases (safe because old paths still work until Phase 4)"
+      - "Updated rollback strategy to include chezmoi apply after git restore"
+      - "Updated BLUF and Background to reflect that chezmoi will be bootstrapped as part of this migration"
 ---
 
 # Dotfiles Legacy Archive Migration
 
-> BLUF: Archive a subset of legacy configuration files in the dotfiles repo (`/home/mjr/code/personal/dotfiles/`) by moving them to `archive/legacy/`, while preserving a non-breaking intermediate state for the live bash/tmux/vscode environment. The migration must handle two categories of risk: (1) the live `~/.bashrc` (sourced from `dot_bashrc`) references files directly from the repo's `bash/`, `vscode/`, and `blackbox/` directories, requiring path rerouting before any move; and (2) two live symlinks on the system (`~/.config/Code/User/keybindings.json`, `~/.config/Code/User/settings.json`) point into the `vscode/` directory that will be relocated. The `run_once_*` scripts at the repo root are legacy artifacts that can simply be moved to the archive. Note: chezmoi has never been applied on this machine -- all system files are from the old `setup.sh` symlink approach or manual placement. Directories explicitly excluded from this archive scope: `firefox/`, `tridactyl/`, `btrfs/`, and `macos/` (see Out of Scope section). This proposal provides a complete file inventory, a phased migration plan, and a "left behind" report documenting all system artifacts for future cleanup.
+> BLUF: Archive a subset of legacy configuration files in the dotfiles repo (`/home/mjr/code/personal/dotfiles/`) by moving them to `archive/legacy/`, while preserving a non-breaking intermediate state for the live bash/tmux/vscode environment. The migration must handle two categories of risk: (1) the live `~/.bashrc` (sourced from `dot_bashrc`) references files directly from the repo's `bash/`, `vscode/`, and `blackbox/` directories, requiring path rerouting before any move; and (2) two live symlinks on the system (`~/.config/Code/User/keybindings.json`, `~/.config/Code/User/settings.json`) point into the `vscode/` directory that will be relocated. Note: chezmoi hasn't been applied on this machine yet, but will be bootstrapped as part of this migration. Files currently on the system are from the old `setup.sh` symlink approach or manual placement. Once chezmoi is initialized, it becomes the deployment mechanism for all subsequent changes. The `run_once_*` scripts at the repo root are chezmoi run_once scripts; `run_once_before_10-install-starship.sh` stays at repo root (starship is used by both bash and nushell), while the bash-specific blesh and tmux-specific tpm install scripts are archived. Directories explicitly excluded from this archive scope: `firefox/`, `tridactyl/`, `btrfs/`, and `macos/` (see Out of Scope section). This proposal provides a complete file inventory, a phased migration plan, and a "left behind" report documenting all system artifacts for future cleanup.
 >
 > **Key Dependencies:**
 > - [Parent: Dotfiles Migration and Config Extraction](2026-02-04-dotfiles-migration-and-config-extraction.md) -- establishes the overall migration direction
@@ -59,7 +71,7 @@ revisions:
 
 Complete the archival of legacy dotfiles configuration by:
 
-1. Moving all legacy files to a structured `archive/legacy/` directory
+1. Moving in-scope legacy files to a structured `archive/legacy/` directory
 2. Maintaining a non-breaking intermediate state throughout the migration
 3. Removing or redirecting all live symlinks pointing into relocated directories
 4. Documenting every system-side artifact left behind for future cleanup
@@ -78,7 +90,7 @@ The dotfiles repo at `/home/mjr/code/personal/dotfiles/` contains two parallel c
 - `dot_config/tridactyl/tridactylrc` -- source of truth for `~/.config/tridactyl/tridactylrc`
 - `dot_config/wezterm/wezterm.lua` -- source of truth for `~/.config/wezterm/wezterm.lua`
 - `dot_config/nvim/` -- source of truth for `~/.config/nvim/`
-- `.chezmoiignore` -- chezmoi exclusion rules (present in repo but chezmoi has never been applied)
+- `.chezmoiignore` -- chezmoi exclusion rules (present in repo; chezmoi will be bootstrapped in Phase 1.5)
 - `.devcontainer/` -- (if created per parent proposal)
 
 **Legacy (to ARCHIVE):**
@@ -87,9 +99,11 @@ The dotfiles repo at `/home/mjr/code/personal/dotfiles/` contains two parallel c
 - `tmux.conf` -- original tmux config (identical to `dot_tmux.conf`)
 - `blackbox/` -- blackbox.sh, setup.sh, backup_exclude.txt, backup.sh (Linux platform setup; only sourced by bash config which is being archived)
 - `init.vim` -- old neovim config (vim-plug based, commented out in setup.sh)
-- `run_once_before_10-install-starship.sh` -- legacy install script (chezmoi was never applied; software was installed manually or via other means)
-- `run_once_before_20-install-blesh.sh` -- legacy install script
-- `run_once_after_10-install-tpm.sh` -- legacy install script
+- `run_once_before_20-install-blesh.sh` -- chezmoi run_once install script for ble.sh (bash-specific; bash is being archived)
+- `run_once_after_10-install-tpm.sh` -- chezmoi run_once install script for TPM (tmux-specific; tmux is legacy)
+
+**Chezmoi run_once scripts (to KEEP at repo root):**
+- `run_once_before_10-install-starship.sh` -- chezmoi run_once install script for starship (used by both bash and nushell; stays at repo root)
 
 **Out of Scope (remaining in current location):**
 - `firefox/` -- userChrome.css, userContent.css, linux_assets/. Firefox config migration is being handled in a separate proposal.
@@ -116,7 +130,7 @@ Investigation confirms these pairs are duplicates (the legacy copy predates the 
 
 ### Live System State (Investigated 2026-02-05)
 
-**Config files on system (placed by old setup.sh or manually, NOT by chezmoi):**
+**Config files on system (placed by old setup.sh or manually; chezmoi has not been applied yet but will be bootstrapped in Phase 1.5):**
 - `~/.bashrc` -- matches `dot_bashrc` content (placed manually or by setup.sh)
 - `~/.blerc` -- matches `dot_blerc` content
 - `~/.tmux.conf` -- matches `dot_tmux.conf` content
@@ -192,11 +206,12 @@ archive/
       backup.sh
     init.vim
     chezmoi_run_once/
-      run_once_before_10-install-starship.sh
       run_once_before_20-install-blesh.sh
       run_once_after_10-install-tpm.sh
 ```
 
+> NOTE: `run_once_before_10-install-starship.sh` remains at the repo root. Starship is used by both bash and nushell, so it is not a legacy-only dependency. When chezmoi is applied, this script will execute but is idempotent (checks `command -v starship` before installing).
+>
 > NOTE: The following directories remain in their current repo-root locations (out of scope):
 > `firefox/`, `tridactyl/`, `btrfs/`, `macos/`. See "Out of Scope" in the inventory above.
 
@@ -260,13 +275,19 @@ case $(uname -s) in
 esac
 ```
 
-After updating `dot_bashrc`, manually copy it to `~/.bashrc` (since chezmoi has never been applied on this machine, we just copy directly).
+After updating `dot_bashrc` in the source repo, run `chezmoi apply` to deploy it to `~/.bashrc`. (Chezmoi is bootstrapped in Phase 1.5 before this step.)
 
 ### run_once Script Handling
 
-The three `run_once_*` scripts at the repo root are legacy install scripts written in chezmoi's naming convention. Since chezmoi has never been applied on this machine, these scripts have no associated chezmoi state -- they are simply shell scripts that were never executed by chezmoi. The software they install (starship, ble.sh, TPM) was installed by other means.
+The three `run_once_*` scripts at the repo root are chezmoi run_once scripts. When chezmoi is applied for the first time (Phase 1.5), they will be marked as "not yet run" in chezmoi's state database and will execute on the first `chezmoi apply`. Since the software is already installed, the scripts' guards (`command -v` checks and directory existence checks) prevent re-installation -- the first `chezmoi apply` will run them, they will detect existing installations, and exit cleanly.
 
-Moving these scripts to `archive/legacy/chezmoi_run_once/` is a straightforward `git mv` with no side effects. They are kept in the archive as documentation of what dependencies the legacy bash stack requires.
+**Disposition of each script:**
+
+- **`run_once_before_10-install-starship.sh`** -- KEEP at repo root. Starship is used by both bash and nushell, so it is not a legacy-only dependency. It remains a chezmoi-managed run_once script.
+- **`run_once_before_20-install-blesh.sh`** -- ARCHIVE to `archive/legacy/chezmoi_run_once/`. Ble.sh is bash-specific. Since bash is being archived, this install script should not run on future `chezmoi apply` invocations. Moving it out of the repo root (into a directory that `.chezmoiignore` excludes) prevents chezmoi from seeing it.
+- **`run_once_after_10-install-tpm.sh`** -- ARCHIVE to `archive/legacy/chezmoi_run_once/`. TPM is tmux-specific. Since tmux is legacy, this install script should not run on future `chezmoi apply` invocations.
+
+The archived scripts are kept as documentation of what dependencies the legacy bash/tmux stack required.
 
 ## Important Design Decisions
 
@@ -300,14 +321,16 @@ Moving these scripts to `archive/legacy/chezmoi_run_once/` is a straightforward 
 - If the user still opens VSCode, the config files continue to work
 - Creating symlinks into an "archive" directory is semantically misleading (it implies active management)
 
-### Decision 4: Keep run_once Scripts as Archive Reference
+### Decision 4: Keep Starship run_once at Root, Archive blesh and tpm
 
-**Decision:** Move `run_once_*` scripts to `archive/legacy/chezmoi_run_once/` rather than deleting them.
+**Decision:** Keep `run_once_before_10-install-starship.sh` at the repo root as a live chezmoi run_once script. Move `run_once_before_20-install-blesh.sh` and `run_once_after_10-install-tpm.sh` to `archive/legacy/chezmoi_run_once/`.
 
 **Why:**
-- They document what software was installed and how
-- They serve as a reference for what dependencies the legacy bash stack requires
-- If chezmoi is ever actually applied in the future, they can be restored to the repo root
+- Starship is used by both bash and nushell -- it is not a legacy-only dependency and should remain chezmoi-managed
+- Ble.sh is bash-specific; archiving its install script prevents chezmoi from running it on future applies
+- TPM is tmux-specific; tmux is legacy so its installer should not run going forward
+- The archived scripts document what software was installed and how, serving as a reference for legacy dependencies
+- If needed, archived scripts can be restored to the repo root to re-enable chezmoi management
 
 ## Edge Cases / Challenging Scenarios
 
@@ -327,10 +350,44 @@ At no point during this sequence are the source files unavailable. The "non-brea
 
 **Recovery:** In the recovery terminal (kept open from Phase 0):
 ```bash
-# Restore the original dot_bashrc from the backup branch and copy to system:
-git -C /home/mjr/code/personal/dotfiles show pre-legacy-archive-backup:dot_bashrc > ~/.bashrc
-# New terminals will now use the original bashrc with old paths
+# Restore the original dot_bashrc from the backup branch:
+cd /home/mjr/code/personal/dotfiles
+git checkout pre-legacy-archive-backup -- dot_bashrc
+
+# Deploy the restored dot_bashrc to ~/.bashrc via chezmoi:
+chezmoi apply --verbose
+# New terminals will now use the original bashrc with old paths.
+# (If chezmoi is not yet bootstrapped, fall back to manual copy:)
+# cp /home/mjr/code/personal/dotfiles/dot_bashrc ~/.bashrc
 ```
+
+### chezmoi apply Between Phases
+
+This edge case applies only after Phase 1.5 (chezmoi bootstrap). Before Phase 1.5, chezmoi is not initialized on this machine, so `chezmoi apply` would fail with an error about missing configuration -- this is harmless and does not affect the migration.
+
+After Phase 1.5, running `chezmoi apply` at any subsequent point during the migration is safe:
+
+If someone runs `chezmoi apply` after Phase 1.5 (chezmoi bootstrap) but before Phase 2 (bashrc rerouting), chezmoi deploys from the repo source, which still has the old `BASHFILES_DIR` path pointing to `bash/` (not `archive/legacy/bash/`). This is fine -- the old paths still work because the originals haven't been deleted yet (that happens in Phase 4).
+
+If `chezmoi apply` is run after Phase 2 but before Phase 4, chezmoi deploys the updated `dot_bashrc` (with archive paths). Since both old and archive paths resolve to identical files at this point, this is also safe.
+
+If `chezmoi apply` is run after Phase 4 (originals deleted) and Phase 5 (committed), chezmoi deploys the final state, which is the intended end state.
+
+**Summary:** Running `chezmoi apply` at any point during the migration is safe. The phased design ensures that at every intermediate state, all source paths resolve to valid files.
+
+### Local Modifications to chezmoi-Managed Files
+
+If `~/.bashrc` or other managed files have been manually edited on the system (diverging from what chezmoi would deploy from `dot_bashrc`), `chezmoi apply` will overwrite those local changes.
+
+**Detection (during Phase 1.5):**
+```bash
+chezmoi diff
+# Review output carefully. Any unexpected diffs indicate local modifications.
+```
+
+**Mitigation:** If `chezmoi diff` shows unexpected changes, review each one. Either:
+1. Incorporate the local change into the source repo file (e.g., edit `dot_bashrc` to include the local addition), then `chezmoi apply`
+2. Accept that the local change will be overwritten (if it was unintentional or obsolete)
 
 ### Symlink Target Already Deleted
 
@@ -384,7 +441,7 @@ This system runs Fedora 43 with kernel 6.17.x. Relevant platform considerations:
 
 After migration, the following files will remain on the system outside the dotfiles repo. These are artifacts of the legacy configuration that should be cleaned up when transitioning away from the bash/tmux stack.
 
-### Active Config Files (Manually Placed, Tracked in Repo)
+### Active Config Files (Deployed via chezmoi, Tracked in Repo)
 
 | System Path | Source of Truth | Notes |
 |---|---|---|
@@ -400,7 +457,7 @@ After migration, the following files will remain on the system outside the dotfi
 
 | System Path | Installed By | In Active Use | Cleanup Notes |
 |---|---|---|---|
-| `/usr/bin/starship` | System package manager | Yes (bash prompt) | Remove when moving to nushell |
+| `/usr/bin/starship` | System package manager / chezmoi run_once | Yes (bash + nushell prompt) | Keep; used by nushell as well |
 | `~/.local/share/blesh/` | Manual install (script in archive) | Yes (bash line editor) | `rm -rf ~/.local/share/blesh` when moving to nushell |
 | `~/.tmux/plugins/tpm` | Manual install (script in archive) | Yes (tmux plugin mgr) | `rm -rf ~/.tmux/plugins` when retiring tmux |
 | `~/.tmux/plugins/tmux-sensible` | TPM | Yes | Removed with TPM |
@@ -427,6 +484,7 @@ After migration, the following files will remain on the system outside the dotfi
 
 - Current working directory can be anything (all paths are absolute)
 - The dotfiles repo is clean (`git -C /home/mjr/code/personal/dotfiles status` shows no uncommitted changes to tracked files)
+- chezmoi is installed on the system (`command -v chezmoi`; install via `dnf install chezmoi` if missing)
 - The user has an open terminal session that can be used as a recovery shell if new shells break
 
 #### Tasks
@@ -442,7 +500,15 @@ bash -li -c 'echo "shell=$SHELL bashfiles=$BASHFILES_DIR starship=$(command -v s
 #   blesh=/home/mjr/.local/share/blesh
 ```
 
-**Step 0.2: Verify VSCode config is accessible (if VSCode is installed).**
+**Step 0.2: Verify chezmoi is installed.**
+
+```bash
+command -v chezmoi && chezmoi --version
+# Expected: chezmoi version X.Y.Z
+# If not installed: dnf install chezmoi (or see https://www.chezmoi.io/install/)
+```
+
+**Step 0.3: Verify VSCode config is accessible (if VSCode is installed).**
 
 ```bash
 # Check both symlinks resolve to real files:
@@ -456,7 +522,7 @@ test -s "$(readlink -f ~/.config/Code/User/keybindings.json)" && echo "keybindin
 test -s "$(readlink -f ~/.config/Code/User/settings.json)" && echo "settings OK" || echo "FAIL"
 ```
 
-**Step 0.3: Create a backup branch.**
+**Step 0.4: Create a backup branch.**
 
 ```bash
 cd /home/mjr/code/personal/dotfiles
@@ -508,10 +574,11 @@ cp -a init.vim archive/legacy/
 # Directory-based configs
 cp -a blackbox/* archive/legacy/blackbox/
 
-# Chezmoi run_once scripts
-cp -a run_once_before_10-install-starship.sh archive/legacy/chezmoi_run_once/
+# Chezmoi run_once scripts (only bash-specific and tmux-specific; starship stays at root)
 cp -a run_once_before_20-install-blesh.sh archive/legacy/chezmoi_run_once/
 cp -a run_once_after_10-install-tpm.sh archive/legacy/chezmoi_run_once/
+# NOTE: run_once_before_10-install-starship.sh is NOT copied to archive.
+# Starship is used by both bash and nushell; the script remains at the repo root.
 ```
 
 #### Validation
@@ -528,8 +595,7 @@ diff -r blackbox/ archive/legacy/blackbox/ && echo "blackbox: OK" || echo "black
 diff tmux.conf archive/legacy/tmux.conf && echo "tmux.conf: OK" || echo "tmux.conf: MISMATCH"
 diff init.vim archive/legacy/init.vim && echo "init.vim: OK" || echo "init.vim: MISMATCH"
 
-# Verify run_once scripts:
-diff run_once_before_10-install-starship.sh archive/legacy/chezmoi_run_once/run_once_before_10-install-starship.sh && echo "starship script: OK"
+# Verify run_once scripts (only blesh and tpm are archived; starship stays at root):
 diff run_once_before_20-install-blesh.sh archive/legacy/chezmoi_run_once/run_once_before_20-install-blesh.sh && echo "blesh script: OK"
 diff run_once_after_10-install-tpm.sh archive/legacy/chezmoi_run_once/run_once_after_10-install-tpm.sh && echo "tpm script: OK"
 
@@ -544,10 +610,100 @@ test -d bash/ && test -d vscode/ && test -f tmux.conf && echo "Originals intact"
 - Original files remain untouched at repo root
 - Running shells are unaffected
 
+### Phase 1.5: Bootstrap chezmoi
+
+#### Pre-conditions
+
+- Phase 1 completed (all files exist under `archive/legacy/`)
+- chezmoi is installed on the system: `command -v chezmoi` (install via `dnf install chezmoi` or `brew install chezmoi` if missing)
+- The dotfiles repo is at `/home/mjr/code/personal/dotfiles/` and is clean
+
+#### Tasks
+
+**Step 1.5.1: Verify chezmoi is available.**
+
+```bash
+chezmoi --version
+# Expected: chezmoi version X.Y.Z (any recent version)
+```
+
+**Step 1.5.2: Initialize chezmoi pointing at the existing repo.**
+
+```bash
+chezmoi init --source=/home/mjr/code/personal/dotfiles
+# This tells chezmoi where the source repo is. It does NOT modify any files yet.
+```
+
+**Step 1.5.3: Run chezmoi doctor to verify the setup.**
+
+```bash
+chezmoi doctor
+# All checks should pass. Pay attention to:
+#   - source-dir: should be /home/mjr/code/personal/dotfiles
+#   - dest-dir: should be /home/mjr (or /var/home/mjr)
+```
+
+**Step 1.5.4: Preview what chezmoi would do.**
+
+```bash
+chezmoi diff
+# Since the system files already match the repo (from setup.sh), the diff should
+# be minimal or empty. Review any differences carefully.
+#
+# Expected: near-no-op. The dot_bashrc -> ~/.bashrc, dot_blerc -> ~/.blerc, etc.
+# should already match. If there are diffs, see the "Local Modifications to
+# chezmoi-Managed Files" edge case.
+#
+# NOTE: The archive/legacy/ files created in Phase 1 will NOT appear in this diff.
+# The .chezmoiignore file already contains "archive/" in its ignore list, so chezmoi
+# does not consider those files as managed targets. This is expected behavior.
+```
+
+**Step 1.5.5: First chezmoi apply.**
+
+```bash
+chezmoi apply --verbose
+# This establishes chezmoi as the deployment mechanism. Since system files already
+# match the repo, this should be a near-no-op for file deployment.
+#
+# IMPORTANT: The run_once scripts will execute on this first apply:
+#   - run_once_before_10-install-starship.sh: will detect starship is installed, exit 0
+#   - run_once_before_20-install-blesh.sh: will detect blesh is installed, exit 0
+#   - run_once_after_10-install-tpm.sh: will detect TPM is installed, exit 0
+# All three scripts have guards that prevent re-installation.
+```
+
+#### Validation
+
+```bash
+# Verify chezmoi knows about managed files:
+chezmoi managed
+# Expected: should list ~/.bashrc, ~/.blerc, ~/.tmux.conf, ~/.config/starship.toml,
+#           ~/.config/tridactyl/tridactylrc, ~/.config/wezterm/wezterm.lua,
+#           ~/.config/nvim/* entries
+
+# Verify chezmoi state is clean (no pending changes):
+chezmoi diff
+# Expected: empty (no differences between source and target)
+
+# Verify the system still works:
+bash -li -c 'echo "shell=$SHELL bashfiles=$BASHFILES_DIR starship=$(command -v starship)"'
+# Expected: same output as Phase 0 Step 0.1
+```
+
+#### Expected State After Completion
+
+- chezmoi is initialized with source at `/home/mjr/code/personal/dotfiles/`
+- All `dot_*` files are deployed and tracked by chezmoi
+- The three run_once scripts have executed (harmlessly) and are recorded in chezmoi's state database
+- System files are unchanged (first apply was a no-op)
+- chezmoi is now the deployment mechanism for all subsequent changes
+
 ### Phase 2: Update dot_bashrc Source Paths
 
 #### Pre-conditions
 
+- Phase 1.5 completed (chezmoi bootstrapped and verified)
 - Phase 1 completed (all files exist under `archive/legacy/`)
 - The archive copies have been verified against originals (all diffs clean)
 - A recovery terminal is open (in case new shells break)
@@ -582,11 +738,15 @@ Three changes are required in `/home/mjr/code/personal/dotfiles/dot_bashrc`:
      Linux) source "$DOTFILES_DIR/archive/legacy/blackbox/blackbox.sh" ;;
    ```
 
-**Step 2.2: Copy the updated dot_bashrc to the live system.**
+**Step 2.2: Deploy the updated dot_bashrc via chezmoi.**
 
 ```bash
-# Since chezmoi has never been applied, we copy directly:
-cp /home/mjr/code/personal/dotfiles/dot_bashrc ~/.bashrc
+# Use chezmoi to deploy the updated dot_bashrc to ~/.bashrc:
+chezmoi diff
+# Review: should show only the path changes in dot_bashrc (BASHFILES_DIR, vscode/init.sh, blackbox.sh)
+
+chezmoi apply --verbose
+# This deploys the updated dot_bashrc to ~/.bashrc.
 ```
 
 **Step 2.3: Verify in a new shell.**
@@ -722,7 +882,8 @@ git rm -rf vscode/
 git rm -f tmux.conf
 git rm -rf blackbox/
 git rm -f init.vim
-git rm -f run_once_before_10-install-starship.sh
+# NOTE: run_once_before_10-install-starship.sh is NOT deleted. Starship is still wanted
+# (used by both bash and nushell). It remains at the repo root as a live chezmoi run_once script.
 git rm -f run_once_before_20-install-blesh.sh
 git rm -f run_once_after_10-install-tpm.sh
 ```
@@ -742,9 +903,12 @@ for d in bash vscode blackbox; do
 done
 
 # Verify deleted files are gone:
-for f in tmux.conf init.vim run_once_before_10-install-starship.sh run_once_before_20-install-blesh.sh run_once_after_10-install-tpm.sh; do
+for f in tmux.conf init.vim run_once_before_20-install-blesh.sh run_once_after_10-install-tpm.sh; do
   test -f "$f" && echo "FAIL: $f still exists" || echo "$f removed: OK"
 done
+
+# Verify starship run_once script is still at repo root (NOT deleted):
+test -f run_once_before_10-install-starship.sh && echo "starship run_once: still present OK" || echo "FAIL: starship run_once script missing (should not have been deleted)"
 
 # Verify out-of-scope directories are still present:
 for d in firefox tridactyl btrfs macos; do
@@ -765,11 +929,11 @@ bash -li -c 'echo "shell OK, BASHFILES_DIR=$BASHFILES_DIR"'
 
 #### Expected State After Completion
 
-- Repo root contains modern files plus out-of-scope legacy dirs: `dot_bashrc`, `dot_blerc`, `dot_tmux.conf`, `dot_config/`, `archive/`, `firefox/`, `tridactyl/`, `btrfs/`, `macos/`, `.chezmoiignore`, `.devcontainer/`, `bin/`, `README.md`
+- Repo root contains modern files plus out-of-scope legacy dirs: `dot_bashrc`, `dot_blerc`, `dot_tmux.conf`, `dot_config/`, `archive/`, `run_once_before_10-install-starship.sh`, `firefox/`, `tridactyl/`, `btrfs/`, `macos/`, `.chezmoiignore`, `.devcontainer/`, `bin/`, `README.md`
 - `git status` shows staged deletions (from `git rm`)
 - Shells work correctly (sourcing from archive paths)
 
-### Phase 5: Commit
+### Phase 5: Update .chezmoiignore and Commit
 
 #### Pre-conditions
 
@@ -779,30 +943,84 @@ bash -li -c 'echo "shell OK, BASHFILES_DIR=$BASHFILES_DIR"'
 
 #### Tasks
 
-**Step 5.1: Stage and commit.**
+**Step 5.1: Verify .chezmoiignore already excludes archive/.**
+
+The existing `.chezmoiignore` already contains `archive/` in its ignore list. This means chezmoi will not attempt to deploy any files from `archive/legacy/`. Verify this is the case:
 
 ```bash
 cd /home/mjr/code/personal/dotfiles
-git add dot_bashrc archive/legacy/
+grep -n 'archive/' .chezmoiignore
+# Expected: a line containing "archive/" (already present)
+```
+
+If `archive/` is NOT in `.chezmoiignore`, add it:
+
+```bash
+# Only if archive/ is missing from .chezmoiignore:
+echo 'archive/' >> .chezmoiignore
+```
+
+Also verify that the out-of-scope legacy directories are properly ignored:
+
+```bash
+for pattern in 'firefox/' 'tridactyl/' 'btrfs/' 'macos/' 'vscode/' 'bash/' 'blackbox/'; do
+  grep -q "$pattern" .chezmoiignore && echo "$pattern in .chezmoiignore: OK" || echo "WARNING: $pattern NOT in .chezmoiignore"
+done
+# Note: bash/, vscode/, blackbox/ entries in .chezmoiignore are now redundant since those
+# directories have been deleted. They can be left in place (harmless) or removed for cleanliness.
+```
+
+**Step 5.2: Verify chezmoi sees the correct managed files after all changes.**
+
+```bash
+chezmoi managed
+# Expected: should list ~/.bashrc, ~/.blerc, ~/.tmux.conf, ~/.config/starship.toml,
+#           ~/.config/tridactyl/tridactylrc, ~/.config/wezterm/wezterm.lua,
+#           ~/.config/nvim/* entries
+# Should NOT list any archive/legacy/ files.
+
+chezmoi diff
+# Expected: empty or shows only the dot_bashrc changes (if not yet applied since Phase 2)
+```
+
+**Step 5.3: Run chezmoi apply to ensure system is in sync.**
+
+```bash
+chezmoi apply --verbose
+# This ensures the system state matches the final repo state.
+# Expected: no-op or only applies dot_bashrc changes if Phase 2 apply was skipped.
+```
+
+**Step 5.4: Stage and commit.**
+
+```bash
+cd /home/mjr/code/personal/dotfiles
+git add dot_bashrc archive/legacy/ .chezmoiignore
 # Note: the git rm deletions from Phase 4 are already staged.
+# .chezmoiignore may or may not be modified; git add is harmless if unchanged.
 
 git status
 # Review carefully: should show dot_bashrc modified,
 # archive/legacy/* added, and in-scope legacy files deleted.
+# run_once_before_10-install-starship.sh should NOT appear (it stays at root).
 # firefox/, tridactyl/, btrfs/, macos/ should NOT appear in the diff.
 
 git commit -m "archive: move in-scope legacy config files to archive/legacy/
 
-Move bash/, vscode/, tmux.conf, blackbox/, init.vim, and run_once_*
-scripts to archive/legacy/. Update dot_bashrc to source from
+Move bash/, vscode/, tmux.conf, blackbox/, init.vim, and run_once scripts
+for blesh and tpm to archive/legacy/. Update dot_bashrc to source from
 archive/legacy/ paths.
+
+run_once_before_10-install-starship.sh remains at repo root (starship is
+used by both bash and nushell, not a legacy-only dependency).
 
 Out of scope (remain at repo root): firefox/, tridactyl/, btrfs/, macos/.
 Firefox config migration is tracked in a separate proposal.
 
 System-side changes (not in this commit):
+- chezmoi bootstrapped (Phase 1.5)
 - VSCode symlinks materialized to regular files (Phase 3)
-- ~/.bashrc updated to match dot_bashrc"
+- ~/.bashrc deployed via chezmoi apply"
 ```
 
 #### Validation
@@ -817,8 +1035,16 @@ git status
 # Verify the commit contains the expected changes:
 git show --stat HEAD
 # Expected: files renamed/deleted for bash/, vscode/, blackbox/, tmux.conf, init.vim,
-#           run_once_* scripts. dot_bashrc modified.
+#           run_once blesh and tpm scripts. dot_bashrc modified.
+#           run_once_before_10-install-starship.sh NOT in diff.
 #           NO changes to firefox/, tridactyl/, btrfs/, macos/.
+
+# Verify chezmoi is fully in sync:
+chezmoi diff
+# Expected: empty (no differences between source and target)
+
+chezmoi managed
+# Expected: lists managed files; no archive/legacy/ entries
 
 # Final end-to-end smoke test:
 bash -li -c '
@@ -836,18 +1062,42 @@ tmux new-session -d -s final-test 'sleep 1' && tmux kill-session -t final-test &
 for d in firefox tridactyl btrfs macos; do
   test -d "$d" && echo "$d: still in place OK" || echo "WARNING: $d missing"
 done
+
+# Verify starship run_once script remains at repo root:
+test -f run_once_before_10-install-starship.sh && echo "starship run_once: present OK" || echo "FAIL"
 ```
 
 #### Expected State After Completion
 
 - Single atomic commit captures the entire repo-side migration
 - `git status` is clean
+- chezmoi is fully in sync (`chezmoi diff` is empty)
 - Shell, tmux, and VSCode config all functional
-- The dotfiles repo root contains: `dot_*`, `dot_config/`, `archive/`, `firefox/`, `tridactyl/`, `btrfs/`, `macos/`, `.chezmoiignore`, `.devcontainer/`, `bin/`, `README.md`
+- The dotfiles repo root contains: `dot_*`, `dot_config/`, `archive/`, `run_once_before_10-install-starship.sh`, `firefox/`, `tridactyl/`, `btrfs/`, `macos/`, `.chezmoiignore`, `.devcontainer/`, `bin/`, `README.md`
 
 ## Rollback Strategy
 
-Use `git reflog` and manual fixup if needed. The `pre-legacy-archive-backup` branch from Phase 0 preserves the exact pre-migration state.
+To rollback the migration, restore the repo state from the backup branch and re-sync the system via chezmoi:
+
+```bash
+cd /home/mjr/code/personal/dotfiles
+
+# Option A: Full rollback to pre-migration state
+git checkout pre-legacy-archive-backup -- .
+# This restores all files to their pre-migration state in the working tree.
+# Then commit the restoration and sync the system:
+git add -A && git commit -m "rollback: restore pre-legacy-archive state"
+chezmoi apply --verbose
+# chezmoi will deploy the restored dot_bashrc (with original paths) to ~/.bashrc.
+
+# Option B: Partial rollback (use git reflog to find the specific commit)
+git reflog
+# Find the commit hash before the migration commit, then:
+git revert <commit-hash>
+chezmoi apply --verbose
+```
+
+The `pre-legacy-archive-backup` branch from Phase 0 preserves the exact pre-migration state. Note: system-side changes from Phase 3 (VSCode symlinks materialized to regular files) cannot be rolled back via git alone -- the symlinks would need to be manually re-created if desired.
 
 ## Open Questions
 

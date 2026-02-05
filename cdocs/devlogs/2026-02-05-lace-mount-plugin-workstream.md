@@ -63,13 +63,17 @@ End goal: Vetted mid-level and detailed implementation proposals with recommende
 | 2 | Review/refine Report 2 | **done** | cdocs/reviews/2026-02-05-review-of-claude-devcontainer-bundling.md |
 | 2 | Review/refine Report 3 | **done** | cdocs/reviews/2026-02-05-review-of-claude-tools-streamlining.md |
 | 2 | Review/refine Report 4 | **done** | cdocs/reviews/2026-02-05-review-of-agent-situational-awareness.md |
-| 3 | Mid-level proposal | pending | |
-| 3 | Proposal review rounds | pending | |
-| 3 | Executive summary | pending | |
-| 4 | User clarification | pending | |
-| 5 | Detailed impl proposals | pending | |
-| 5 | Sequencing report | pending | |
-| 6 | Final iteration | pending | |
+| 3 | Mid-level proposal | **done** | cdocs/proposals/2026-02-05-lace-mount-enabled-claude-plugin.md |
+| 3 | Proposal self-review (1 round) | **done** | cdocs/reviews/2026-02-05-review-of-lace-mount-enabled-claude-plugin.md |
+| 3 | Executive summary | **done** | cdocs/reports/2026-02-05-mount-plugin-workstream-executive-summary.md |
+| 4 | User clarification (4 questions) | **done** | Resolved in proposal Open Questions section |
+| 5 | Detailed impl proposals | **done** | cdocs/proposals/2026-02-05-lace-claude-access-detailed-implementation.md |
+| 5 | Proposal self-review (round 1) | **done** | cdocs/reviews/2026-02-05-review-of-lace-claude-access-detailed-implementation.md |
+| 5 | Sequencing report | **done** | cdocs/reports/2026-02-05-implementation-sequencing.md |
+| 6 | Fresh-agent review (round 2) of detailed proposal | **done** | cdocs/reviews/2026-02-05-r2-review-of-lace-claude-access-detailed-implementation.md |
+| 6 | Fresh-agent review of sequencing report | **done** | cdocs/reviews/2026-02-05-review-of-implementation-sequencing.md |
+| 6 | Apply round 2 feedback (detailed proposal) | **done** | (revisions entry in proposal frontmatter) |
+| 6 | Apply review feedback (sequencing report) | **done** | (edits applied to report) |
 
 ## Changes Made
 

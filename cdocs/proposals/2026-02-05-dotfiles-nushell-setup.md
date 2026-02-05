@@ -13,70 +13,11 @@ last_reviewed:
   by: "@claude-opus-4-6"
   at: 2026-02-05T23:15:00-08:00
   round: 3
-revisions:
-  - at: 2026-02-05T23:00:00-08:00
-    by: "@claude-opus-4-6"
-    changes:
-      - "Reworked proposal to assume archive migration is complete: bash config files are at archive/legacy/bash/, not top-level paths"
-      - "Removed all Python/virtualenv/venv considerations: auto-venv hooks, overlay activate.nu mechanism, virtualenv gotchas, Python prompt display"
-      - "Removed blesh visual mode concerns: WezTerm copy mode (Alt+C) is sufficient"
-      - "Changed tone from cautious evaluation to decisive daily-driver setup: nushell is the target shell, not an experiment"
-      - "Updated nushell version from 'not installed' to v0.110.0 (now installed)"
-      - "Removed install-nushell steps and availability guards"
-      - "Simplified rollback plan: switch default_prog back to bash in wezterm.lua"
-      - "Collapsed three phases into two: Phase 1 is the full setup, Phase 2 is nushell-native enhancements"
-      - "Confirmed starship.toml stays at dot_config/starship.toml (not archived) and is shared with nushell"
-      - "Removed Decision 6 (overlay-based venv activation) and related edge cases"
-      - "Removed open questions about activate.nu availability and ble.sh equivalence"
-  - at: 2026-02-05T18:50:00-08:00
-    by: "@claude-opus-4-6"
-    changes:
-      - "Expanded implementation phases with concrete step-by-step instructions, exact commands, file contents, and chezmoi integration"
-      - "Expanded test plan with runnable nushell/bash commands and expected outputs for each verification item"
-      - "Added Nushell-Specific Gotchas section (6 gotchas: overlay parse-time, keybinding append, env scoping, module loading order, untranslatable bash features, wezterm compatibility)"
-      - "Added Rollback Plan with three scenarios (quick fix, abandon entirely, parallel evaluation)"
-      - "Fixed $env.config.history: changed full-record assignment to individual field assignments (same pattern as completions fix)"
-      - "Fixed Gotcha 3 env scoping: corrected if-block behavior (propagates in v0.100+), clarified closure vs block distinction"
-      - "Cached hostname in env.nu to avoid per-command sys host call in pre_execution hook"
-      - "Fixed chezmoi install script shebang ordering in Chezmoi Integration section"
-      - "Fixed .chezmoiignore paths: nushell history lives at $nu.data-dir, not config dir"
-      - "Fixed rollback scenario 2: chezmoi does not auto-delete targets, added manual rm"
-      - "Fixed carapace cache command in Step 2.1: use bash redirection instead of nushell save"
-      - "Corrected OSC 133 attribution: nushell shell_integration, not starship"
-      - "Updated PATH verification to use explicit closure syntax instead of deprecated $it"
-  - at: 2026-02-05T12:35:00-08:00
-    by: "@claude-opus-4-6"
-    changes:
-      - "Fixed auto-venv hook: replaced closure-based overlay use (parse-time error) with string-based code: pattern"
-      - "Fixed keybindings: changed = to ++= to append rather than overwrite default keybindings"
-      - "Fixed completions config: changed record assignment to individual field assignments to avoid partial overwrite"
-      - "Added carapace guard to completions.nu main code block"
-      - "Fixed LESS_TERMCAP escape codes: replaced ansi -e with char escape for correct CSI sequences"
-      - "Fixed full_history hook: added explicit newline to prevent line concatenation"
-      - "Phase 1 now creates stub files for all six scripts"
-      - "Added note about nushell breaking-change history between versions"
-      - "Removed unused SCRIPTS_DIR const from config.nu"
-      - "Updated venv fallback edge case to use closure-safe env var approach"
 ---
 
 # Nushell Configuration Setup for Dotfiles
 
-> BLUF: Set up nushell as the primary interactive shell, replacing the archived bash/ble.sh setup. The configuration preserves core preferences -- vi-mode editing, solarized dark colors, starship prompt, large history, safety aliases -- while leveraging nushell idioms: structured data pipelines, SQLite-backed history, the reedline line editor, and carapace-based completions. The setup uses a modular file layout (env.nu, config.nu, plus a `scripts/` directory for utilities and hooks) managed through chezmoi at `dot_config/nushell/`. Bash remains available for scripting but nushell is the daily driver. The legacy bash configuration has already been archived per the [archive migration proposal](2026-02-05-dotfiles-legacy-archive-migration.md).
->
-> **Prerequisites (already complete):**
-> - [Archive Migration](2026-02-05-dotfiles-legacy-archive-migration.md) -- bash config archived to `archive/legacy/bash/`
-> - Nushell v0.110.0 installed
-> - Starship prompt installed and configured (`dot_config/starship.toml`)
->
-> **New dependency:**
-> - Carapace completion engine
->
-> **Key Sources:**
-> - [Nushell Configuration Docs](https://www.nushell.sh/book/configuration.html)
-> - [Nushell Line Editor / Reedline Docs](https://www.nushell.sh/book/line_editor.html)
-> - [Nushell Hooks](https://www.nushell.sh/book/hooks.html)
-> - [Starship + Nushell Integration](https://www.nushell.sh/book/3rdpartyprompts.html)
-> - [Carapace Completion Engine](https://carapace.sh/)
+> BLUF: Set up nushell as the primary interactive shell, replacing the archived bash/ble.sh setup. The configuration preserves core preferences (vi-mode, solarized dark, starship, large history, safety aliases) while adopting nushell idioms -- structured pipelines, SQLite history, reedline, and carapace completions. The modular file layout (`dot_config/nushell/` with `scripts/` directory) is chezmoi-managed; bash remains available for scripting. Depends on the [archive migration](2026-02-05-dotfiles-legacy-archive-clean.md) being complete and adds carapace as a new dependency.
 
 ## Objective
 
@@ -91,7 +32,7 @@ Establish a nushell configuration that:
 
 ### Archived Shell Stack
 
-The previous bash setup has been archived to `archive/legacy/bash/` per the [archive migration proposal](2026-02-05-dotfiles-legacy-archive-migration.md). The archived configuration serves as reference for what to port:
+The previous bash setup has been archived to `archive/legacy/bash/` per the [archive migration proposal](2026-02-05-dotfiles-legacy-archive-clean.md). The archived configuration serves as reference for what to port:
 
 | Component | Tool | Archive Location |
 |-----------|------|------------------|
@@ -1043,7 +984,9 @@ open ~/.full_history | lines | where { |l| not ($l =~ "^\\d{4}-\\d{2}-\\d{2}") }
 
 **Goal:** Nushell is fully configured and set as the default interactive shell in WezTerm.
 
-**Prerequisite:** The [archive migration](2026-02-05-dotfiles-legacy-archive-migration.md) is complete. Bash config is at `archive/legacy/bash/`, `~/.bashrc` sources from archive paths or is minimal.
+**Prerequisites:**
+- The [archive migration](2026-02-05-dotfiles-legacy-archive-clean.md) is complete. Bash config is at `archive/legacy/bash/`, `~/.bashrc` sources from archive paths.
+- Chezmoi is functional (can run `chezmoi apply` to deploy config files).
 
 #### Step 1.1: Create Chezmoi Directory Structure
 

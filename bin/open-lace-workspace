@@ -321,10 +321,10 @@ if [[ -n "$EXISTING_PANE" ]]; then
   fi
 fi
 
-# Ensure WezTerm uses the lace config (which defines the lace SSH domain).
-# Without this, wezterm connect won't find the domain unless the user has
-# symlinked config/wezterm/wezterm.lua to ~/.config/wezterm/wezterm.lua.
-export WEZTERM_CONFIG_FILE="${WEZTERM_CONFIG_FILE:-$REPO_ROOT/config/wezterm/wezterm.lua}"
+# NOTE: The lace-specific wezterm config was removed (migrated to lace.wezterm plugin).
+# The personal wezterm config at ~/.config/wezterm/wezterm.lua now loads the plugin
+# which pre-registers SSH domains for the lace port range (22425-22499).
+# No WEZTERM_CONFIG_FILE override is needed.
 
 # Pre-populate known_hosts with the container's current SSH host keys.
 # WezTerm's libssh backend reads ~/.ssh/known_hosts to verify host keys.

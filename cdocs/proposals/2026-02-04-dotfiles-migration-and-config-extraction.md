@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/dotfiles-migration
 type: proposal
 state: live
-status: accepted
+status: result_accepted
 tags: [dotfiles, devcontainer, chezmoi, wezterm-plugin, migration, lace-plugins]
 last_reviewed:
   status: revision_requested

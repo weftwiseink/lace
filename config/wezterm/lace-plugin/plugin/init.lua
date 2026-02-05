@@ -1,122 +1,192 @@
 -- Lace WezTerm Plugin
--- Provides SSH domain configuration and worktree picker for lace devcontainers.
+-- Provides SSH domain configuration and project discovery for lace devcontainers.
 --
 -- Usage:
 --   local lace = wezterm.plugin.require("file:///path/to/lace/config/wezterm/lace-plugin")
 --   lace.apply_to_config(config, {
 --     ssh_key = wezterm.home_dir .. "/.ssh/lace_devcontainer",
---     domain_name = "lace",
---     ssh_port = "localhost:2222",
 --   })
 --
--- Or manually trigger the worktree picker:
---   wezterm.action.EmitEvent("lace.trigger-worktree-picker.lace")
+-- Features:
+--   - Pre-registers SSH domains for ports 22425-22499 (lace port range)
+--   - Discovers running devcontainers via Docker CLI when picker is invoked
+--   - Project picker shows all running lace devcontainers
+--   - No central registry needed - fully decoupled discovery
+--
+-- Keybinding:
+--   CTRL+SHIFT+P - Open project picker (configurable via picker_key option)
+--
+-- Or manually trigger the picker:
+--   wezterm.action.EmitEvent("lace.project-picker")
 
 local wezterm = require("wezterm")
 local act = wezterm.action
 
 local M = {}
 
+-- Port range for lace devcontainer SSH servers
+-- w=22, e=4, z=25 spells "wez" in alphabet positions
+M.PORT_MIN = 22425
+M.PORT_MAX = 22499
+
 -- Configurable defaults
 M.defaults = {
-  domain_name = "lace",           -- Name of the SSH domain
-  ssh_port = "localhost:2222",    -- SSH connection address
-  username = "node",              -- Container user
-  workspace_path = "/workspace",  -- Where worktrees are mounted
-  main_worktree = "main",         -- Default worktree name
+  username = "node",                    -- Default container user
+  workspace_path = "/workspace",        -- Where worktrees are mounted
   remote_wezterm_path = "/usr/local/bin/wezterm",
-  -- NOTE: domain_name "lace" may conflict if multiple projects use this plugin
-  -- with different configurations. Future work should consider a namespacing
-  -- strategy (e.g., "lace:<project-name>") to avoid collision.
+  picker_key = "p",                     -- Key for project picker
+  picker_mods = "CTRL|SHIFT",           -- Modifiers for project picker
+  enable_status_bar = true,             -- Show workspace in status bar
 }
 
 -- Track registered event handlers to prevent duplicates
 M._registered_events = {}
 M._status_registered = false
+M._domains_registered = false
 
---- Set up the SSH domain for connecting to the devcontainer.
+--- Pre-register SSH domains for all ports in the lace range.
+-- This allows connecting to any discovered project without needing
+-- to register domains dynamically (which WezTerm doesn't support).
 -- @param config WezTerm config object
--- @param opts Plugin options
-local function setup_ssh_domain(config, opts)
+-- @param opts Plugin options (ssh_key required)
+local function setup_port_domains(config, opts)
+  if M._domains_registered then
+    return
+  end
+
   config.ssh_domains = config.ssh_domains or {}
-  table.insert(config.ssh_domains, {
-    name = opts.domain_name,
-    remote_address = opts.ssh_port,
-    username = opts.username,
-    remote_wezterm_path = opts.remote_wezterm_path,
-    multiplexing = "WezTerm",
-    ssh_option = {
-      identityfile = opts.ssh_key,
-      -- Host key verification should be handled by pre-populating ~/.ssh/known_hosts
-      -- before connecting. Do NOT use userknownhostsfile = "/dev/null".
-    },
-  })
+
+  for port = M.PORT_MIN, M.PORT_MAX do
+    table.insert(config.ssh_domains, {
+      name = "lace:" .. port,
+      remote_address = "localhost:" .. port,
+      username = opts.username,
+      remote_wezterm_path = opts.remote_wezterm_path,
+      multiplexing = "WezTerm",
+      ssh_option = {
+        identityfile = opts.ssh_key,
+        -- Host key verification handled by pre-populating ~/.ssh/known_hosts
+      },
+    })
+  end
+
+  M._domains_registered = true
+  wezterm.log_info("lace: registered " .. (M.PORT_MAX - M.PORT_MIN + 1) .. " SSH domains for ports " .. M.PORT_MIN .. "-" .. M.PORT_MAX)
 end
 
---- Create an action to spawn a workspace connected to a container worktree.
--- @param name Worktree name
--- @param opts Plugin options
--- @return WezTerm action
-local function spawn_worktree_workspace(name, opts)
-  return act.SwitchToWorkspace({
-    name = name,
-    spawn = {
-      domain = { DomainName = opts.domain_name },
-      cwd = opts.workspace_path .. "/" .. name,
-    },
+--- Discover running lace devcontainers via Docker CLI.
+-- Queries Docker for containers with devcontainer.local_folder label
+-- and ports in the lace range (22425-22499).
+-- @return Table of projects keyed by name: { port, name, path, user, container_id }
+local function discover_projects()
+  -- Get all devcontainers with their ports and project paths
+  local success, stdout, stderr = wezterm.run_child_process({
+    "docker", "ps",
+    "--filter", "label=devcontainer.local_folder",
+    "--format", "{{.ID}}\t{{.Label \"devcontainer.local_folder\"}}\t{{.Ports}}"
   })
+
+  if not success then
+    wezterm.log_warn("lace: docker ps failed: " .. (stderr or "unknown error"))
+    return {}
+  end
+
+  local projects = {}
+
+  for line in stdout:gmatch("[^\n]+") do
+    local id, local_folder, ports = line:match("^(%S+)\t(.+)\t(.*)$")
+    if id and local_folder then
+      -- Extract project name from path
+      local name = local_folder:match("([^/]+)$")
+
+      -- Find SSH port in expected range (22425-22499)
+      -- Port format: "0.0.0.0:22425->2222/tcp" or ":::22425->2222/tcp"
+      local ssh_port = nil
+      for port_str in ports:gmatch("(%d+)%->2222/tcp") do
+        local p = tonumber(port_str)
+        if p and p >= M.PORT_MIN and p <= M.PORT_MAX then
+          ssh_port = p
+          break
+        end
+      end
+
+      if ssh_port and name then
+        -- Get container user
+        local user_success, user_stdout = wezterm.run_child_process({
+          "docker", "inspect", id, "--format", "{{.Config.User}}"
+        })
+        local user = M.defaults.username
+        if user_success and user_stdout then
+          local extracted_user = user_stdout:gsub("%s+", "")
+          if extracted_user ~= "" and extracted_user ~= "root" then
+            user = extracted_user
+          end
+        end
+
+        projects[name] = {
+          port = ssh_port,
+          name = name,
+          path = local_folder,
+          user = user,
+          container_id = id,
+        }
+      end
+    end
+  end
+
+  return projects
 end
 
---- Set up the worktree picker event handler.
--- Queries /workspace/ in the container and shows a fuzzy selector.
+--- Set up the project picker event handler.
+-- Shows a selector with all discovered lace devcontainers.
 -- @param opts Plugin options
--- @return Event name for triggering the picker
-local function setup_worktree_picker(opts)
-  local event_name = "lace.trigger-worktree-picker." .. opts.domain_name
+local function setup_project_picker(opts)
+  local event_name = "lace.project-picker"
 
-  -- Only register the event once per domain
+  -- Only register once
   if M._registered_events[event_name] then
     return event_name
   end
 
   wezterm.on(event_name, function(window, pane)
-    local port = opts.ssh_port:match(":(%d+)$") or "2222"
-    local success, stdout = wezterm.run_child_process({
-      "ssh", "-p", port,
-      "-i", opts.ssh_key,
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "UserKnownHostsFile=/dev/null",
-      "-o", "LogLevel=ERROR",
-      opts.username .. "@localhost",
-      "ls", "-1", opts.workspace_path,
-    })
-
-    if not success then
-      window:toast_notification(opts.domain_name, "Container not running or SSH failed", nil, 3000)
-      return
-    end
-
+    local projects = discover_projects()
     local choices = {}
-    for name in stdout:gmatch("[^\n]+") do
-      -- Skip hidden dirs and common non-worktree items
-      if not name:match("^%.") and name ~= "node_modules" then
-        table.insert(choices, { id = name, label = name })
-      end
+
+    for name, info in pairs(projects) do
+      table.insert(choices, {
+        id = name,
+        label = string.format("[*] %s (:%d) - %s", name, info.port, info.path),
+      })
     end
 
     if #choices == 0 then
-      window:toast_notification(opts.domain_name, "No worktrees found in " .. opts.workspace_path, nil, 3000)
+      window:toast_notification("lace", "No running devcontainers found", nil, 5000)
       return
     end
 
+    -- Sort by label for consistent ordering
+    table.sort(choices, function(a, b) return a.label < b.label end)
+
     window:perform_action(
       act.InputSelector({
-        title = "Select Worktree (" .. opts.domain_name .. ")",
+        title = "Lace Projects",
         choices = choices,
         action = wezterm.action_callback(function(win, _, id)
-          if id then
-            win:perform_action(spawn_worktree_workspace(id, opts), pane)
-          end
+          if not id then return end
+          local project = projects[id]
+          if not project then return end
+
+          -- Connect via pre-registered port-based domain
+          win:perform_action(
+            act.SwitchToWorkspace({
+              name = id,
+              spawn = {
+                domain = { DomainName = "lace:" .. project.port },
+                cwd = opts.workspace_path,
+              },
+            }),
+            pane
+          )
         end),
       }),
       pane
@@ -146,41 +216,32 @@ local function setup_status_bar()
   M._status_registered = true
 end
 
--- NOTE: Keybindings (Leader+D, Leader+W) are intentionally disabled.
--- When multiple projects use this plugin with different configurations,
--- the keybindings conflict (each overwriting the previous).
--- See RFP: cdocs/proposals/2026-02-04-wezterm-project-picker.md for the
--- planned project picker feature that will provide a unified UI for
--- selecting which project's devcontainer to connect to.
---
--- For now, users can invoke the picker event directly via:
---   wezterm.action.EmitEvent("lace.trigger-worktree-picker.<domain_name>")
---
--- Or add their own keybindings:
---   table.insert(config.keys, {
---     key = "d", mods = "LEADER",
---     action = act.SwitchToWorkspace({
---       name = "lace",
---       spawn = { domain = { DomainName = "lace" }, cwd = "/workspace/main" },
---     }),
---   })
+--- Set up keybindings for the project picker.
+-- @param config WezTerm config object
+-- @param opts Plugin options
+-- @param picker_event Event name for the picker
 local function setup_keybindings(config, opts, picker_event)
-  -- Keybindings disabled pending project picker feature
-  -- config.keys = config.keys or {}
-  -- table.insert(config.keys, { key = "d", mods = "LEADER", action = ... })
-  -- table.insert(config.keys, { key = "w", mods = "LEADER", action = ... })
+  if not opts.picker_key then
+    return
+  end
+
+  config.keys = config.keys or {}
+  table.insert(config.keys, {
+    key = opts.picker_key,
+    mods = opts.picker_mods,
+    action = act.EmitEvent(picker_event),
+  })
 end
 
 --- Apply the lace plugin configuration to a WezTerm config.
 -- @param config WezTerm config object (from config_builder())
 -- @param opts Plugin options:
 --   - ssh_key (required): Path to SSH private key for container access
---   - domain_name (optional): SSH domain name, default "lace"
---   - ssh_port (optional): SSH address, default "localhost:2222"
---   - username (optional): Container user, default "node"
---   - workspace_path (optional): Container worktree path, default "/workspace"
---   - main_worktree (optional): Default worktree name, default "main"
+--   - username (optional): Default container user, default "node"
+--   - workspace_path (optional): Container workspace path, default "/workspace"
 --   - remote_wezterm_path (optional): Path to wezterm in container
+--   - picker_key (optional): Key for project picker, default "p"
+--   - picker_mods (optional): Modifiers for picker, default "CTRL|SHIFT"
 --   - enable_status_bar (optional): Show workspace in status bar, default true
 function M.apply_to_config(config, opts)
   opts = opts or {}
@@ -198,45 +259,32 @@ function M.apply_to_config(config, opts)
     return
   end
 
-  -- Set up SSH domain for devcontainer connection
-  setup_ssh_domain(config, opts)
+  -- Pre-register SSH domains for all ports in range
+  setup_port_domains(config, opts)
 
-  -- Set up worktree picker event
-  local picker_event = setup_worktree_picker(opts)
+  -- Set up project picker event
+  local picker_event = setup_project_picker(opts)
+
+  -- Set up keybindings for picker
+  setup_keybindings(config, opts, picker_event)
 
   -- Set up status bar (unless disabled)
-  if opts.enable_status_bar ~= false then
+  if opts.enable_status_bar then
     setup_status_bar()
   end
-
-  -- Set up keybindings (currently disabled)
-  setup_keybindings(config, opts, picker_event)
 end
 
---- Get the worktree picker event name for a domain.
+--- Manually trigger project discovery (for testing/debugging).
+-- @return Table of discovered projects
+function M.discover()
+  return discover_projects()
+end
+
+--- Get the project picker event name.
 -- Useful for adding custom keybindings.
--- @param domain_name The SSH domain name
 -- @return Event name string
-function M.get_picker_event(domain_name)
-  return "lace.trigger-worktree-picker." .. (domain_name or M.defaults.domain_name)
-end
-
---- Create an action to connect to the devcontainer's main worktree.
--- @param opts Options (domain_name, workspace_path, main_worktree)
--- @return WezTerm action
-function M.connect_action(opts)
-  opts = opts or {}
-  local domain_name = opts.domain_name or M.defaults.domain_name
-  local workspace_path = opts.workspace_path or M.defaults.workspace_path
-  local main_worktree = opts.main_worktree or M.defaults.main_worktree
-
-  return act.SwitchToWorkspace({
-    name = domain_name,
-    spawn = {
-      domain = { DomainName = domain_name },
-      cwd = workspace_path .. "/" .. main_worktree,
-    },
-  })
+function M.get_picker_event()
+  return "lace.project-picker"
 end
 
 return M

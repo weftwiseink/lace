@@ -5,8 +5,8 @@ first_authored:
   at: 2026-01-30
 task_list: cdocs/reports
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [quality, assessment, cdocs, plugin-architecture]
 ---
 

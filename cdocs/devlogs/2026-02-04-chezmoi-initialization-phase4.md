@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-04T23:00:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [dotfiles, chezmoi, migration, phase4]
 last_reviewed:
   status: accepted

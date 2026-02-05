@@ -3,8 +3,9 @@ first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-04T23:30:00-08:00
 type: proposal
-state: live
-status: review_ready
+state: evolved
+status: accepted
+evolved_into: cdocs/proposals/2026-02-04-port-scanning-wezterm-discovery.md
 tags: [wezterm, plugin, multi-project, port-allocation, devcontainer, lua]
 related_to:
   - cdocs/proposals/2026-02-04-wezterm-project-picker.md

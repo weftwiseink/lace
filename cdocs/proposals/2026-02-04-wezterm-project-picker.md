@@ -3,8 +3,9 @@ first_authored:
   by: "@claude-haiku-4-5-20251001"
   at: 2026-02-04T00:00:00-08:00
 type: proposal
-state: live
-status: draft
+state: evolved
+status: accepted
+evolved_into: cdocs/proposals/2026-02-04-multi-project-wezterm-plugin.md
 tags: [wezterm, plugin, keybinding, project-picker, ui, cli]
 revisions:
   - at: 2026-02-04T20:30:00-08:00

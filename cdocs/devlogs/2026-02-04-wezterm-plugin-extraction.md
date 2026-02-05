@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T23:00:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
+state: archived
 status: done
 tags: [wezterm, plugin, extraction, dotfiles, migration]
 implements: cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md

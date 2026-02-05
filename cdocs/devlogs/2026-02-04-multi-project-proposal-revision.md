@@ -3,7 +3,7 @@ first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-05T00:00:00-08:00
 type: devlog
-state: live
+state: archived
 status: done
 tags: [wezterm, multi-project, proposal-revision, port-allocation, registry]
 related_to:

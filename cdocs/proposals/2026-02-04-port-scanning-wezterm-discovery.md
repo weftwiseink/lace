@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T16:30:00-08:00
 type: proposal
 state: live
-status: review_ready
+status: implementation_ready
 tags: [wezterm, port-scanning, discovery, multi-project, devcontainer, decoupled, docker-cli]
 related_to:
   - cdocs/proposals/2026-02-04-wezterm-project-picker.md

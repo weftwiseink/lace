@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/plugins-system
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_complete
 tags: [devcontainer, mounts, plugins, lace-cli, architecture]
 supersedes: cdocs/proposals/2026-02-04-dev-dependency-cross-project-mounts.md
 last_reviewed:

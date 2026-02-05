@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T12:00:00-05:00
 type: report
 subtype: analysis
-state: live
+state: archived
 status: done
 tags: [wezterm, plugin, lua, devcontainer, local-development]
 ---

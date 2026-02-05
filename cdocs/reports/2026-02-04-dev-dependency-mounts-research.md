@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-04T14:00:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [devcontainer, mounts, architecture, plugins, dependencies, analysis]
 ---
 

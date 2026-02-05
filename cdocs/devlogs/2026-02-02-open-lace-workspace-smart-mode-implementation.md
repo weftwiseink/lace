@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-02T11:00:00-08:00
 task_list: lace/devcontainer-workflow
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [devcontainer, wezterm, developer-experience, workflow-automation, smart-mode]
 last_reviewed:
   status: accepted

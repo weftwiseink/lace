@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-04T22:38:00-08:00
 task_list: lace/plugins-system
 type: review
-state: live
+state: archived
 status: done
 tags: [self, implementation, test-coverage, architecture]
 ---

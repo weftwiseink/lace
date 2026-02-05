@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-02T09:15:00-08:00
 task_list: lace/devcontainer-architecture
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [git, worktrees, agents, parallelism, operations, sync, ecosystem, analysis]
 ---
 

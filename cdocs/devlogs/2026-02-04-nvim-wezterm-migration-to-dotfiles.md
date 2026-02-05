@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T19:58:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
+state: archived
 status: complete
 tags: [nvim, wezterm, dotfiles, chezmoi, migration]
 implements: cdocs/proposals/2026-02-04-nvim-wezterm-config-migration.md

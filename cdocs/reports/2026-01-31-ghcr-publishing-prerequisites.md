@@ -4,7 +4,7 @@ first_authored:
   at: 2026-01-31T18:30:00-08:00
 task_list: lace/devcontainer-features
 type: report
-state: live
+state: archived
 status: done
 tags: [ghcr, github-actions, publishing, prerequisites, devcontainer-features]
 ---

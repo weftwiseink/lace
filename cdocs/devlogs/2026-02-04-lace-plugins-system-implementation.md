@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-04T22:30:00-08:00
 task_list: lace/plugins-system
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [devcontainer, mounts, plugins, lace-cli, implementation]
 last_reviewed:
   status: accepted

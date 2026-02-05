@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-02T08:30:00-08:00
 task_list: lace/devcontainer-workflow
 type: devlog
-state: live
-status: implementation_wip
+state: archived
+status: done
 tags: [devcontainer, wezterm, developer-experience, workflow-automation]
 ---
 

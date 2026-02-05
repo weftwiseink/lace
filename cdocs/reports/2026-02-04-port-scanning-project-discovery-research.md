@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T22:15:00-08:00
 type: report
 subtype: technical-research
-state: live
+state: archived
 status: done
 tags: [wezterm, port-scanning, devcontainer, project-discovery, lua, unix]
 ---

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T20:45:00-08:00
 task_list: lace/plugins-system
 type: report
-state: live
+state: archived
 status: done
 tags: [plugins, architecture, design-decisions, lace-cli, analysis]
 related_to: cdocs/proposals/2026-02-04-lace-plugins-system.md

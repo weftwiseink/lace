@@ -4,7 +4,7 @@ first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-04T21:00:00-08:00
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, cli, wezterm, test_plan]
 ---

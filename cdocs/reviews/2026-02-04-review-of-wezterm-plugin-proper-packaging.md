@@ -4,7 +4,7 @@ first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-04T18:30:00-05:00
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, migration, repository_structure]
 ---

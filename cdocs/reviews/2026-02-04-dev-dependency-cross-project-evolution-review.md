@@ -1,4 +1,15 @@
-> NOTE(mjr): Human authored, please update frontmatter with /triage
+---
+first_authored:
+  by: "@mjr"
+  at: 2026-02-04T17:45:00-08:00
+review_of: cdocs/proposals/2026-02-04-dev-dependency-cross-project-mounts.md
+type: review
+state: archived
+status: done
+tags: [human, feedback, evolution-trigger, lace-plugins]
+---
+
+# Evolution Review: Dev Dependency to Lace Plugins
 
 Review of the dev dependency proposal:
 

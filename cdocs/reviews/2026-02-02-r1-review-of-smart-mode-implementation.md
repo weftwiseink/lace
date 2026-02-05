@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-02T11:30:00-08:00
 task_list: lace/devcontainer-workflow
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, bin, open-lace-workspace, smart-mode, shell-scripting, set-e-safety]
 ---

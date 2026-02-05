@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-04
 task_list: cdocs/reports
 type: report
-state: live
+state: archived
 status: done
 tags: [neovim, plugin-extraction, dotfiles, assessment]
 ---

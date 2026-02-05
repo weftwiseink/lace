@@ -8,6 +8,11 @@ status: review_ready
 tags: [wezterm, port-scanning, discovery, multi-project, devcontainer, implementation]
 implements:
   - cdocs/proposals/2026-02-04-port-scanning-wezterm-discovery.md
+last_reviewed:
+  status: revision_requested
+  by: claude-haiku-4-5-20251001
+  at: 2026-02-04T18:45:00-08:00
+  round: 1
 ---
 
 # Port-Scanning WezTerm Discovery Implementation

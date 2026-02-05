@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-03T08:35:00-08:00
 task_list: lace/devcontainer-workflow
 type: devlog
-state: live
+state: archived
 status: complete
 tags: [wezterm, ssh, host-key, devcontainer, fix]
 ---

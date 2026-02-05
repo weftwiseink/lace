@@ -4,7 +4,7 @@ first_authored:
   at: "2026-02-01T17:00:00-05:00"
 type: report
 subtype: analysis
-state: live
+state: archived
 status: done
 tags: [wezterm, overlays, api-reference, inputselector, modal-ui]
 ---

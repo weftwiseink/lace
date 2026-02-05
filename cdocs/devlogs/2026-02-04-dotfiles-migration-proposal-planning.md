@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-04T12:00:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
-status: wip
+state: archived
+status: done
 tags: [dotfiles, devcontainer, chezmoi, wezterm-plugin, proposal-planning]
 ---
 

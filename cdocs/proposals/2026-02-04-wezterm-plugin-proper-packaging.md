@@ -9,7 +9,7 @@ last_reviewed:
   round: 2
 type: proposal
 state: live
-status: accepted
+status: deferred
 tags: [wezterm, plugin, packaging, distribution, github, migration]
 ---
 

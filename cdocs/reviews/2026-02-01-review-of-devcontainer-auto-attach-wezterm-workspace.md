@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-01T14:00:00-08:00
 task_list: lace/devcontainer-workflow
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, devcontainer, workflow_automation, developer_experience, lifecycle_hooks, technical_accuracy]
 ---

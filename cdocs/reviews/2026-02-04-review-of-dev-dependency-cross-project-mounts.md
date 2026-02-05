@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-04T17:30:00-08:00
 task_list: lace/dotfiles-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, cli_integration, edge_cases, test_plan]
 ---

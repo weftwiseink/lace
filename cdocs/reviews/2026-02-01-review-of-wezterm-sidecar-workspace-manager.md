@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-01T18:00:00-05:00
 task_list: lace/wezterm-sidecar
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, communication_protocol, feasibility, widget_system, edge_cases]
 ---

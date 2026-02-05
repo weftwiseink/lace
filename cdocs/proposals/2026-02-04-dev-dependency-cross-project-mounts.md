@@ -4,9 +4,10 @@ first_authored:
   at: 2026-02-04T16:00:00-08:00
 task_list: lace/dotfiles-migration
 type: proposal
-state: archived
+state: evolved
 status: superseded
 superseded_by: cdocs/proposals/2026-02-04-lace-plugins-system.md
+evolved_into: cdocs/proposals/2026-02-04-lace-plugins-system.md
 tags: [devcontainer, mounts, dependencies, lace-cli, plugins, dotfiles, architecture]
 last_reviewed:
   status: revision_requested

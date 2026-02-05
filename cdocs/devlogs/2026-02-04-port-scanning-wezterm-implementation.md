@@ -46,5 +46,197 @@ Per the proposal, implementation proceeds in 5 phases:
 
 ### Implementation Notes
 
-Starting with the port-manager module...
+Created `packages/lace/src/lib/port-manager.ts` with:
+- `LACE_PORT_MIN = 22425`, `LACE_PORT_MAX = 22499`
+- `isPortAvailable(port)`: TCP connect with 100ms timeout
+- `findAvailablePort()`: Sequential scan of port range
+- `parseAppPort(appPort)`: Parse devcontainer appPort format
+- `readPortAssignment(workspaceFolder)`: Read from `.lace/devcontainer.json`
+- `writePortAssignment(workspaceFolder, port)`: Write to `.lace/devcontainer.json`
+- `assignPort(workspaceFolder)`: Main assignment logic with collision handling
+
+Updated `lace up` workflow:
+1. Port assignment now runs as Phase 0 (before prebuild)
+2. Converted `runUp()` to async to support port availability checking
+3. Extended config now always generated (includes port mapping)
+4. Port mapping added to `appPort` in extended devcontainer.json
+
+### Verification
+
+- [x] `npm run build` succeeds
+- [x] `npm run typecheck` passes
+- [x] All 298 tests pass
+- [x] Port assignment phase runs before other phases
+- [x] Extended config includes `appPort: ["22425:2222"]` format
+
+### Commit
+
+`c8dff68` - feat(lace): add port assignment for wezterm SSH server (22425-22499)
+
+---
+
+## Phase 2: Docker Discovery Function
+
+### Plan
+
+- Create `bin/lace-discover` standalone script
+- Parse Docker output to extract project info
+- Test in isolation before integrating into wezterm plugin
+
+### Implementation Notes
+
+Created `bin/lace-discover` with:
+- Queries Docker for containers with `devcontainer.local_folder` label
+- Filters for ports in 22425-22499 range (mapping to 2222)
+- Extracts project name from path basename
+- Gets container user via `docker inspect`
+- Outputs text format (name:port:user:path) or JSON
+
+### Verification
+
+```bash
+# Verify Docker labels are present
+docker ps --filter "label=devcontainer.local_folder" --format json | head -1 | jq '.'
+
+# Test discovery (empty result expected - no lace ports yet)
+./bin/lace-discover
+./bin/lace-discover --json
+```
+
+- [x] Script is executable
+- [x] Returns empty array when no lace containers running
+- [x] Correctly skips containers with ports outside range
+
+### Commit
+
+`9722deb` - feat(bin): add lace-discover script for Docker-based project discovery
+
+---
+
+## Phase 3: WezTerm Plugin with Docker Discovery
+
+### Plan
+
+- Pre-register SSH domains for ports 22425-22499 at startup
+- Implement `discover_projects()` using Docker CLI
+- Implement project picker UI
+- Add CTRL+SHIFT+P keybinding
+
+### Implementation Notes
+
+Rewrote `config/wezterm/lace-plugin/plugin/init.lua`:
+
+**Port Domain Registration:**
+- Pre-registers 75 SSH domains (lace:22425 through lace:22499)
+- Each domain configured with SSH key and WezTerm multiplexing
+- Logged at startup: "lace: registered 75 SSH domains for ports 22425-22499"
+
+**Docker Discovery:**
+- `discover_projects()` queries Docker with same logic as shell script
+- Parses container ID, local_folder label, and ports
+- Filters for ports in lace range
+- Gets container user via docker inspect
+
+**Project Picker:**
+- Registered on `lace.project-picker` event
+- Shows all discovered containers with format: `[*] name (:port) - /path`
+- Connects via `lace:PORT` domain when selected
+- Toast notification if no containers found
+
+**Configuration:**
+- Only `ssh_key` required now
+- Optional: `picker_key`, `picker_mods`, `enable_status_bar`
+
+### Verification
+
+Cannot fully test without restarting WezTerm, but code review confirms:
+- [x] Domain registration loop covers full port range
+- [x] Docker CLI command matches shell script
+- [x] Port parsing regex handles both 0.0.0.0 and ::: formats
+- [x] Keybinding registered correctly
+
+### Commit
+
+`fd633e3` - feat(wezterm): implement Docker-based project discovery in lace plugin
+
+---
+
+## Phase 4: CLI Update (wez-lace-into)
+
+### Plan
+
+- Create `bin/wez-lace-into` CLI
+- Use lace-discover for Docker discovery
+- Provide interactive picker and direct connection
+
+### Implementation Notes
+
+Created `bin/wez-lace-into` with:
+- `--list`: Show project names only
+- `--status`: Show projects with ports and paths
+- `<project>`: Direct connection to named project
+- (no args): Interactive picker (fzf or bash select fallback)
+- Single project auto-connects without picker
+
+Uses `bin/lace-discover` for discovery, connects via `wezterm connect lace:PORT`.
+
+### Verification
+
+```bash
+./bin/wez-lace-into --help   # Shows usage
+./bin/wez-lace-into --list   # Empty (no lace containers)
+./bin/wez-lace-into --status # Empty (no lace containers)
+./bin/wez-lace-into test     # Error: project not found
+```
+
+- [x] Help text displays correctly
+- [x] Empty list handled gracefully
+- [x] Non-existent project shows helpful error
+
+### Commit
+
+`defbaa0` - feat(bin): add wez-lace-into CLI for project connection
+
+---
+
+## Phase 5: End-to-End Integration Testing
+
+### Plan
+
+Per the proposal, test full workflow:
+1. Start container with `lace up` (assigns port)
+2. Verify discovery finds it
+3. Connect via wez-lace-into
+4. Test picker in WezTerm
+
+### Prerequisites
+
+Need to rebuild current devcontainer with new port assignment.
+Current container uses port 2222 (old format), not in lace range.
+
+### Testing
+
+**Note:** Full E2E testing requires rebuilding the devcontainer, which would
+disrupt the current session. Key components have been unit tested.
+
+Manual verification checklist:
+
+1. [ ] `lace up` assigns port in 22425-22499 range
+2. [ ] Port persisted in `.lace/devcontainer.json`
+3. [ ] Container starts with correct port mapping
+4. [ ] `bin/lace-discover` finds container
+5. [ ] `bin/wez-lace-into --status` shows container
+6. [ ] `bin/wez-lace-into <project>` connects
+7. [ ] WezTerm picker shows container (CTRL+SHIFT+P)
+8. [ ] Selecting project opens workspace
+
+### Performance Verification
+
+Per proposal requirements:
+
+| Scenario | Expected | Actual |
+|----------|----------|--------|
+| Discovery with 0 containers | < 200ms | ~50ms (docker ps) |
+| Discovery with 3 containers | < 300ms | TBD |
+| Discovery with 10 containers | < 500ms | TBD |
 

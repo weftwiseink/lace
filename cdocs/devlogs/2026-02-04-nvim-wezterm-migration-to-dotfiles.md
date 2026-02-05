@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/dotfiles-migration
 type: devlog
 state: live
-status: wip
+status: complete
 tags: [nvim, wezterm, dotfiles, chezmoi, migration]
 implements: cdocs/proposals/2026-02-04-nvim-wezterm-config-migration.md
 ---
@@ -202,4 +202,35 @@ Proposal accepted. Beginning implementation of migration phases from:
 **Note:** Plugin loading shows warning because lace-plugin is not yet a standalone
 git repo. This is expected - the plugin extraction is a separate future migration.
 
-### Phase 4: Documentation
+### Phase 4: Documentation - COMPLETE
+
+**Tasks:**
+- [x] Devlog updated with implementation progress
+- [x] Proposal and review documents committed
+
+## Summary
+
+Migration complete. The neovim and wezterm personal configs are now in the
+dotfiles repo, managed by chezmoi. The lace repo now contains only:
+
+1. `config/wezterm/wezterm.lua` - Minimal plugin demo (67 lines)
+2. `config/wezterm/lace-plugin/` - The lace wezterm plugin
+
+### Commits Made
+
+**Dotfiles repo:**
+- a0012d0: feat(nvim): migrate neovim config from lace repo
+
+**Lace repo:**
+- d8c32b2: refactor(config): remove nvim config (migrated to dotfiles)
+- 4c31ea9: refactor(wezterm): reduce wezterm.lua to minimal plugin demo
+- 0492fc7: docs(cdocs): add nvim/wezterm migration proposal and devlog
+
+### Verification Status
+
+- [x] Chezmoi managed files include all nvim configs
+- [x] `chezmoi apply` deploys nvim to ~/.config/nvim/
+- [x] Neovim launches with solarized theme
+- [x] Treesitter parsers install on first launch
+- [x] Lace wezterm.lua reduced to <70 lines
+- [x] Lace nvim config removed entirely

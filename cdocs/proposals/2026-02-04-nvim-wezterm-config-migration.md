@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/dotfiles-migration
 type: proposal
 state: live
-status: accepted
+status: implemented
 tags: [nvim, wezterm, dotfiles, chezmoi, migration]
 parent: cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md
 last_reviewed:

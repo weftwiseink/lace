@@ -1,0 +1,126 @@
+#!/bin/bash
+# Discover running lace devcontainers via Docker labels.
+#
+# Usage:
+#   lace-discover           # Output: name:port:user:path per line
+#   lace-discover --json    # Output: JSON array of project objects
+#
+# This script queries Docker for running devcontainers that have:
+# - The devcontainer.local_folder label (set by devcontainer CLI)
+# - A port mapping in the 22425-22499 range (lace wezterm SSH ports)
+#
+# Output format (default):
+#   project-name:22425:node:/path/to/project
+#
+# JSON format:
+#   [{"name":"project-name","port":22425,"user":"node","path":"/path/to/project","container_id":"abc123"}]
+
+set -euo pipefail
+
+LACE_PORT_MIN=22425
+LACE_PORT_MAX=22499
+
+# Parse arguments
+OUTPUT_FORMAT="text"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json)
+      OUTPUT_FORMAT="json"
+      shift
+      ;;
+    -h|--help)
+      head -19 "${BASH_SOURCE[0]}" | tail -n +2 | sed 's/^# \?//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Usage: lace-discover [--json] [--help]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Check if Docker is available
+if ! command -v docker &>/dev/null; then
+  if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+    echo "[]"
+  fi
+  exit 0
+fi
+
+# Check if Docker daemon is running
+if ! docker info &>/dev/null 2>&1; then
+  if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+    echo "[]"
+  fi
+  exit 0
+fi
+
+# Get all devcontainers with their local folders and ports
+# Format: container_id \t local_folder \t ports
+discover_raw() {
+  docker ps --filter "label=devcontainer.local_folder" \
+    --format '{{.ID}}\t{{.Label "devcontainer.local_folder"}}\t{{.Ports}}' 2>/dev/null || true
+}
+
+# Parse the raw output and extract projects
+discover_projects() {
+  while IFS=$'\t' read -r container_id local_folder ports; do
+    # Skip empty lines
+    [[ -z "$container_id" ]] && continue
+
+    # Extract project name from path
+    name=$(basename "$local_folder")
+
+    # Find SSH port in expected range (22425-22499 -> 2222)
+    # Port format varies: "0.0.0.0:22425->2222/tcp" or ":::22425->2222/tcp"
+    # Use grep to find the port mapping pattern
+    ssh_port=""
+    while read -r port_candidate; do
+      if [[ $port_candidate -ge $LACE_PORT_MIN && $port_candidate -le $LACE_PORT_MAX ]]; then
+        ssh_port=$port_candidate
+        break
+      fi
+    done < <(echo "$ports" | grep -oE '[0-9]+->2222/tcp' | grep -oE '^[0-9]+' || true)
+
+    # Skip containers without a valid SSH port in range
+    [[ -z "$ssh_port" ]] && continue
+
+    # Get container user
+    user=$(docker inspect "$container_id" --format '{{.Config.User}}' 2>/dev/null || echo "")
+    # Default to "node" if user is empty (root or unset)
+    [[ -z "$user" || "$user" == "root" ]] && user="node"
+
+    if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+      # Output JSON object (without trailing comma - handled by caller)
+      printf '{"name":"%s","port":%d,"user":"%s","path":"%s","container_id":"%s"}' \
+        "$name" "$ssh_port" "$user" "$local_folder" "$container_id"
+    else
+      # Output text format
+      echo "$name:$ssh_port:$user:$local_folder"
+    fi
+  done < <(discover_raw)
+}
+
+if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+  # Collect all JSON objects, then wrap in array
+  mapfile -t projects < <(discover_projects)
+  if [[ ${#projects[@]} -eq 0 ]]; then
+    echo "[]"
+  else
+    # Join with commas
+    printf '['
+    first=true
+    for proj in "${projects[@]}"; do
+      if [[ "$first" == "true" ]]; then
+        first=false
+      else
+        printf ','
+      fi
+      printf '%s' "$proj"
+    done
+    printf ']\n'
+  fi
+else
+  discover_projects
+fi

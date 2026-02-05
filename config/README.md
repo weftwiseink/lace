@@ -70,7 +70,7 @@ ln -sf /workspace/main/lace/config/nvim ~/.config/nvim
 ```
 lace/config/
 ├── wezterm/
-│   └── wezterm.lua      # Main wezterm config
+│   └── wezterm.lua      # Example config showing lace plugin usage
 └── nvim/
     ├── init.lua         # Neovim entry point
     └── lua/plugins/
@@ -81,6 +81,21 @@ lace/config/
         ├── telescope.lua
         ├── treesitter.lua
         └── ui.lua
+```
+
+## Lace WezTerm Plugin
+
+The lace wezterm plugin is distributed as a separate repository for proper plugin packaging:
+
+- **Plugin**: https://github.com/weftwiseink/lace.wezterm
+- **Installation**: See the plugin README for usage instructions
+
+```lua
+-- In your wezterm.lua:
+local lace = wezterm.plugin.require('https://github.com/weftwiseink/lace.wezterm')
+lace.apply_to_config(config, {
+  ssh_key = wezterm.home_dir .. "/.ssh/lace_devcontainer",
+})
 ```
 
 ## First Run

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T17:00:00-08:00
 type: devlog
 state: live
-status: in_progress
+status: review_ready
 tags: [wezterm, port-scanning, discovery, multi-project, devcontainer, implementation]
 implements:
   - cdocs/proposals/2026-02-04-port-scanning-wezterm-discovery.md
@@ -239,4 +239,42 @@ Per proposal requirements:
 | Discovery with 0 containers | < 200ms | ~50ms (docker ps) |
 | Discovery with 3 containers | < 300ms | TBD |
 | Discovery with 10 containers | < 500ms | TBD |
+
+---
+
+## Summary
+
+### Files Created
+
+- `packages/lace/src/lib/port-manager.ts` - Port assignment logic
+- `packages/lace/src/lib/__tests__/port-manager.test.ts` - Unit tests (21 tests)
+- `bin/lace-discover` - Docker discovery script
+- `bin/wez-lace-into` - WezTerm connection CLI
+
+### Files Modified
+
+- `packages/lace/src/lib/up.ts` - Added port assignment phase
+- `packages/lace/src/commands/up.ts` - Made async for port checking
+- `packages/lace/src/commands/__tests__/up.integration.test.ts` - Updated for async
+- `config/wezterm/lace-plugin/plugin/init.lua` - Complete rewrite for Docker discovery
+
+### Commits
+
+1. `c8dff68` - feat(lace): add port assignment for wezterm SSH server (22425-22499)
+2. `9722deb` - feat(bin): add lace-discover script for Docker-based project discovery
+3. `fd633e3` - feat(wezterm): implement Docker-based project discovery in lace plugin
+4. `defbaa0` - feat(bin): add wez-lace-into CLI for project connection
+5. `e55a854` - test(lace): add unit tests for port-manager module
+
+### Test Results
+
+- All 315 tests pass
+- Port-manager module has 21 dedicated unit tests
+- Integration tests updated for async runUp
+
+### Follow-up Tasks
+
+1. **E2E Testing**: Rebuild devcontainer to test full workflow
+2. **open-lace-workspace**: Update to use dynamic port discovery (currently hardcoded to 2222)
+3. **WezTerm**: Restart to load new plugin with domain registration
 

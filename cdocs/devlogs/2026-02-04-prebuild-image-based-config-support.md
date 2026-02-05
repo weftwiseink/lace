@@ -9,7 +9,7 @@ last_reviewed:
   round: 1
 task_list: lace/packages-lace-cli
 type: devlog
-state: live
+state: archived
 status: done
 tags: [devcontainer, prebuild, image, lace, implementation]
 ---

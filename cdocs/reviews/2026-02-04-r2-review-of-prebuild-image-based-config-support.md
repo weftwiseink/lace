@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-04T14:30:00-08:00
 task_list: lace/packages-lace-cli
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, architecture, test_plan, verification]
 ---

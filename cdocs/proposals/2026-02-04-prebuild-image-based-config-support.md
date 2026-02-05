@@ -9,8 +9,8 @@ last_reviewed:
   round: 2
 task_list: lace/packages-lace-cli
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [devcontainer, prebuild, image, lace]
 ---
 

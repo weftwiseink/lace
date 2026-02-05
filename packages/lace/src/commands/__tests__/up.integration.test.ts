@@ -186,7 +186,7 @@ const MINIMAL_JSON = JSON.stringify(
 );
 
 describe("lace up: plugins with all overridden", () => {
-  it("generates extended config and invokes devcontainer", () => {
+  it("generates extended config and invokes devcontainer", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
@@ -200,7 +200,7 @@ describe("lace up: plugins with all overridden", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true, // Skip actual devcontainer up for unit tests
@@ -224,11 +224,11 @@ describe("lace up: plugins with all overridden", () => {
 });
 
 describe("lace up: plugins with clones", () => {
-  it("clones plugins and generates extended config", () => {
+  it("clones plugins and generates extended config", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
     setupSettings({});
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -248,10 +248,10 @@ describe("lace up: plugins with clones", () => {
 });
 
 describe("lace up: prebuild only", () => {
-  it("runs prebuild and generates extended config", () => {
+  it("runs prebuild and generates extended config", async () => {
     setupWorkspace(PREBUILD_ONLY_JSON, STANDARD_DOCKERFILE);
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -271,7 +271,7 @@ describe("lace up: prebuild only", () => {
 });
 
 describe("lace up: full config (prebuild + plugins)", () => {
-  it("runs all phases in order", () => {
+  it("runs all phases in order", async () => {
     setupWorkspace(FULL_CONFIG_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
@@ -285,7 +285,7 @@ describe("lace up: full config (prebuild + plugins)", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -299,10 +299,10 @@ describe("lace up: full config (prebuild + plugins)", () => {
 });
 
 describe("lace up: no plugins or prebuild", () => {
-  it("invokes devcontainer directly without extended config", () => {
+  it("assigns port and generates extended config with port mapping", async () => {
     setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -311,12 +311,24 @@ describe("lace up: no plugins or prebuild", () => {
     expect(result.exitCode).toBe(0);
     expect(result.phases.prebuild).toBeUndefined();
     expect(result.phases.resolveMounts).toBeUndefined();
-    expect(result.phases.generateConfig).toBeUndefined();
+    // Port assignment always happens
+    expect(result.phases.portAssignment?.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
+    expect(result.phases.portAssignment?.port).toBeLessThanOrEqual(22499);
+    // Config is always generated now (for port mapping)
+    expect(result.phases.generateConfig?.exitCode).toBe(0);
+
+    // Verify extended config contains the port mapping
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(extended.appPort).toBeDefined();
+    expect(extended.appPort[0]).toMatch(/^224\d{2}:2222$/);
   });
 });
 
 describe("lace up: resolution failures abort before devcontainer up", () => {
-  it("aborts on resolve-mounts failure", () => {
+  it("aborts on resolve-mounts failure", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
     setupSettings({
       plugins: {
@@ -326,7 +338,7 @@ describe("lace up: resolution failures abort before devcontainer up", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
     });
@@ -345,7 +357,7 @@ describe("lace up: resolution failures abort before devcontainer up", () => {
 });
 
 describe("lace up: symlink generation", () => {
-  it("adds symlink command to postCreateCommand", () => {
+  it("adds symlink command to postCreateCommand", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
@@ -362,7 +374,7 @@ describe("lace up: symlink generation", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -377,7 +389,7 @@ describe("lace up: symlink generation", () => {
     expect(extended.postCreateCommand).toContain("ln -s");
   });
 
-  it("merges with existing postCreateCommand string", () => {
+  it("merges with existing postCreateCommand string", async () => {
     const configWithPostCreate = JSON.stringify(
       {
         build: { dockerfile: "Dockerfile" },
@@ -410,7 +422,7 @@ describe("lace up: symlink generation", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       skipDevcontainerUp: true,
@@ -428,7 +440,7 @@ describe("lace up: symlink generation", () => {
 });
 
 describe("lace up: devcontainer up integration", () => {
-  it("passes through to devcontainer up with extended config", () => {
+  it("passes through to devcontainer up with extended config", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
@@ -442,7 +454,7 @@ describe("lace up: devcontainer up integration", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
       // Don't skip devcontainer up
@@ -462,7 +474,7 @@ describe("lace up: devcontainer up integration", () => {
     expect(upCall?.args).toContain("--workspace-folder");
   });
 
-  it("handles devcontainer up failure", () => {
+  it("handles devcontainer up failure", async () => {
     setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
@@ -476,7 +488,7 @@ describe("lace up: devcontainer up integration", () => {
       },
     });
 
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createFailingDevcontainerUpMock(),
     });
@@ -488,9 +500,9 @@ describe("lace up: devcontainer up integration", () => {
 });
 
 describe("lace up: devcontainer.json missing", () => {
-  it("exits with error", () => {
+  it("exits with error", async () => {
     // Don't set up workspace
-    const result = runUp({
+    const result = await runUp({
       workspaceFolder: workspaceRoot,
       subprocess: createMock(),
     });

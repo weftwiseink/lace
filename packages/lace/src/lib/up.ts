@@ -13,6 +13,7 @@ import { runResolveMounts } from "./resolve-mounts";
 import { runPrebuild } from "./prebuild";
 import type { RunSubprocess, SubprocessResult } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
+import { assignPort, type PortAssignmentResult } from "./port-manager";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -29,6 +30,7 @@ export interface UpResult {
   exitCode: number;
   message: string;
   phases: {
+    portAssignment?: { exitCode: number; message: string; port?: number };
     prebuild?: { exitCode: number; message: string };
     resolveMounts?: { exitCode: number; message: string };
     generateConfig?: { exitCode: number; message: string };
@@ -38,12 +40,13 @@ export interface UpResult {
 
 /**
  * Run the full lace up workflow:
- * 1. Prebuild (if prebuildFeatures configured)
- * 2. Resolve mounts (if plugins configured)
- * 3. Generate extended devcontainer.json
- * 4. Invoke devcontainer up
+ * 1. Assign port for wezterm SSH server (22425-22499 range)
+ * 2. Prebuild (if prebuildFeatures configured)
+ * 3. Resolve mounts (if plugins configured)
+ * 4. Generate extended devcontainer.json (includes port mapping)
+ * 5. Invoke devcontainer up
  */
-export function runUp(options: UpOptions = {}): UpResult {
+export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const {
     workspaceFolder = process.cwd(),
     subprocess = defaultRunSubprocess,
@@ -82,6 +85,31 @@ export function runUp(options: UpOptions = {}): UpResult {
   const hasPrebuildFeatures = extractPrebuildFeatures(configMinimal.raw).kind === "features";
   const pluginsResult = extractPlugins(configMinimal.raw);
   const hasPlugins = pluginsResult.kind === "plugins";
+
+  // Phase 0: Assign port for wezterm SSH server
+  // This runs before other phases to ensure port is available
+  console.log("Assigning port for wezterm SSH server...");
+  let portResult: PortAssignmentResult;
+  try {
+    portResult = await assignPort(workspaceFolder);
+    const portMessage = portResult.wasReassigned
+      ? `Port ${portResult.previousPort} was in use, reassigned to ${portResult.assignment.hostPort}`
+      : `Using port ${portResult.assignment.hostPort}`;
+    result.phases.portAssignment = {
+      exitCode: 0,
+      message: portMessage,
+      port: portResult.assignment.hostPort,
+    };
+    console.log(portMessage);
+  } catch (err) {
+    result.phases.portAssignment = {
+      exitCode: 1,
+      message: (err as Error).message,
+    };
+    result.exitCode = 1;
+    result.message = `Port assignment failed: ${(err as Error).message}`;
+    return result;
+  }
 
   // Only read full config (with Dockerfile) if we need prebuild
   let config;
@@ -147,27 +175,28 @@ export function runUp(options: UpOptions = {}): UpResult {
   }
 
   // Phase 3: Generate extended devcontainer.json
-  if (hasPlugins || hasPrebuildFeatures) {
-    console.log("Generating extended devcontainer.json...");
-    try {
-      generateExtendedConfig({
-        workspaceFolder,
-        mountSpecs,
-        symlinkCommand,
-      });
-      result.phases.generateConfig = {
-        exitCode: 0,
-        message: "Generated .lace/devcontainer.json",
-      };
-    } catch (err) {
-      result.phases.generateConfig = {
-        exitCode: 1,
-        message: (err as Error).message,
-      };
-      result.exitCode = 1;
-      result.message = `Config generation failed: ${(err as Error).message}`;
-      return result;
-    }
+  // Always generate because we always need the port mapping
+  const portMapping = `${portResult.assignment.hostPort}:${portResult.assignment.containerPort}`;
+  console.log("Generating extended devcontainer.json...");
+  try {
+    generateExtendedConfig({
+      workspaceFolder,
+      mountSpecs,
+      symlinkCommand,
+      portMapping,
+    });
+    result.phases.generateConfig = {
+      exitCode: 0,
+      message: "Generated .lace/devcontainer.json",
+    };
+  } catch (err) {
+    result.phases.generateConfig = {
+      exitCode: 1,
+      message: (err as Error).message,
+    };
+    result.exitCode = 1;
+    result.message = `Config generation failed: ${(err as Error).message}`;
+    return result;
   }
 
   // Phase 4: Invoke devcontainer up
@@ -181,7 +210,7 @@ export function runUp(options: UpOptions = {}): UpResult {
     workspaceFolder,
     subprocess,
     devcontainerArgs,
-    useExtendedConfig: hasPlugins || hasPrebuildFeatures,
+    useExtendedConfig: true, // Always use extended config now (has port mapping)
   });
 
   result.phases.devcontainerUp = upResult;
@@ -201,6 +230,7 @@ interface GenerateExtendedConfigOptions {
   workspaceFolder: string;
   mountSpecs: string[];
   symlinkCommand: string | null;
+  portMapping: string | null; // Format: "hostPort:containerPort"
 }
 
 /**
@@ -208,9 +238,10 @@ interface GenerateExtendedConfigOptions {
  * - All original configuration
  * - Plugin mounts
  * - Symlink creation commands in postCreateCommand
+ * - Port mapping for wezterm SSH server
  */
 function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
-  const { workspaceFolder, mountSpecs, symlinkCommand } = options;
+  const { workspaceFolder, mountSpecs, symlinkCommand, portMapping } = options;
 
   const devcontainerPath = join(
     workspaceFolder,
@@ -256,6 +287,19 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
         "lace-symlinks": ["sh", "-c", symlinkCommand],
       };
     }
+  }
+
+  // Add port mapping for wezterm SSH server
+  if (portMapping) {
+    const existingAppPort = (original.appPort ?? []) as string[];
+    // Filter out any existing lace port mappings (in 22425-22499 range)
+    const filteredPorts = existingAppPort.filter((p) => {
+      const match = String(p).match(/^(\d+):/);
+      if (!match) return true;
+      const port = parseInt(match[1], 10);
+      return port < 22425 || port > 22499;
+    });
+    extended.appPort = [...filteredPorts, portMapping];
   }
 
   // Write extended config

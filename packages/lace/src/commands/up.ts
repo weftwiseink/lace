@@ -15,7 +15,7 @@ export const upCommand = defineCommand({
       required: false,
     },
   },
-  run({ args, rawArgs }) {
+  async run({ args, rawArgs }) {
     // Extract workspace-folder if provided
     const workspaceFolder = args["workspace-folder"] || process.cwd();
 
@@ -43,7 +43,7 @@ export const upCommand = defineCommand({
       devcontainerArgs,
     };
 
-    const result = runUp(options);
+    const result = await runUp(options);
 
     if (result.message) {
       console.log(result.message);

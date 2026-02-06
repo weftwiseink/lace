@@ -14,6 +14,13 @@ import { runPrebuild } from "./prebuild";
 import type { RunSubprocess, SubprocessResult } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 import { assignPort, type PortAssignmentResult } from "./port-manager";
+import {
+  fetchAllFeatureMetadata,
+  validateFeatureOptions,
+  validatePortDeclarations,
+  MetadataFetchError,
+  type FeatureMetadata,
+} from "./feature-metadata";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -24,6 +31,12 @@ export interface UpOptions {
   devcontainerArgs?: string[];
   /** Skip devcontainer up (for testing) */
   skipDevcontainerUp?: boolean;
+  /** Bypass filesystem cache for floating tags */
+  noCache?: boolean;
+  /** Skip metadata validation entirely (offline/emergency) */
+  skipMetadataValidation?: boolean;
+  /** Override cache directory (for testing) */
+  cacheDir?: string;
 }
 
 export interface UpResult {
@@ -31,6 +44,7 @@ export interface UpResult {
   message: string;
   phases: {
     portAssignment?: { exitCode: number; message: string; port?: number };
+    metadataValidation?: { exitCode: number; message: string };
     prebuild?: { exitCode: number; message: string };
     resolveMounts?: { exitCode: number; message: string };
     generateConfig?: { exitCode: number; message: string };
@@ -52,6 +66,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     subprocess = defaultRunSubprocess,
     devcontainerArgs = [],
     skipDevcontainerUp = false,
+    noCache = false,
+    skipMetadataValidation = false,
+    cacheDir,
   } = options;
 
   const result: UpResult = {
@@ -109,6 +126,78 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     result.exitCode = 1;
     result.message = `Port assignment failed: ${(err as Error).message}`;
     return result;
+  }
+
+  // Phase 0.5: Metadata validation (if features are declared)
+  // Extract feature IDs from the devcontainer.json's `features` key
+  const rawFeatures = (configMinimal.raw.features ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const featureIds = Object.keys(rawFeatures);
+
+  if (featureIds.length > 0) {
+    console.log("Validating feature metadata...");
+    try {
+      const metadataMap = await fetchAllFeatureMetadata(featureIds, {
+        noCache,
+        skipValidation: skipMetadataValidation,
+        subprocess,
+        cacheDir,
+      });
+
+      // Validate each feature's options and port declarations
+      for (const [featureId, metadata] of metadataMap) {
+        if (!metadata) continue; // null only when skipValidation=true
+
+        // Validate user-provided options exist in schema
+        const optionResult = validateFeatureOptions(
+          featureId,
+          rawFeatures[featureId] ?? {},
+          metadata,
+        );
+        if (!optionResult.valid) {
+          const msg =
+            `Feature "${featureId}" has invalid options:\n` +
+            optionResult.errors.map((e) => `  - ${e.message}`).join("\n");
+          result.phases.metadataValidation = { exitCode: 1, message: msg };
+          result.exitCode = 1;
+          result.message = msg;
+          return result;
+        }
+
+        // Validate port declaration keys match option names
+        const portResult = validatePortDeclarations(metadata);
+        if (!portResult.valid) {
+          const msg =
+            `Feature "${featureId}" has invalid port declarations:\n` +
+            portResult.errors.map((e) => `  - ${e.message}`).join("\n");
+          result.phases.metadataValidation = { exitCode: 1, message: msg };
+          result.exitCode = 1;
+          result.message = msg;
+          return result;
+        }
+      }
+
+      result.phases.metadataValidation = {
+        exitCode: 0,
+        message: `Validated metadata for ${featureIds.length} feature(s)`,
+      };
+      console.log(
+        `Validated metadata for ${featureIds.length} feature(s)`,
+      );
+    } catch (err) {
+      if (err instanceof MetadataFetchError) {
+        result.phases.metadataValidation = {
+          exitCode: 1,
+          message: err.message,
+        };
+        result.exitCode = 1;
+        result.message = err.message;
+        return result;
+      }
+      throw err;
+    }
   }
 
   // Only read full config (with Dockerfile) if we need prebuild

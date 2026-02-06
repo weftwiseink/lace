@@ -14,10 +14,22 @@ export const upCommand = defineCommand({
       description: "Path to the workspace folder (defaults to current directory)",
       required: false,
     },
+    "no-cache": {
+      type: "boolean",
+      description: "Bypass filesystem cache for floating feature tags",
+      required: false,
+    },
+    "skip-metadata-validation": {
+      type: "boolean",
+      description: "Skip feature metadata validation (offline/emergency use)",
+      required: false,
+    },
   },
   async run({ args, rawArgs }) {
     // Extract workspace-folder if provided
     const workspaceFolder = args["workspace-folder"] || process.cwd();
+    const noCache = args["no-cache"] ?? false;
+    const skipMetadataValidation = args["skip-metadata-validation"] ?? false;
 
     // Pass remaining args to devcontainer
     // Filter out our own args
@@ -28,8 +40,10 @@ export const upCommand = defineCommand({
         skipNext = false;
         continue;
       }
-      if (arg === "--workspace-folder") {
-        skipNext = true;
+      if (arg === "--workspace-folder" || arg === "--no-cache" || arg === "--skip-metadata-validation") {
+        if (arg === "--workspace-folder") {
+          skipNext = true;
+        }
         continue;
       }
       if (arg.startsWith("--workspace-folder=")) {
@@ -41,6 +55,8 @@ export const upCommand = defineCommand({
     const options: UpOptions = {
       workspaceFolder,
       devcontainerArgs,
+      noCache,
+      skipMetadataValidation,
     };
 
     const result = await runUp(options);

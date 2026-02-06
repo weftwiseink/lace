@@ -11,10 +11,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runUp } from "@/lib/up";
 import type { RunSubprocess } from "@/lib/subprocess";
+import { clearMetadataCache, type FeatureMetadata } from "@/lib/feature-metadata";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
 let laceDir: string;
+let metadataCacheDir: string;
 let mockCalls: Array<{ command: string; args: string[]; cwd?: string }>;
 
 /** Mock subprocess that handles devcontainer build and up commands. */
@@ -110,8 +112,10 @@ beforeEach(() => {
   );
   devcontainerDir = join(workspaceRoot, ".devcontainer");
   laceDir = join(workspaceRoot, ".lace");
+  metadataCacheDir = join(workspaceRoot, ".metadata-cache");
   mockCalls = [];
   mkdirSync(workspaceRoot, { recursive: true });
+  clearMetadataCache(metadataCacheDir);
 
   // Set LACE_SETTINGS to point to our test settings location
   process.env.LACE_SETTINGS = join(
@@ -123,6 +127,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearMetadataCache(metadataCacheDir);
   rmSync(workspaceRoot, { recursive: true, force: true });
   delete process.env.LACE_SETTINGS;
 });
@@ -509,5 +514,276 @@ describe("lace up: devcontainer.json missing", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.message).toContain("Cannot read devcontainer.json");
+  });
+});
+
+// ── Feature metadata integration tests (Scenarios 35-41) ──
+
+const weztermMetadata: FeatureMetadata = {
+  id: "wezterm-server",
+  version: "1.0.0",
+  options: {
+    sshPort: { type: "string", default: "2222" },
+  },
+  customizations: {
+    lace: {
+      ports: {
+        sshPort: { label: "wezterm ssh", onAutoForward: "silent" },
+      },
+    },
+  },
+};
+
+/** Create a mock that handles both metadata fetch and devcontainer build/up. */
+function createMetadataMock(
+  metadataByFeature: Record<string, FeatureMetadata>,
+): RunSubprocess {
+  return (command, args, opts) => {
+    mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    // Handle metadata fetch: devcontainer features info manifest <featureId> --output-format json
+    if (
+      command === "devcontainer" &&
+      args[0] === "features" &&
+      args[1] === "info" &&
+      args[2] === "manifest"
+    ) {
+      const featureId = args[3];
+      const metadata = metadataByFeature[featureId];
+      if (!metadata) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Error: feature not found: ${featureId}`,
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          annotations: {
+            "dev.containers.metadata": JSON.stringify(metadata),
+          },
+        }),
+        stderr: "",
+      };
+    }
+
+    // Handle devcontainer build (prebuild)
+    if (command === "devcontainer" && args[0] === "build") {
+      const wsFolder = args[args.indexOf("--workspace-folder") + 1];
+      if (wsFolder) {
+        writeFileSync(
+          join(wsFolder, "devcontainer-lock.json"),
+          JSON.stringify({ features: {} }) + "\n",
+          "utf-8",
+        );
+      }
+    }
+
+    return {
+      exitCode: 0,
+      stdout: '{"imageName":["test"]}',
+      stderr: "",
+    };
+  };
+}
+
+/** Create a mock where metadata fetch always fails. */
+function createFailingMetadataMock(): RunSubprocess {
+  return (command, args, opts) => {
+    mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    if (
+      command === "devcontainer" &&
+      args[0] === "features" &&
+      args[1] === "info" &&
+      args[2] === "manifest"
+    ) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "unauthorized: authentication required",
+      };
+    }
+
+    return { exitCode: 0, stdout: '{"imageName":["test"]}', stderr: "" };
+  };
+}
+
+const FEATURES_CONFIG_JSON = JSON.stringify(
+  {
+    build: { dockerfile: "Dockerfile" },
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+        sshPort: "22430",
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const FEATURES_WITH_UNKNOWN_OPTION_JSON = JSON.stringify(
+  {
+    build: { dockerfile: "Dockerfile" },
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+        sshPort: "22430",
+        bogusOpt: "true",
+      },
+    },
+  },
+  null,
+  2,
+);
+
+describe("lace up: metadata validation -- fetch success", () => {
+  // Scenario 35: Full pipeline with metadata
+  it("validates feature metadata successfully", async () => {
+    setupWorkspace(FEATURES_CONFIG_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.metadataValidation?.exitCode).toBe(0);
+    expect(result.phases.metadataValidation?.message).toContain(
+      "Validated metadata for 1 feature(s)",
+    );
+  });
+});
+
+describe("lace up: metadata validation -- fetch failure aborts", () => {
+  // Scenario 36: Metadata fetch failure aborts lace up
+  it("aborts with clear error when metadata fetch fails", async () => {
+    setupWorkspace(FEATURES_CONFIG_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createFailingMetadataMock(),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("Failed to fetch metadata");
+    expect(result.message).toContain("--skip-metadata-validation");
+    expect(result.phases.metadataValidation?.exitCode).toBe(1);
+
+    // devcontainer up should NOT have been called
+    expect(mockCalls).not.toContainEqual(
+      expect.objectContaining({
+        command: "devcontainer",
+        args: expect.arrayContaining(["up"]),
+      }),
+    );
+  });
+});
+
+describe("lace up: metadata validation -- skip-metadata-validation", () => {
+  // Scenario 37: --skip-metadata-validation allows fallback
+  it("succeeds with skipMetadataValidation when fetch fails", async () => {
+    setupWorkspace(FEATURES_CONFIG_JSON, STANDARD_DOCKERFILE);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createFailingMetadataMock(),
+      skipDevcontainerUp: true,
+      skipMetadataValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.metadataValidation?.exitCode).toBe(0);
+    // Warning should have been logged
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("--skip-metadata-validation"),
+    );
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe("lace up: metadata validation -- unknown option", () => {
+  // Scenario 38: Unknown option name aborts lace up
+  it("aborts with error listing unknown option", async () => {
+    setupWorkspace(FEATURES_WITH_UNKNOWN_OPTION_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("invalid options");
+    expect(result.message).toContain("bogusOpt");
+    expect(result.phases.metadataValidation?.exitCode).toBe(1);
+  });
+});
+
+describe("lace up: metadata validation -- port key mismatch", () => {
+  // Scenario 39: Port declaration key mismatch aborts lace up
+  it("aborts when port key does not match option name", async () => {
+    const badPortMetadata: FeatureMetadata = {
+      id: "wezterm-server",
+      version: "1.0.0",
+      options: {
+        sshPort: { type: "string", default: "2222" },
+      },
+      customizations: {
+        lace: {
+          ports: {
+            ssh: { label: "wezterm ssh" }, // WRONG: key should be "sshPort"
+          },
+        },
+      },
+    };
+
+    setupWorkspace(FEATURES_CONFIG_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          badPortMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("invalid port declarations");
+    expect(result.message).toContain("ssh");
+    expect(result.message).toContain("does not match any option");
+    expect(result.phases.metadataValidation?.exitCode).toBe(1);
+  });
+});
+
+describe("lace up: metadata validation -- no features", () => {
+  // Verify that configs without features skip metadata validation
+  it("skips metadata validation when no features declared", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.metadataValidation).toBeUndefined();
   });
 });

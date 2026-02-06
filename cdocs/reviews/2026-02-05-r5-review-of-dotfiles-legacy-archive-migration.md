@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T22:45:00-08:00
 task_list: dotfiles/legacy-archive
 type: review
-state: live
+state: archived
 status: done
 tags: [self, chezmoi_restoration, run_once_disposition, deployment_mechanism, edge_cases]
 ---

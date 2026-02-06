@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T12:25:00-08:00
 task_list: dotfiles/nushell-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, nushell, shell_config, implementation_detail, test_plan, rollback, gotchas]
 ---

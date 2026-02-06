@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T12:45:00-08:00
 task_list: dotfiles/legacy-archive
 type: review
-state: live
+state: archived
 status: done
 tags: [self, migration, archive, symlinks, chezmoi, correctness_check]
 ---

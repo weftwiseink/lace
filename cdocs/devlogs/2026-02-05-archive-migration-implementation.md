@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-05T17:00:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
+state: archived
 status: done
 tags: [implementation, archive, dotfiles, migration]
 last_reviewed:

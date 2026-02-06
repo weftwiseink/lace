@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T18:00:00-08:00
 task_list: lace/dotfiles-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [self, implementation_review, nushell, version_compatibility, config_loading]
 ---

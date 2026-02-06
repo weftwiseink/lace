@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T19:30:00-08:00
 task_list: dotfiles/legacy-archive
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, rereview_agent, implementation_detail, validation, edge_cases, operational_readiness]
 ---

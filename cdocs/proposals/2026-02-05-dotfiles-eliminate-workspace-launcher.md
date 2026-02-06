@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T20:00:00-08:00
 task_list: lace/dotfiles-migration
 type: proposal
-state: live
-status: review_ready  # R2 revisions applied (username amendment)
+state: archived
+status: accepted
 tags: [dotfiles, devcontainer, wezterm, launcher, port-range, discovery, lace-ecosystem, migration, elimination]
 last_reviewed:
   status: revision_requested

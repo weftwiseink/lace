@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T19:00:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
-status: wip
+state: archived
+status: result_accepted
 tags: [implementation-summary, dotfiles, archive, nushell, plugin, launcher, cross-proposal]
 supersedes:
   - cdocs/reports/2026-02-05-dotfiles-modernization-project-assessment.md

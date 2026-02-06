@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-05T14:00:00-08:00
 task_list: lace/dotfiles-migration
 type: proposal
-state: evolved
+state: archived
 status: superseded
 superseded_by: cdocs/proposals/2026-02-05-dotfiles-eliminate-workspace-launcher.md
 evolved_into: cdocs/proposals/2026-02-05-dotfiles-eliminate-workspace-launcher.md

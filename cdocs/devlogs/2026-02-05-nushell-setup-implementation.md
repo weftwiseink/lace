@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-05T17:30:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
+state: archived
 status: done
 tags: [implementation, nushell, dotfiles, shell, vi-mode, starship]
 last_reviewed:

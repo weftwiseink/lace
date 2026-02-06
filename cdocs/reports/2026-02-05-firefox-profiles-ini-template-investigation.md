@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/dotfiles-migration
 type: report
 subtype: investigation
-state: live
+state: archived
 status: done
 tags: [firefox, chezmoi, template, investigation]
 ---

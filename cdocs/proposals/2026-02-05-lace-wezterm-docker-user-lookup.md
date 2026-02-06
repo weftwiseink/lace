@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T23:55:00-08:00
 task_list: lace/wezterm-plugin
 type: proposal
-state: live
-status: review_ready  # R1 revisions applied
+state: archived
+status: accepted
 tags: [wezterm, docker, ssh, plugin, username, devcontainer]
 last_reviewed:
   status: revision_requested

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T13:10:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
+state: archived
 status: done
 tags: [status, dotfiles, chezmoi, devcontainer, plugins, executive-summary]
 ---

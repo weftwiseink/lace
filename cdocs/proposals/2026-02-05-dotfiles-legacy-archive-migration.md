@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-05T12:30:00-08:00
 task_list: dotfiles/legacy-archive
 type: proposal
-state: live
+state: archived
 status: evolved
 superseded_by: cdocs/proposals/2026-02-05-dotfiles-legacy-archive-clean.md
 tags: [dotfiles, migration, archive, symlinks, bash, tmux, vscode, blackbox, legacy]

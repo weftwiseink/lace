@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T20:15:00-08:00
 task_list: dotfiles/legacy-archive
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, scope_reduction, internal_consistency, phase_renumbering, out_of_scope_verification]
 ---

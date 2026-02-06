@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T23:58:00-08:00
 task_list: lace/wezterm-plugin
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent]
 round: 1

@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T17:30:00-08:00
 task_list: lace/dotfiles-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, implementation_detail, test_plan, forward_compatibility, code_changes]
 ---

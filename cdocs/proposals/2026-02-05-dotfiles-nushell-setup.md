@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T12:08:00-08:00
 task_list: dotfiles/nushell-migration
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: accepted
 tags: [nushell, dotfiles, shell, vi-mode, starship, chezmoi, migration]
 parent: cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md
 last_reviewed:

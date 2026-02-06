@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T23:45:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
-status: done
+state: archived
+status: result_accepted
 tags: [status, dotfiles, executive-summary, project-assessment, cross-proposal, sequencing, chezmoi, nushell, wezterm, firefox]
 supersedes:
   - cdocs/reports/2026-02-05-dotfiles-modernization-executive-summary.md

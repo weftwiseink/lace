@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T17:00:00-08:00
 task_list: lace/wezterm-plugin
 type: devlog
-state: live
-status: wip
+state: archived
+status: done
 tags: [implementation, plugin, wezterm, docker, username]
 last_reviewed:
   status: accepted

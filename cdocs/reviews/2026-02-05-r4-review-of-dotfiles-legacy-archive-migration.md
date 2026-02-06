@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-05T21:45:00-08:00
 task_list: dotfiles/legacy-archive
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, consistency_audit, chezmoi_removal, rollback_simplification, simplification_pass]
 ---

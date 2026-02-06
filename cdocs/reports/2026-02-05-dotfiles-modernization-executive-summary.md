@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-05T16:00:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: evolved
+state: archived
 status: superseded
 superseded_by: cdocs/reports/2026-02-05-dotfiles-modernization-project-assessment.md
 tags: [status, dotfiles, executive-summary, nushell, wezterm, archive, launcher, migration, sequencing]

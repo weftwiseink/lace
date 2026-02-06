@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T23:55:00-08:00
 task_list: lace/dotfiles-migration
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: accepted
 tags: [dotfiles, migration, archive, bash, tmux, vscode, blackbox, legacy, chezmoi]
 supersedes: cdocs/proposals/2026-02-05-dotfiles-legacy-archive-migration.md
 last_reviewed:

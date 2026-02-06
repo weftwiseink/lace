@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-05T17:30:00-08:00
 task_list: lace/dotfiles-migration
 type: devlog
-state: live
-status: wip
+state: archived
+status: done
 tags: [implementation, launcher, devcontainer, port-range, elimination]
 last_reviewed:
   status: accepted

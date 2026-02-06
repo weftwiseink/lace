@@ -304,7 +304,7 @@ describe("lace up: full config (prebuild + repo mounts)", () => {
 });
 
 describe("lace up: no repo mounts or prebuild", () => {
-  it("assigns port and generates extended config with port mapping", async () => {
+  it("generates extended config without port mapping when no features declared", async () => {
     setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
 
     const result = await runUp({
@@ -316,19 +316,19 @@ describe("lace up: no repo mounts or prebuild", () => {
     expect(result.exitCode).toBe(0);
     expect(result.phases.prebuild).toBeUndefined();
     expect(result.phases.resolveMounts).toBeUndefined();
-    // Port assignment always happens
+    // No port templates found -> no port allocation
     expect(result.phases.portAssignment?.exitCode).toBe(0);
-    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
-    expect(result.phases.portAssignment?.port).toBeLessThanOrEqual(22499);
-    // Config is always generated now (for port mapping)
+    expect(result.phases.portAssignment?.message).toContain(
+      "No port templates found",
+    );
+    // Config is always generated
     expect(result.phases.generateConfig?.exitCode).toBe(0);
 
-    // Verify extended config contains the port mapping
+    // Verify extended config is generated (but no appPort without features)
     const extended = JSON.parse(
       readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
     );
-    expect(extended.appPort).toBeDefined();
-    expect(extended.appPort[0]).toMatch(/^224\d{2}:2222$/);
+    expect(extended.appPort).toBeUndefined();
   });
 });
 
@@ -785,5 +785,325 @@ describe("lace up: metadata validation -- no features", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.phases.metadataValidation).toBeUndefined();
+  });
+});
+
+// ── Feature awareness v2 integration tests ──
+
+const AUTO_INJECT_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+    },
+  },
+  null,
+  2,
+);
+
+const EXPLICIT_STATIC_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+        sshPort: "3333",
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const EXPLICIT_TEMPLATE_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+        sshPort: "${lace.port(wezterm-server/sshPort)}",
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const ASYMMETRIC_APPPORT_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+        sshPort: "2222",
+      },
+    },
+    appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+  },
+  null,
+  2,
+);
+
+const NO_LACE_PORTS_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/devcontainers/features/git:1": {},
+    },
+  },
+  null,
+  2,
+);
+
+const gitMetadataNoLace: FeatureMetadata = {
+  id: "git",
+  version: "1.0.0",
+  options: { version: { type: "string", default: "latest" } },
+};
+
+describe("lace up: auto-inject port templates from metadata", () => {
+  it("auto-injects and resolves port, generates symmetric appPort/forwardPorts/portsAttributes", async () => {
+    setupWorkspace(AUTO_INJECT_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
+    expect(result.phases.portAssignment?.port).toBeLessThanOrEqual(22499);
+
+    // Verify generated config
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const port = result.phases.portAssignment!.port!;
+
+    // Feature option resolved to integer
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      features[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ].sshPort,
+    ).toBe(port);
+
+    // Symmetric appPort
+    expect(extended.appPort).toContain(`${port}:${port}`);
+
+    // forwardPorts
+    expect(extended.forwardPorts).toContain(port);
+
+    // portsAttributes with feature-declared label
+    expect(extended.portsAttributes?.[String(port)]).toEqual({
+      label: "wezterm ssh (lace)",
+      requireLocalPort: true,
+    });
+
+    // Port assignments file persisted
+    const assignmentsPath = join(laceDir, "port-assignments.json");
+    expect(existsSync(assignmentsPath)).toBe(true);
+    const assignments = JSON.parse(readFileSync(assignmentsPath, "utf-8"));
+    expect(
+      assignments.assignments["wezterm-server/sshPort"].port,
+    ).toBe(port);
+  });
+});
+
+describe("lace up: user static value prevents auto-injection", () => {
+  it("uses user value, no port allocation or appPort generation", async () => {
+    setupWorkspace(EXPLICIT_STATIC_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // No port allocation (user provided static value, injection skipped)
+    expect(result.phases.portAssignment?.message).toContain(
+      "No port templates found",
+    );
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      features[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ].sshPort,
+    ).toBe("3333");
+
+    // No auto-generated appPort
+    expect(extended.appPort).toBeUndefined();
+  });
+});
+
+describe("lace up: explicit template same as auto-injection", () => {
+  it("resolves explicit template the same as auto-injection would", async () => {
+    setupWorkspace(EXPLICIT_TEMPLATE_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const port = result.phases.portAssignment!.port!;
+
+    // Feature option resolved to integer (same as auto-injection)
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      features[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ].sshPort,
+    ).toBe(port);
+
+    // Symmetric entries generated
+    expect(extended.appPort).toContain(`${port}:${port}`);
+  });
+});
+
+describe("lace up: asymmetric appPort suppresses auto-generated entry", () => {
+  it("resolves template in user appPort and suppresses auto-generated entry", async () => {
+    setupWorkspace(ASYMMETRIC_APPPORT_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const port = result.phases.portAssignment!.port!;
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+
+    // sshPort stays literal "2222" (user provided static value)
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      features[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ].sshPort,
+    ).toBe("2222");
+
+    // appPort has user's asymmetric mapping (resolved)
+    expect(extended.appPort).toContain(`${port}:2222`);
+
+    // No duplicate symmetric entry (suppressed because user already has port:...)
+    const symmetricEntry = `${port}:${port}`;
+    expect(extended.appPort).not.toContain(symmetricEntry);
+
+    // forwardPorts and portsAttributes still generated
+    expect(extended.forwardPorts).toContain(port);
+    expect(extended.portsAttributes?.[String(port)]).toBeDefined();
+  });
+});
+
+describe("lace up: no lace port metadata -- no injection or allocation", () => {
+  it("passes through config unchanged when features have no lace ports", async () => {
+    setupWorkspace(NO_LACE_PORTS_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/devcontainers/features/git:1": gitMetadataNoLace,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.message).toContain(
+      "No port templates found",
+    );
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    // No port-related entries
+    expect(extended.appPort).toBeUndefined();
+    expect(extended.forwardPorts).toBeUndefined();
+    expect(extended.portsAttributes).toBeUndefined();
+  });
+});
+
+describe("lace up: metadata unavailable with skip-metadata-validation", () => {
+  it("does not auto-inject when metadata fails but skip-validation set", async () => {
+    // Feature with explicit template works even without metadata
+    setupWorkspace(EXPLICIT_TEMPLATE_CONFIG_JSON);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createFailingMetadataMock(),
+      skipDevcontainerUp: true,
+      skipMetadataValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Port should still be allocated (user explicitly wrote the template)
+    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const port = result.phases.portAssignment!.port!;
+
+    // Template resolved
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(
+      features[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ].sshPort,
+    ).toBe(port);
+
+    // portsAttributes uses label fallback (no metadata to enrich)
+    expect(extended.portsAttributes?.[String(port)]?.label).toBe(
+      "wezterm-server/sshPort (lace)",
+    );
+
+    warnSpy.mockRestore();
   });
 });

@@ -2,3 +2,4 @@
 .lace/
 node_modules/
 dist/
+.vscode

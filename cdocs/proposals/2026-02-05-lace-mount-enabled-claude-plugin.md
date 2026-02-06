@@ -6,29 +6,11 @@ type: proposal
 state: live
 status: review_ready
 tags: [lace, plugins, claude-code, managed-plugins, mounts, devcontainer, agent-awareness]
-last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6"
-  at: 2026-02-05T17:30:00-08:00
-  round: 1
-revisions:
-  - at: 2026-02-05T17:45:00-08:00
-    by: "@claude-opus-4-6"
-    round: 1
-    summary: >
-      Applied review feedback: [blocking] added sshPort parameter to resolveClaudeAccess
-      signature, specified postStartCommand merging strategy (always normalize to object format)
-      for all original formats with multiple lace-injected commands. [non-blocking] Fixed
-      background table to reference claude-access.ts, clarified forwardApiKey defaults to
-      always-include unless explicitly false, added settings-vs-project precedence documentation,
-      fixed LACE_WORKSPACE_ROOT to be container path not host path, added claudeAccess phase
-      to UpResult.phases, fixed .claude.local.md heredoc example consistency, added settings/project
-      conflict resolution test cases, renamed Phase 1 for accuracy.
 ---
 
 # Mount-Enabled Claude Plugin: Managed Plugin API and First Integration
 
-> **BLUF:** This proposal extends the lace plugin system with a "managed plugin" concept -- built-in plugins that generate mounts, environment variables, and devcontainer features without requiring a git repo. The first managed plugin, `customizations.lace.claude`, provides one-line Claude Code access in any lace container by auto-injecting the `ghcr.io/anthropics/devcontainer-features/claude-code:1` feature, a `~/.claude/` bind mount, `CLAUDE_CONFIG_DIR`, and `ANTHROPIC_API_KEY` forwarding. The implementation extends `generateExtendedConfig` in `up.ts` to support `features`, `containerEnv`, and `remoteEnv` merging, adds runtime user detection for proper mount targeting, and includes a lightweight agent awareness layer via `LACE_*` environment variables and a generated `.claude.local.md`. The design is validated at each phase against the Claude access use case, ensuring the API works before generalizing. Based on findings from four research reports: plugin system architecture (Report 1), Claude devcontainer bundling (Report 2), claude-tools session portability (Report 3), and agent situational awareness (Report 4).
+> **BLUF:** Add `"customizations.lace.claude": true` support to lace so that `lace up` produces a container with Claude Code installed, host credentials forwarded, and session portability between host and container. Extends `generateExtendedConfig` to merge features, env vars, and `postStartCommand` alongside the existing mounts support. Includes a lightweight agent awareness layer (`LACE_*` env vars, `.claude.local.md`).
 
 ## Objective
 

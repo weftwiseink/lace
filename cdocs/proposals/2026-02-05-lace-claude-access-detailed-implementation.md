@@ -6,43 +6,11 @@ type: proposal
 state: live
 status: review_ready
 tags: [lace, claude-code, managed-plugins, implementation, devcontainer, mounts, features, agent-awareness, subagent-ready]
-last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6"
-  at: 2026-02-05T22:30:00-08:00
-  round: 2
-revisions:
-  - at: 2026-02-05T21:30:00-08:00
-    by: "@claude-opus-4-6"
-    round: 1
-    summary: >
-      Applied self-review feedback: [blocking] replaced postCreateCommands indexOf-based key
-      generation with forEach counter and restructured to single-pass object normalization
-      matching the postStartCommand pattern; [blocking] moved containerWorkspaceFolder
-      computation to before the sessionBridge conditional so it is available to both session
-      bridge (step 8) and agent context (step 9). [non-blocking] Reconciled BLUF test count
-      with test plan table; aligned up-extended-config test approach with D1 export decision;
-      fixed resolveRemoteUser doc comment; updated postCreateCommand test case 12 to reflect
-      new object-format merge and added test case 13.
-  - at: 2026-02-05T23:00:00-08:00
-    by: "@claude-opus-4-6"
-    round: 2
-    summary: >
-      Applied round 2 fresh-agent review feedback: [blocking] added opam init --auto-setup
-      --bare before opam install in generateClaudeToolsInstallCommand and added NOTE that the
-      repository URL (github.com/dlond/claude-tools) was user-provided and should be verified
-      during implementation. [non-blocking] Added D7 documenting resolveClaudeAccess signature
-      divergence from mid-level proposal (added config parameter, removed containerWorkspaceFolder,
-      detailed proposal is authoritative); added root user warning in resolveClaudeAccess step 1a
-      cross-referencing mid-level E2; updated E4 to reflect object-format normalization for
-      postCreateCommands; fixed claude-access.test.ts count from 14 to 16 and reconciled BLUF
-      total to ~64; added installClaudeTools manual verification step; clarified test case 12
-      symlinkCommand is null with NOTE explaining intermediate state when non-null.
 ---
 
 # Lace Claude Access: Detailed Implementation Proposal
 
-> **BLUF:** This proposal provides line-level implementation specifications for adding Claude Code access to lace-managed devcontainers, as designed in the mid-level proposal (`cdocs/proposals/2026-02-05-lace-mount-enabled-claude-plugin.md`). It covers four phases: (1) extending `generateExtendedConfig` to merge `features`, `containerEnv`, `remoteEnv`, and `postStartCommand`, plus creating `claude-access.ts` with extraction/utility functions; (2) implementing `resolveClaudeAccess` and wiring it into `runUp` for end-to-end `"customizations.lace.claude": true` support; (3) session bridge symlinks, `LACE_*` environment variables, and optional claude-tools source installation via `postCreateCommand`; (4) `.claude.local.md` generation for agent situational awareness. Each phase specifies exact function signatures, type definitions, merge logic, test cases with inputs/expected outputs, file modification targets, and mechanically verifiable success criteria. The proposal is structured for subagent-driven development: each phase is independently executable with explicit dependencies and constraints. Total estimated test count: ~60 unit + ~4 integration (~64 total).
+> **BLUF:** Line-level implementation spec for the claude access feature designed in the mid-level proposal. Four phases: (1) extend `generateExtendedConfig` + create `claude-access.ts`, (2) wire `resolveClaudeAccess` into `runUp`, (3) session bridge + `LACE_*` vars + claude-tools, (4) `.claude.local.md` generation. ~64 tests total. Structured for subagent-driven development with explicit phase dependencies.
 
 ## Objective
 

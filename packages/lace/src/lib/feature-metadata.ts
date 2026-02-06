@@ -1,6 +1,13 @@
 // IMPLEMENTATION_VALIDATION
-import { readFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { RunSubprocess } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 
@@ -59,6 +66,8 @@ export interface FetchOptions {
   skipValidation?: boolean;
   /** Subprocess runner override (for testing). */
   subprocess?: RunSubprocess;
+  /** Override cache directory (for testing). Default: ~/.config/lace/cache/features */
+  cacheDir?: string;
 }
 
 /** Error thrown when metadata cannot be fetched and skipValidation is false. */
@@ -77,6 +86,30 @@ export class MetadataFetchError extends Error {
   }
 }
 
+// ── Internal: Cache types ──
+
+interface CacheEntry {
+  /** The feature metadata itself. */
+  metadata: FeatureMetadata;
+  /** Cache bookkeeping, not part of the feature metadata. */
+  _cache: {
+    /** The feature ID as provided. */
+    featureId: string;
+    /** ISO 8601 timestamp when the cache entry was written. */
+    fetchedAt: string;
+    /**
+     * TTL in milliseconds. null means permanent (pinned version).
+     * 86400000 = 24h for floating tags.
+     */
+    ttlMs: number | null;
+  };
+}
+
+interface ReadFsCacheOptions {
+  /** When true, skip entries with non-null TTL (floating tags). Default: false. */
+  skipFloating?: boolean;
+}
+
 // ── Internal: OCI manifest shape ──
 
 /** Shape of the OCI manifest JSON returned by the devcontainer CLI. */
@@ -87,6 +120,102 @@ interface OciManifest {
 // ── Internal: In-memory cache ──
 
 const memoryCache = new Map<string, FeatureMetadata>();
+
+// ── Internal: Filesystem cache ──
+
+const DEFAULT_CACHE_DIR = join(
+  homedir(),
+  ".config",
+  "lace",
+  "cache",
+  "features",
+);
+
+const SEMVER_EXACT = /^.*:\d+\.\d+\.\d+$/; // :1.2.3
+const DIGEST_REF = /^.*@sha256:[a-f0-9]{64}$/; // @sha256:abc...
+
+const TTL_24H_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Convert a feature ID to a filesystem-safe cache key using percent-encoding.
+ * '/' -> '%2F', ':' -> '%3A', '%' -> '%25' (encode % first to avoid double-encoding)
+ */
+export function featureIdToCacheKey(featureId: string): string {
+  return featureId
+    .replace(/%/g, "%25")
+    .replace(/\//g, "%2F")
+    .replace(/:/g, "%3A");
+}
+
+function cacheKeyToFilePath(featureId: string, cacheDir: string): string {
+  return join(cacheDir, `${featureIdToCacheKey(featureId)}.json`);
+}
+
+/**
+ * Determine the TTL for a feature ID based on its version format.
+ * Pinned versions (exact semver, digest) are permanent (null TTL).
+ * Floating tags (major, minor, latest, unversioned) get 24h TTL.
+ */
+export function getTtlMs(featureId: string): number | null {
+  if (SEMVER_EXACT.test(featureId)) return null; // permanent
+  if (DIGEST_REF.test(featureId)) return null; // permanent
+  return TTL_24H_MS; // floating: 24h
+}
+
+function readFsCache(
+  featureId: string,
+  cacheDir: string,
+  options: ReadFsCacheOptions = {},
+): FeatureMetadata | null {
+  const { skipFloating = false } = options;
+  const filePath = cacheKeyToFilePath(featureId, cacheDir);
+  if (!existsSync(filePath)) return null;
+
+  let entry: CacheEntry;
+  try {
+    entry = JSON.parse(readFileSync(filePath, "utf-8")) as CacheEntry;
+  } catch {
+    // Corrupted cache file -- treat as miss, will be overwritten on next fetch
+    return null;
+  }
+
+  // When skipFloating is true (--no-cache), only permanent entries are used.
+  // Floating tags (non-null TTL) are treated as cache misses.
+  if (skipFloating && entry._cache.ttlMs !== null) {
+    return null;
+  }
+
+  // Check TTL for floating tags
+  if (entry._cache.ttlMs !== null) {
+    const age = Date.now() - new Date(entry._cache.fetchedAt).getTime();
+    if (age > entry._cache.ttlMs) return null; // expired
+  }
+
+  return entry.metadata;
+}
+
+function writeFsCache(
+  featureId: string,
+  metadata: FeatureMetadata,
+  cacheDir: string,
+): void {
+  mkdirSync(cacheDir, { recursive: true });
+
+  const entry: CacheEntry = {
+    metadata,
+    _cache: {
+      featureId,
+      fetchedAt: new Date().toISOString(),
+      ttlMs: getTtlMs(featureId),
+    },
+  };
+
+  writeFileSync(
+    cacheKeyToFilePath(featureId, cacheDir),
+    JSON.stringify(entry, null, 2),
+    "utf-8",
+  );
+}
 
 // ── Internal: Local-path detection ──
 
@@ -196,20 +325,41 @@ export async function fetchFeatureMetadata(
   featureId: string,
   options: FetchOptions = {},
 ): Promise<FeatureMetadata | null> {
-  const { skipValidation = false, subprocess } = options;
+  const {
+    noCache = false,
+    skipValidation = false,
+    subprocess,
+    cacheDir = DEFAULT_CACHE_DIR,
+  } = options;
 
   // 1. Check in-memory cache
   const cached = memoryCache.get(featureId);
   if (cached) return cached;
 
-  // 2. Fetch from source
+  // 2. Check filesystem cache (unless local-path)
+  // When noCache is true, only pinned (permanent) cache entries are used.
+  // Floating tags are bypassed.
+  if (!isLocalPath(featureId)) {
+    const fsCached = readFsCache(featureId, cacheDir, {
+      skipFloating: noCache,
+    });
+    if (fsCached) {
+      memoryCache.set(featureId, fsCached);
+      return fsCached;
+    }
+  }
+
+  // 3. Fetch from source
   try {
     const metadata = isLocalPath(featureId)
       ? fetchFromLocalPath(featureId)
       : fetchFromRegistry(featureId, subprocess);
 
-    // 3. Populate in-memory cache
+    // 4. Populate caches
     memoryCache.set(featureId, metadata);
+    if (!isLocalPath(featureId)) {
+      writeFsCache(featureId, metadata, cacheDir);
+    }
 
     return metadata;
   } catch (e) {
@@ -248,9 +398,18 @@ export async function fetchAllFeatureMetadata(
   return new Map(entries);
 }
 
-/** Clear the in-memory metadata cache. */
-export function clearMetadataCache(): void {
+/**
+ * Clear both in-memory and filesystem caches.
+ * If cacheDir is provided, deletes that directory; otherwise deletes the default.
+ */
+export function clearMetadataCache(cacheDir?: string): void {
   memoryCache.clear();
+  const dir = cacheDir ?? DEFAULT_CACHE_DIR;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Ignore errors -- cache directory may not exist
+  }
 }
 
 /** Validate that provided option names exist in the feature's schema. */

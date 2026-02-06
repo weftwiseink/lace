@@ -1,6 +1,12 @@
 // IMPLEMENTATION_VALIDATION
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { RunSubprocess, SubprocessResult } from "../subprocess";
@@ -12,6 +18,8 @@ import {
   validatePortDeclarations,
   extractLaceCustomizations,
   isLocalPath,
+  featureIdToCacheKey,
+  getTtlMs,
   MetadataFetchError,
   type FeatureMetadata,
 } from "../feature-metadata";
@@ -71,8 +79,18 @@ describe("isLocalPath", () => {
 });
 
 describe("fetchFeatureMetadata -- OCI fetch", () => {
+  let cacheDir: string;
+
   beforeEach(() => {
-    clearMetadataCache();
+    cacheDir = join(
+      tmpdir(),
+      `lace-test-cache-oci-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    clearMetadataCache(cacheDir);
+  });
+
+  afterEach(() => {
+    rmSync(cacheDir, { recursive: true, force: true });
   });
 
   // Scenario 1: Successful metadata parsing from CLI output
@@ -81,7 +99,7 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
 
     const result = await fetchFeatureMetadata(
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-      { subprocess },
+      { subprocess, cacheDir },
     );
 
     expect(result).toEqual(weztermMetadata);
@@ -104,18 +122,18 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     });
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(MetadataFetchError);
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(/Failed to fetch metadata for feature/);
 
     // Clear cache so the second call actually runs
-    clearMetadataCache();
+    clearMetadataCache(cacheDir);
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(/unauthorized: authentication required/);
   });
 
@@ -131,6 +149,7 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     const result = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
       subprocess,
       skipValidation: true,
+      cacheDir,
     });
 
     expect(result).toBeNull();
@@ -150,7 +169,7 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     });
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(/CLI returned invalid JSON/);
   });
 
@@ -163,7 +182,7 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     });
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(/missing dev.containers.metadata annotation/);
   });
 
@@ -180,7 +199,7 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     });
 
     await expect(
-      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess }),
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
     ).rejects.toThrow(/not valid JSON/);
   });
 });
@@ -545,8 +564,18 @@ describe("validatePortDeclarations", () => {
 });
 
 describe("in-memory cache", () => {
+  let cacheDir: string;
+
   beforeEach(() => {
-    clearMetadataCache();
+    cacheDir = join(
+      tmpdir(),
+      `lace-test-cache-mem-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    clearMetadataCache(cacheDir);
+  });
+
+  afterEach(() => {
+    rmSync(cacheDir, { recursive: true, force: true });
   });
 
   // Scenario 22: Deduplication within a run
@@ -555,9 +584,11 @@ describe("in-memory cache", () => {
 
     const result1 = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
       subprocess,
+      cacheDir,
     });
     const result2 = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
       subprocess,
+      cacheDir,
     });
 
     expect(result1).toEqual(weztermMetadata);
@@ -569,9 +600,15 @@ describe("in-memory cache", () => {
   it("resets cache on clearMetadataCache", async () => {
     const subprocess = mockOciSuccess(weztermMetadata);
 
-    await fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess });
-    clearMetadataCache();
-    await fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess });
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+    clearMetadataCache(cacheDir);
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
 
     expect(subprocess).toHaveBeenCalledTimes(2);
   });
@@ -583,9 +620,7 @@ describe("in-memory cache", () => {
       version: "2.0.0",
     };
 
-    let callCount = 0;
-    const subprocess: RunSubprocess = vi.fn((cmd, args) => {
-      callCount++;
+    const subprocess: RunSubprocess = vi.fn((_cmd, args) => {
       const featureId = args[3]; // 4th arg is the feature ID
       const metadata =
         featureId === "ghcr.io/org/other:2" ? otherMetadata : weztermMetadata;
@@ -602,12 +637,278 @@ describe("in-memory cache", () => {
 
     const result = await fetchAllFeatureMetadata(
       ["ghcr.io/org/feat:1", "ghcr.io/org/feat:1", "ghcr.io/org/other:2"],
-      { subprocess },
+      { subprocess, cacheDir },
     );
 
     expect(result.size).toBe(2);
     expect(result.get("ghcr.io/org/feat:1")).toEqual(weztermMetadata);
     expect(result.get("ghcr.io/org/other:2")).toEqual(otherMetadata);
     expect(subprocess).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("featureIdToCacheKey", () => {
+  // Scenario 34: Cache key escaping round-trip
+  it("percent-encodes slashes, colons, and percent signs", () => {
+    expect(featureIdToCacheKey("ghcr.io/org/feat:1.2.3")).toBe(
+      "ghcr.io%2Forg%2Ffeat%3A1.2.3",
+    );
+  });
+
+  it("encodes percent signs before other characters to avoid double-encoding", () => {
+    expect(featureIdToCacheKey("ghcr.io/org/feat%special:1.2.3")).toBe(
+      "ghcr.io%2Forg%2Ffeat%25special%3A1.2.3",
+    );
+  });
+
+  it("preserves hyphens and dots", () => {
+    expect(featureIdToCacheKey("ghcr.io/org/my-feature:1")).toBe(
+      "ghcr.io%2Forg%2Fmy-feature%3A1",
+    );
+  });
+});
+
+describe("getTtlMs", () => {
+  it("returns null (permanent) for exact semver", () => {
+    expect(getTtlMs("ghcr.io/org/feat:1.2.3")).toBeNull();
+  });
+
+  it("returns null (permanent) for digest references", () => {
+    expect(
+      getTtlMs(
+        "ghcr.io/org/feat@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      ),
+    ).toBeNull();
+  });
+
+  it("returns 24h TTL for major float", () => {
+    expect(getTtlMs("ghcr.io/org/feat:1")).toBe(86400000);
+  });
+
+  it("returns 24h TTL for minor float", () => {
+    expect(getTtlMs("ghcr.io/org/feat:1.2")).toBe(86400000);
+  });
+
+  it("returns 24h TTL for :latest", () => {
+    expect(getTtlMs("ghcr.io/org/feat:latest")).toBe(86400000);
+  });
+
+  it("returns 24h TTL for unversioned (no tag)", () => {
+    expect(getTtlMs("ghcr.io/org/feat")).toBe(86400000);
+  });
+});
+
+describe("filesystem cache", () => {
+  let cacheDir: string;
+
+  beforeEach(() => {
+    cacheDir = join(
+      tmpdir(),
+      `lace-test-fscache-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    clearMetadataCache(cacheDir);
+  });
+
+  afterEach(() => {
+    rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  // Helper: write a cache entry file directly
+  function writeCacheFile(
+    featureId: string,
+    metadata: FeatureMetadata,
+    opts?: { fetchedAt?: string; ttlMs?: number | null },
+  ): void {
+    mkdirSync(cacheDir, { recursive: true });
+    const cacheKey = featureIdToCacheKey(featureId);
+    const entry = {
+      metadata,
+      _cache: {
+        featureId,
+        fetchedAt: opts?.fetchedAt ?? new Date().toISOString(),
+        ttlMs: opts?.ttlMs !== undefined ? opts.ttlMs : getTtlMs(featureId),
+      },
+    };
+    writeFileSync(
+      join(cacheDir, `${cacheKey}.json`),
+      JSON.stringify(entry, null, 2),
+      "utf-8",
+    );
+  }
+
+  function readCacheFile(featureId: string): Record<string, unknown> | null {
+    const cacheKey = featureIdToCacheKey(featureId);
+    const filePath = join(cacheDir, `${cacheKey}.json`);
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, "utf-8")) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  // Scenario 25: Pinned version writes permanent cache entry
+  it("writes permanent cache entry for pinned version", async () => {
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    await fetchFeatureMetadata("ghcr.io/org/feat:1.2.3", {
+      subprocess,
+      cacheDir,
+    });
+
+    const cached = readCacheFile("ghcr.io/org/feat:1.2.3");
+    expect(cached).not.toBeNull();
+    expect((cached as any)._cache.ttlMs).toBeNull();
+    expect((cached as any).metadata).toEqual(weztermMetadata);
+  });
+
+  // Scenario 26: Floating tag writes 24h TTL cache entry
+  it("writes 24h TTL cache entry for floating tag", async () => {
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+
+    const cached = readCacheFile("ghcr.io/org/feat:1");
+    expect(cached).not.toBeNull();
+    expect((cached as any)._cache.ttlMs).toBe(86400000);
+  });
+
+  // Scenario 27: Cache hit for pinned version
+  it("uses filesystem cache for pinned version without spawning subprocess", async () => {
+    writeCacheFile("ghcr.io/org/feat:1.2.3", weztermMetadata, {
+      ttlMs: null,
+    });
+
+    const subprocess = vi.fn() as unknown as RunSubprocess;
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1.2.3", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(result).toEqual(weztermMetadata);
+    expect(subprocess).not.toHaveBeenCalled();
+  });
+
+  // Scenario 28: Cache hit within TTL for floating tag
+  it("uses filesystem cache within TTL for floating tag", async () => {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    writeCacheFile("ghcr.io/org/feat:1", weztermMetadata, {
+      fetchedAt: oneHourAgo,
+      ttlMs: 86400000,
+    });
+
+    const subprocess = vi.fn() as unknown as RunSubprocess;
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(result).toEqual(weztermMetadata);
+    expect(subprocess).not.toHaveBeenCalled();
+  });
+
+  // Scenario 29: Cache miss -- expired TTL for floating tag
+  it("treats expired floating tag cache as miss", async () => {
+    const twentyFiveHoursAgo = new Date(
+      Date.now() - 25 * 60 * 60 * 1000,
+    ).toISOString();
+    writeCacheFile("ghcr.io/org/feat:1", weztermMetadata, {
+      fetchedAt: twentyFiveHoursAgo,
+      ttlMs: 86400000,
+    });
+
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(subprocess).toHaveBeenCalledTimes(1);
+
+    // Verify cache was overwritten with fresh entry
+    const cached = readCacheFile("ghcr.io/org/feat:1");
+    const fetchedAt = new Date((cached as any)._cache.fetchedAt).getTime();
+    expect(Date.now() - fetchedAt).toBeLessThan(5000); // within 5 seconds
+  });
+
+  // Scenario 30: --no-cache bypasses filesystem cache for floating tags
+  it("bypasses filesystem cache for floating tags when noCache is true", async () => {
+    writeCacheFile("ghcr.io/org/feat:1", weztermMetadata, {
+      ttlMs: 86400000,
+    });
+
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+      noCache: true,
+    });
+
+    expect(subprocess).toHaveBeenCalledTimes(1);
+  });
+
+  // Scenario 31: --no-cache does NOT bypass permanent cache
+  it("preserves permanent cache when noCache is true", async () => {
+    writeCacheFile("ghcr.io/org/feat:1.2.3", weztermMetadata, {
+      ttlMs: null,
+    });
+
+    const subprocess = vi.fn() as unknown as RunSubprocess;
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1.2.3", {
+      subprocess,
+      cacheDir,
+      noCache: true,
+    });
+
+    expect(result).toEqual(weztermMetadata);
+    expect(subprocess).not.toHaveBeenCalled();
+  });
+
+  // Scenario 32: Cache directory auto-created
+  it("auto-creates cache directory on first write", async () => {
+    const freshCacheDir = join(cacheDir, "nested", "cache", "dir");
+    expect(existsSync(freshCacheDir)).toBe(false);
+
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir: freshCacheDir,
+    });
+
+    expect(existsSync(freshCacheDir)).toBe(true);
+  });
+
+  // Scenario 33: Corrupted cache file treated as miss
+  it("treats corrupted cache file as miss", async () => {
+    mkdirSync(cacheDir, { recursive: true });
+    const cacheKey = featureIdToCacheKey("ghcr.io/org/feat:1");
+    writeFileSync(
+      join(cacheDir, `${cacheKey}.json`),
+      "{ invalid json content",
+      "utf-8",
+    );
+
+    const subprocess = mockOciSuccess(weztermMetadata);
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(result).toEqual(weztermMetadata);
+    expect(subprocess).toHaveBeenCalledTimes(1);
+
+    // Verify cache was overwritten with valid content
+    const cached = readCacheFile("ghcr.io/org/feat:1");
+    expect(cached).not.toBeNull();
+    expect((cached as any).metadata).toEqual(weztermMetadata);
   });
 });

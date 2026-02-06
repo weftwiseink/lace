@@ -1,7 +1,47 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { isPortAvailable, LACE_PORT_MIN, LACE_PORT_MAX } from "./port-manager";
+import * as net from "node:net";
+
+// Port range for lace devcontainer port allocations
+// w=22, e=4, z=25 spells "wez" in alphabet positions
+export const LACE_PORT_MIN = 22425;
+export const LACE_PORT_MAX = 22499;
+
+/**
+ * Check if a port is available (not in use) on localhost.
+ * Uses TCP connect with a short timeout.
+ *
+ * @param port Port number to check
+ * @param timeout Connection timeout in milliseconds (default 100ms)
+ * @returns Promise that resolves to true if port is available, false if in use
+ */
+export function isPortAvailable(
+  port: number,
+  timeout = 100,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(timeout);
+
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(false); // Port is in use
+    });
+
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(true); // Port is available (connection timed out)
+    });
+
+    socket.once("error", () => {
+      socket.destroy();
+      resolve(true); // Port is available (connection refused or other error)
+    });
+
+    socket.connect(port, "localhost");
+  });
+}
 
 // ── Types ──
 

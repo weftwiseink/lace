@@ -10,8 +10,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as net from "node:net";
-import { PortAllocator } from "../port-allocator";
-import { LACE_PORT_MIN, LACE_PORT_MAX } from "../port-manager";
+import { PortAllocator, LACE_PORT_MIN, LACE_PORT_MAX } from "../port-allocator";
 
 describe("PortAllocator", () => {
   let workspaceRoot: string;

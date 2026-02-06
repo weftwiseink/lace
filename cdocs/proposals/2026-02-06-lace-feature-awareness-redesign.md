@@ -4,8 +4,9 @@ first_authored:
   at: 2026-02-06T11:00:00-08:00
 task_list: lace/feature-overhaul
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: evolved
+superseded_by: cdocs/proposals/2026-02-06-lace-feature-awareness-v2.md
 tags: [architecture, features, templating, ports, refactor, devcontainer-spec]
 last_reviewed:
   status: accepted

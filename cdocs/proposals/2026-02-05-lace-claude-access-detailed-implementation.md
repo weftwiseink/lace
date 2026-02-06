@@ -3,8 +3,9 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-05T20:00:00-08:00
 type: proposal
-state: live
+state: evolved
 status: review_ready
+superseded_by: cdocs/proposals/2026-02-06-rfp-claude-tools-lace-feature.md
 tags: [lace, claude-code, managed-plugins, implementation, devcontainer, mounts, features, agent-awareness, subagent-ready]
 ---
 

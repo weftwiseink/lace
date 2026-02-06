@@ -6,10 +6,10 @@ import type { RunSubprocess, SubprocessResult } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 import { parseRepoId } from "./devcontainer";
 
-export class PluginCloneError extends Error {
+export class RepoCloneError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "PluginCloneError";
+    this.name = "RepoCloneError";
   }
 }
 
@@ -38,22 +38,22 @@ export function deriveProjectId(workspaceFolder: string): string {
 }
 
 /**
- * Get the path where a plugin clone should be stored.
+ * Get the path where a repo clone should be stored.
  *
- * Pattern: ~/.config/lace/$project/plugins/$nameOrAlias
+ * Pattern: ~/.config/lace/$project/repos/$nameOrAlias
  */
 export function getClonePath(projectId: string, nameOrAlias: string): string {
-  return join(homedir(), ".config", "lace", projectId, "plugins", nameOrAlias);
+  return join(homedir(), ".config", "lace", projectId, "repos", nameOrAlias);
 }
 
 /**
- * Get the base plugins directory for a project.
+ * Get the base repos directory for a project.
  */
-export function getPluginsDir(projectId: string): string {
-  return join(homedir(), ".config", "lace", projectId, "plugins");
+export function getReposDir(projectId: string): string {
+  return join(homedir(), ".config", "lace", projectId, "repos");
 }
 
-export interface ClonePluginOptions {
+export interface CloneRepoOptions {
   /** The repo identifier (e.g., github.com/user/repo) */
   repoId: string;
   /** Where to clone the repo */
@@ -62,7 +62,7 @@ export interface ClonePluginOptions {
   subprocess?: RunSubprocess;
 }
 
-export interface ClonePluginResult {
+export interface CloneRepoResult {
   success: boolean;
   message: string;
   cloneDir: string;
@@ -71,13 +71,13 @@ export interface ClonePluginResult {
 }
 
 /**
- * Shallow clone a plugin repo to the target directory.
+ * Shallow clone a repo to the target directory.
  *
  * - Uses `git clone --depth 1` for efficiency
  * - Clones the full repo even if repoId has a subdirectory
  * - HTTPS is always used (no SSH key configuration needed)
  */
-export function clonePlugin(options: ClonePluginOptions): ClonePluginResult {
+export function cloneRepo(options: CloneRepoOptions): CloneRepoResult {
   const { repoId, targetDir, subprocess = defaultRunSubprocess } = options;
 
   const { cloneUrl, subdirectory } = parseRepoId(repoId);
@@ -90,8 +90,8 @@ export function clonePlugin(options: ClonePluginOptions): ClonePluginResult {
   const result = subprocess("git", ["clone", "--depth", "1", cloneUrl, targetDir]);
 
   if (result.exitCode !== 0) {
-    throw new PluginCloneError(
-      `Failed to clone plugin '${repoId}': ${result.stderr}`,
+    throw new RepoCloneError(
+      `Failed to clone repo '${repoId}': ${result.stderr}`,
     );
   }
 
@@ -99,8 +99,8 @@ export function clonePlugin(options: ClonePluginOptions): ClonePluginResult {
   if (subdirectory) {
     const subPath = join(targetDir, subdirectory);
     if (!existsSync(subPath) || !statSync(subPath).isDirectory()) {
-      throw new PluginCloneError(
-        `Plugin '${repoId}' subdirectory does not exist: ${subdirectory}`,
+      throw new RepoCloneError(
+        `Repo '${repoId}' subdirectory does not exist: ${subdirectory}`,
       );
     }
   }
@@ -113,7 +113,7 @@ export function clonePlugin(options: ClonePluginOptions): ClonePluginResult {
   };
 }
 
-export interface UpdatePluginOptions {
+export interface UpdateRepoOptions {
   /** Path to the existing clone directory */
   cloneDir: string;
   /** The repo identifier (for error messages) */
@@ -122,7 +122,7 @@ export interface UpdatePluginOptions {
   subprocess?: RunSubprocess;
 }
 
-export interface UpdatePluginResult {
+export interface UpdateRepoResult {
   success: boolean;
   message: string;
   /** Whether the update was skipped (e.g., network failure with cached version) */
@@ -130,17 +130,17 @@ export interface UpdatePluginResult {
 }
 
 /**
- * Update an existing plugin clone to the latest HEAD.
+ * Update an existing repo clone to the latest HEAD.
  *
  * On fetch failure (network, auth): warn and continue with cached version.
  * On reset failure: error (indicates corrupted clone).
  */
-export function updatePlugin(options: UpdatePluginOptions): UpdatePluginResult {
+export function updateRepo(options: UpdateRepoOptions): UpdateRepoResult {
   const { cloneDir, repoId, subprocess = defaultRunSubprocess } = options;
 
   if (!existsSync(cloneDir)) {
-    throw new PluginCloneError(
-      `Plugin clone directory does not exist: ${cloneDir}`,
+    throw new RepoCloneError(
+      `Repo clone directory does not exist: ${cloneDir}`,
     );
   }
 
@@ -153,7 +153,7 @@ export function updatePlugin(options: UpdatePluginOptions): UpdatePluginResult {
     // Network/auth failure - warn and continue with cached version
     return {
       success: true,
-      message: `Warning: Failed to update plugin '${repoId}'. Using cached version. (${fetchResult.stderr})`,
+      message: `Warning: Failed to update repo '${repoId}'. Using cached version. (${fetchResult.stderr})`,
       skipped: true,
     };
   }
@@ -165,8 +165,8 @@ export function updatePlugin(options: UpdatePluginOptions): UpdatePluginResult {
 
   if (resetResult.exitCode !== 0) {
     // Reset failure indicates corrupted clone
-    throw new PluginCloneError(
-      `Failed to update plugin '${repoId}': reset failed. ` +
+    throw new RepoCloneError(
+      `Failed to update repo '${repoId}': reset failed. ` +
         `The clone may be corrupted. Try removing ${cloneDir} and re-running. ` +
         `(${resetResult.stderr})`,
     );
@@ -180,30 +180,30 @@ export function updatePlugin(options: UpdatePluginOptions): UpdatePluginResult {
 }
 
 /**
- * Ensure a plugin is cloned/updated.
+ * Ensure a repo is cloned/updated.
  * If the clone exists, update it. Otherwise, clone it.
  */
-export function ensurePlugin(options: ClonePluginOptions): ClonePluginResult | UpdatePluginResult {
+export function ensureRepo(options: CloneRepoOptions): CloneRepoResult | UpdateRepoResult {
   const { targetDir } = options;
 
   // Check if clone already exists
   const gitDir = join(targetDir, ".git");
   if (existsSync(gitDir)) {
-    return updatePlugin({
+    return updateRepo({
       cloneDir: targetDir,
       repoId: options.repoId,
       subprocess: options.subprocess,
     });
   }
 
-  return clonePlugin(options);
+  return cloneRepo(options);
 }
 
 /**
- * Get the effective source path for a plugin.
+ * Get the effective source path for a repo.
  * If the repo has a subdirectory, returns the path to that subdirectory.
  * Otherwise, returns the clone directory itself.
  */
-export function getPluginSourcePath(cloneDir: string, subdirectory?: string): string {
+export function getRepoSourcePath(cloneDir: string, subdirectory?: string): string {
   return subdirectory ? join(cloneDir, subdirectory) : cloneDir;
 }

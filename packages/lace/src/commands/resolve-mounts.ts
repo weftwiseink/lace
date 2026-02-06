@@ -7,7 +7,7 @@ export const resolveMountsCommand = defineCommand({
   meta: {
     name: "resolve-mounts",
     description:
-      "Resolve plugin mounts from devcontainer.json and user settings",
+      "Resolve repo mounts from devcontainer.json and user settings",
   },
   args: {
     "dry-run": {

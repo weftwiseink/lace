@@ -5,7 +5,7 @@ import * as jsonc from "jsonc-parser";
 import {
   readDevcontainerConfig,
   readDevcontainerConfigMinimal,
-  extractPlugins,
+  extractRepoMounts,
   extractPrebuildFeatures,
   DevcontainerConfigError,
 } from "./devcontainer";
@@ -42,7 +42,7 @@ export interface UpResult {
  * Run the full lace up workflow:
  * 1. Assign port for wezterm SSH server (22425-22499 range)
  * 2. Prebuild (if prebuildFeatures configured)
- * 3. Resolve mounts (if plugins configured)
+ * 3. Resolve mounts (if repo mounts configured)
  * 4. Generate extended devcontainer.json (includes port mapping)
  * 5. Invoke devcontainer up
  */
@@ -83,8 +83,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
 
   const hasPrebuildFeatures = extractPrebuildFeatures(configMinimal.raw).kind === "features";
-  const pluginsResult = extractPlugins(configMinimal.raw);
-  const hasPlugins = pluginsResult.kind === "plugins";
+  const repoMountsResult = extractRepoMounts(configMinimal.raw);
+  const hasRepoMounts = repoMountsResult.kind === "repoMounts";
 
   // Phase 0: Assign port for wezterm SSH server
   // This runs before other phases to ensure port is available
@@ -152,8 +152,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   let mountSpecs: string[] = [];
   let symlinkCommand: string | null = null;
 
-  if (hasPlugins) {
-    console.log("Resolving plugin mounts...");
+  if (hasRepoMounts) {
+    console.log("Resolving repo mounts...");
     const mountsResult = runResolveMounts({ workspaceFolder, subprocess });
     result.phases.resolveMounts = {
       exitCode: mountsResult.exitCode,
@@ -236,7 +236,7 @@ interface GenerateExtendedConfigOptions {
 /**
  * Generate an extended devcontainer.json that includes:
  * - All original configuration
- * - Plugin mounts
+ * - Repo mounts
  * - Symlink creation commands in postCreateCommand
  * - Port mapping for wezterm SSH server
  */

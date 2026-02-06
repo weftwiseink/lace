@@ -1,18 +1,18 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync } from "node:fs";
 import {
-  type PluginsConfig,
-  type PluginOptions,
-  getPluginNameOrAlias,
+  type RepoMountsConfig,
+  type RepoMountOptions,
+  getRepoNameOrAlias,
   parseRepoId,
 } from "./devcontainer";
-import { type LaceSettings, type PluginSettings } from "./settings";
+import { type LaceSettings, type RepoMountSettings } from "./settings";
 import {
   getClonePath,
-  ensurePlugin,
-  getPluginSourcePath,
-  type ClonePluginOptions,
-} from "./plugin-clones";
+  ensureRepo,
+  getRepoSourcePath,
+  type CloneRepoOptions,
+} from "./repo-clones";
 import type { RunSubprocess } from "./subprocess";
 
 export class MountsError extends Error {
@@ -22,11 +22,11 @@ export class MountsError extends Error {
   }
 }
 
-/** Mount target prefix for plugins */
-const PLUGIN_MOUNT_PREFIX = "/mnt/lace/plugins";
+/** Mount target prefix for repo mounts */
+const REPO_MOUNT_PREFIX = "/mnt/lace/repos";
 
-/** Resolved plugin mount specification */
-export interface ResolvedPlugin {
+/** Resolved repo mount specification */
+export interface ResolvedRepoMount {
   /** The original repo identifier */
   repoId: string;
   /** The resolved name (alias or derived) */
@@ -52,19 +52,19 @@ export interface ResolvedPlugin {
 export interface ResolvedMounts {
   version: 2;
   generatedAt: string;
-  plugins: ResolvedPlugin[];
+  repoMounts: ResolvedRepoMount[];
   errors: string[];
 }
 
 /**
- * Validate that no two plugins resolve to the same name/alias.
+ * Validate that no two repo mounts resolve to the same name/alias.
  * Throws MountsError with guidance if conflicts are found.
  */
-export function validateNoConflicts(plugins: PluginsConfig): void {
+export function validateNoConflicts(repoMounts: RepoMountsConfig): void {
   const names = new Map<string, string[]>();
 
-  for (const [repoId, options] of Object.entries(plugins)) {
-    const nameOrAlias = getPluginNameOrAlias(repoId, options);
+  for (const [repoId, options] of Object.entries(repoMounts)) {
+    const nameOrAlias = getRepoNameOrAlias(repoId, options);
     if (!names.has(nameOrAlias)) {
       names.set(nameOrAlias, []);
     }
@@ -78,26 +78,26 @@ export function validateNoConflicts(plugins: PluginsConfig): void {
   if (conflicts.length > 0) {
     const [name, repos] = conflicts[0];
     const aliasExamples = repos
-      .map((r, i) => `  "${r}": { "alias": "${getPluginNameOrAlias(r, {})}-${i + 1}" }`)
+      .map((r, i) => `  "${r}": { "alias": "${getRepoNameOrAlias(r, {})}-${i + 1}" }`)
       .join(",\n");
 
     throw new MountsError(
-      `Plugin name conflict: ${repos.map((r) => `'${r}'`).join(" and ")} ` +
+      `Repo mount name conflict: ${repos.map((r) => `'${r}'`).join(" and ")} ` +
         `resolve to name '${name}'. Add explicit aliases:\n\n${aliasExamples}`,
     );
   }
 }
 
 /**
- * Get the default mount target for a plugin.
+ * Get the default mount target for a repo mount.
  */
 export function getDefaultTarget(nameOrAlias: string): string {
-  return `${PLUGIN_MOUNT_PREFIX}/${nameOrAlias}`;
+  return `${REPO_MOUNT_PREFIX}/${nameOrAlias}`;
 }
 
-export interface ResolvePluginMountsOptions {
-  /** Plugins declared in devcontainer.json */
-  plugins: PluginsConfig;
+export interface ResolveRepoMountsOptions {
+  /** Repo mounts declared in devcontainer.json */
+  repoMounts: RepoMountsConfig;
   /** User settings from settings.json */
   settings: LaceSettings;
   /** Project identifier for clone paths */
@@ -107,34 +107,34 @@ export interface ResolvePluginMountsOptions {
 }
 
 /**
- * Resolve plugin mounts from project declarations and user settings.
+ * Resolve repo mounts from project declarations and user settings.
  *
- * For each plugin:
+ * For each repo mount:
  * - If override exists in settings: use override source, validate it exists
  * - If no override: clone/update the repo and use clone path as source
  * - Generate mount spec and symlink spec if needed
  */
-export function resolvePluginMounts(
-  options: ResolvePluginMountsOptions,
+export function resolveRepoMounts(
+  options: ResolveRepoMountsOptions,
 ): ResolvedMounts {
-  const { plugins, settings, projectId, subprocess } = options;
+  const { repoMounts, settings, projectId, subprocess } = options;
 
   // First, validate no name conflicts
-  validateNoConflicts(plugins);
+  validateNoConflicts(repoMounts);
 
-  const resolved: ResolvedPlugin[] = [];
+  const resolved: ResolvedRepoMount[] = [];
   const errors: string[] = [];
 
-  for (const [repoId, pluginOptions] of Object.entries(plugins)) {
+  for (const [repoId, mountOptions] of Object.entries(repoMounts)) {
     try {
-      const plugin = resolvePlugin({
+      const repoMount = resolveRepoMount({
         repoId,
-        options: pluginOptions,
+        options: mountOptions,
         settings,
         projectId,
         subprocess,
       });
-      resolved.push(plugin);
+      resolved.push(repoMount);
     } catch (err) {
       errors.push((err as Error).message);
     }
@@ -143,40 +143,40 @@ export function resolvePluginMounts(
   // If there are errors, we should fail
   if (errors.length > 0) {
     throw new MountsError(
-      `Failed to resolve plugins:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
+      `Failed to resolve repo mounts:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
     );
   }
 
   return {
     version: 2,
     generatedAt: new Date().toISOString(),
-    plugins: resolved,
+    repoMounts: resolved,
     errors: [],
   };
 }
 
-interface ResolvePluginOptions {
+interface ResolveRepoMountOptions {
   repoId: string;
-  options: PluginOptions;
+  options: RepoMountOptions;
   settings: LaceSettings;
   projectId: string;
   subprocess?: RunSubprocess;
 }
 
 /**
- * Resolve a single plugin.
+ * Resolve a single repo mount.
  */
-function resolvePlugin(opts: ResolvePluginOptions): ResolvedPlugin {
+function resolveRepoMount(opts: ResolveRepoMountOptions): ResolvedRepoMount {
   const { repoId, options, settings, projectId, subprocess } = opts;
-  const nameOrAlias = getPluginNameOrAlias(repoId, options);
+  const nameOrAlias = getRepoNameOrAlias(repoId, options);
   const defaultTarget = getDefaultTarget(nameOrAlias);
 
   // Check for override in settings
-  const pluginSettings = settings.plugins?.[repoId];
-  const override = pluginSettings?.overrideMount;
+  const repoSettings = settings.repoMounts?.[repoId];
+  const override = repoSettings?.overrideMount;
 
   if (override) {
-    return resolveOverridePlugin({
+    return resolveOverrideRepoMount({
       repoId,
       nameOrAlias,
       defaultTarget,
@@ -184,7 +184,7 @@ function resolvePlugin(opts: ResolvePluginOptions): ResolvedPlugin {
     });
   }
 
-  return resolveClonePlugin({
+  return resolveCloneRepoMount({
     repoId,
     nameOrAlias,
     defaultTarget,
@@ -193,32 +193,32 @@ function resolvePlugin(opts: ResolvePluginOptions): ResolvedPlugin {
   });
 }
 
-interface ResolveOverridePluginOptions {
+interface ResolveOverrideRepoMountOptions {
   repoId: string;
   nameOrAlias: string;
   defaultTarget: string;
-  override: NonNullable<PluginSettings["overrideMount"]>;
+  override: NonNullable<RepoMountSettings["overrideMount"]>;
 }
 
 /**
- * Resolve a plugin with a user override.
+ * Resolve a repo mount with a user override.
  */
-function resolveOverridePlugin(
-  opts: ResolveOverridePluginOptions,
-): ResolvedPlugin {
+function resolveOverrideRepoMount(
+  opts: ResolveOverrideRepoMountOptions,
+): ResolvedRepoMount {
   const { repoId, nameOrAlias, defaultTarget, override } = opts;
 
   // Validate source path exists
   if (!existsSync(override.source)) {
     throw new MountsError(
-      `Plugin '${repoId}' override source does not exist: ${override.source}`,
+      `Repo '${repoId}' override source does not exist: ${override.source}`,
     );
   }
 
   const target = override.target ?? defaultTarget;
   const readonly = override.readonly ?? true;
 
-  const plugin: ResolvedPlugin = {
+  const repoMount: ResolvedRepoMount = {
     repoId,
     nameOrAlias,
     source: override.source,
@@ -229,16 +229,16 @@ function resolveOverridePlugin(
 
   // Generate symlink spec if target differs from default
   if (override.target && override.target !== defaultTarget) {
-    plugin.symlink = {
+    repoMount.symlink = {
       from: defaultTarget,
       to: override.target,
     };
   }
 
-  return plugin;
+  return repoMount;
 }
 
-interface ResolveClonePluginOptions {
+interface ResolveCloneRepoMountOptions {
   repoId: string;
   nameOrAlias: string;
   defaultTarget: string;
@@ -247,25 +247,25 @@ interface ResolveClonePluginOptions {
 }
 
 /**
- * Resolve a plugin via shallow clone.
+ * Resolve a repo mount via shallow clone.
  */
-function resolveClonePlugin(opts: ResolveClonePluginOptions): ResolvedPlugin {
+function resolveCloneRepoMount(opts: ResolveCloneRepoMountOptions): ResolvedRepoMount {
   const { repoId, nameOrAlias, defaultTarget, projectId, subprocess } = opts;
 
   const clonePath = getClonePath(projectId, nameOrAlias);
   const { subdirectory } = parseRepoId(repoId);
 
-  // Clone or update the plugin
-  const cloneOptions: ClonePluginOptions = {
+  // Clone or update the repo
+  const cloneOptions: CloneRepoOptions = {
     repoId,
     targetDir: clonePath,
     subprocess,
   };
 
-  ensurePlugin(cloneOptions);
+  ensureRepo(cloneOptions);
 
   // Get the effective source path (accounting for subdirectory)
-  const source = getPluginSourcePath(clonePath, subdirectory);
+  const source = getRepoSourcePath(clonePath, subdirectory);
 
   return {
     repoId,
@@ -278,18 +278,18 @@ function resolveClonePlugin(opts: ResolveClonePluginOptions): ResolvedPlugin {
 }
 
 /**
- * Generate a devcontainer mount string for a resolved plugin.
+ * Generate a devcontainer mount string for a resolved repo mount.
  *
  * Format: "type=bind,source=/host/path,target=/container/path[,readonly]"
  */
-export function generateMountSpec(plugin: ResolvedPlugin): string {
+export function generateMountSpec(repoMount: ResolvedRepoMount): string {
   const parts = [
     "type=bind",
-    `source=${plugin.source}`,
-    `target=${plugin.target}`,
+    `source=${repoMount.source}`,
+    `target=${repoMount.target}`,
   ];
 
-  if (plugin.readonly) {
+  if (repoMount.readonly) {
     parts.push("readonly");
   }
 
@@ -297,20 +297,20 @@ export function generateMountSpec(plugin: ResolvedPlugin): string {
 }
 
 /**
- * Generate shell commands to create symlinks for plugins with custom targets.
+ * Generate shell commands to create symlinks for repo mounts with custom targets.
  *
  * Returns null if no symlinks are needed.
  */
-export function generateSymlinkCommands(plugins: ResolvedPlugin[]): string | null {
+export function generateSymlinkCommands(repoMounts: ResolvedRepoMount[]): string | null {
   const commands: string[] = [];
 
-  for (const plugin of plugins) {
-    if (plugin.symlink) {
+  for (const repoMount of repoMounts) {
+    if (repoMount.symlink) {
       // Create parent directory, remove existing symlink, create new symlink
       commands.push(
-        `mkdir -p "$(dirname '${plugin.symlink.from}')"`,
-        `rm -f '${plugin.symlink.from}'`,
-        `ln -s '${plugin.symlink.to}' '${plugin.symlink.from}'`,
+        `mkdir -p "$(dirname '${repoMount.symlink.from}')"`,
+        `rm -f '${repoMount.symlink.from}'`,
+        `ln -s '${repoMount.symlink.to}' '${repoMount.symlink.from}'`,
       );
     }
   }
@@ -323,8 +323,8 @@ export function generateSymlinkCommands(plugins: ResolvedPlugin[]): string | nul
 }
 
 /**
- * Generate all mount specs for resolved plugins.
+ * Generate all mount specs for resolved repo mounts.
  */
-export function generateMountSpecs(plugins: ResolvedPlugin[]): string[] {
-  return plugins.map(generateMountSpec);
+export function generateMountSpecs(repoMounts: ResolvedRepoMount[]): string[] {
+  return repoMounts.map(generateMountSpec);
 }

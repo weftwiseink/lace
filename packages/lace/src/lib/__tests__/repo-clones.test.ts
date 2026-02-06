@@ -7,13 +7,13 @@ import type { RunSubprocess } from "@/lib/subprocess";
 import {
   deriveProjectId,
   getClonePath,
-  getPluginsDir,
-  clonePlugin,
-  updatePlugin,
-  ensurePlugin,
-  getPluginSourcePath,
-  PluginCloneError,
-} from "@/lib/plugin-clones";
+  getReposDir,
+  cloneRepo,
+  updateRepo,
+  ensureRepo,
+  getRepoSourcePath,
+  RepoCloneError,
+} from "@/lib/repo-clones";
 
 let testDir: string;
 
@@ -66,20 +66,20 @@ describe("deriveProjectId", () => {
 describe("getClonePath", () => {
   it("generates correct path", () => {
     const result = getClonePath("lace", "dotfiles");
-    expect(result).toBe(join(homedir(), ".config/lace/lace/plugins/dotfiles"));
+    expect(result).toBe(join(homedir(), ".config/lace/lace/repos/dotfiles"));
   });
 });
 
-describe("getPluginsDir", () => {
+describe("getReposDir", () => {
   it("generates correct path", () => {
-    const result = getPluginsDir("lace");
-    expect(result).toBe(join(homedir(), ".config/lace/lace/plugins"));
+    const result = getReposDir("lace");
+    expect(result).toBe(join(homedir(), ".config/lace/lace/repos"));
   });
 });
 
-// --- Clone plugin ---
+// --- Clone repo ---
 
-describe("clonePlugin", () => {
+describe("cloneRepo", () => {
   it("clones a repo successfully", () => {
     const targetDir = join(testDir, "clones", "dotfiles");
 
@@ -89,7 +89,7 @@ describe("clonePlugin", () => {
       stderr: "",
     }));
 
-    const result = clonePlugin({
+    const result = cloneRepo({
       repoId: "github.com/user/dotfiles",
       targetDir,
       subprocess: mockSubprocess,
@@ -116,19 +116,19 @@ describe("clonePlugin", () => {
     }));
 
     expect(() =>
-      clonePlugin({
+      cloneRepo({
         repoId: "github.com/user/private-repo",
         targetDir,
         subprocess: mockSubprocess,
       }),
-    ).toThrow(PluginCloneError);
+    ).toThrow(RepoCloneError);
     expect(() =>
-      clonePlugin({
+      cloneRepo({
         repoId: "github.com/user/private-repo",
         targetDir,
         subprocess: mockSubprocess,
       }),
-    ).toThrow(/Failed to clone plugin/);
+    ).toThrow(/Failed to clone repo/);
   });
 
   it("verifies subdirectory exists after clone", () => {
@@ -143,7 +143,7 @@ describe("clonePlugin", () => {
       stderr: "",
     }));
 
-    const result = clonePlugin({
+    const result = cloneRepo({
       repoId: "github.com/user/monorepo/plugins/my-plugin",
       targetDir,
       subprocess: mockSubprocess,
@@ -166,14 +166,14 @@ describe("clonePlugin", () => {
     }));
 
     expect(() =>
-      clonePlugin({
+      cloneRepo({
         repoId: "github.com/user/monorepo/nonexistent/path",
         targetDir,
         subprocess: mockSubprocess,
       }),
-    ).toThrow(PluginCloneError);
+    ).toThrow(RepoCloneError);
     expect(() =>
-      clonePlugin({
+      cloneRepo({
         repoId: "github.com/user/monorepo/nonexistent/path",
         targetDir,
         subprocess: mockSubprocess,
@@ -182,9 +182,9 @@ describe("clonePlugin", () => {
   });
 });
 
-// --- Update plugin ---
+// --- Update repo ---
 
-describe("updatePlugin", () => {
+describe("updateRepo", () => {
   it("updates an existing clone successfully", () => {
     const cloneDir = join(testDir, "existing-clone");
     mkdirSync(cloneDir, { recursive: true });
@@ -195,7 +195,7 @@ describe("updatePlugin", () => {
       stderr: "",
     }));
 
-    const result = updatePlugin({
+    const result = updateRepo({
       cloneDir,
       repoId: "github.com/user/repo",
       subprocess: mockSubprocess,
@@ -230,7 +230,7 @@ describe("updatePlugin", () => {
       stderr: "Network error",
     }));
 
-    const result = updatePlugin({
+    const result = updateRepo({
       cloneDir,
       repoId: "github.com/user/repo",
       subprocess: mockSubprocess,
@@ -261,17 +261,17 @@ describe("updatePlugin", () => {
     });
 
     expect(() =>
-      updatePlugin({
+      updateRepo({
         cloneDir,
         repoId: "github.com/user/repo",
         subprocess: mockSubprocess,
       }),
-    ).toThrow(PluginCloneError);
+    ).toThrow(RepoCloneError);
 
     // Reset for second check
     callCount = 0;
     expect(() =>
-      updatePlugin({
+      updateRepo({
         cloneDir,
         repoId: "github.com/user/repo",
         subprocess: mockSubprocess,
@@ -283,14 +283,14 @@ describe("updatePlugin", () => {
     const cloneDir = join(testDir, "nonexistent");
 
     expect(() =>
-      updatePlugin({
+      updateRepo({
         cloneDir,
         repoId: "github.com/user/repo",
         subprocess: vi.fn(),
       }),
-    ).toThrow(PluginCloneError);
+    ).toThrow(RepoCloneError);
     expect(() =>
-      updatePlugin({
+      updateRepo({
         cloneDir,
         repoId: "github.com/user/repo",
         subprocess: vi.fn(),
@@ -299,9 +299,9 @@ describe("updatePlugin", () => {
   });
 });
 
-// --- Ensure plugin ---
+// --- Ensure repo ---
 
-describe("ensurePlugin", () => {
+describe("ensureRepo", () => {
   it("clones new repo when no existing clone", () => {
     const targetDir = join(testDir, "clones", "new-repo");
 
@@ -311,7 +311,7 @@ describe("ensurePlugin", () => {
       stderr: "",
     }));
 
-    const result = ensurePlugin({
+    const result = ensureRepo({
       repoId: "github.com/user/new-repo",
       targetDir,
       subprocess: mockSubprocess,
@@ -334,7 +334,7 @@ describe("ensurePlugin", () => {
       stderr: "",
     }));
 
-    const result = ensurePlugin({
+    const result = ensureRepo({
       repoId: "github.com/user/existing-repo",
       targetDir,
       subprocess: mockSubprocess,
@@ -349,15 +349,15 @@ describe("ensurePlugin", () => {
   });
 });
 
-// --- Plugin source path ---
+// --- Repo source path ---
 
-describe("getPluginSourcePath", () => {
+describe("getRepoSourcePath", () => {
   it("returns clone dir when no subdirectory", () => {
-    expect(getPluginSourcePath("/path/to/clone")).toBe("/path/to/clone");
+    expect(getRepoSourcePath("/path/to/clone")).toBe("/path/to/clone");
   });
 
   it("returns subdirectory path when specified", () => {
-    expect(getPluginSourcePath("/path/to/clone", "plugins/foo")).toBe(
+    expect(getRepoSourcePath("/path/to/clone", "plugins/foo")).toBe(
       "/path/to/clone/plugins/foo",
     );
   });

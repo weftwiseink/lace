@@ -8,15 +8,15 @@ import * as jsonc from "jsonc-parser";
  * User-level lace settings configuration.
  */
 export interface LaceSettings {
-  plugins?: {
-    [repoId: string]: PluginSettings;
+  repoMounts?: {
+    [repoId: string]: RepoMountSettings;
   };
 }
 
 /**
- * Per-plugin settings in the user's configuration.
+ * Per-repo mount settings in the user's configuration.
  */
-export interface PluginSettings {
+export interface RepoMountSettings {
   overrideMount?: {
     /** Local path to mount (required for override) */
     source: string;
@@ -114,9 +114,9 @@ export function readSettingsConfig(filePath: string): LaceSettings {
     );
   }
 
-  // Expand paths in plugin overrides
-  if (raw.plugins) {
-    for (const [repoId, settings] of Object.entries(raw.plugins)) {
+  // Expand paths in repo mount overrides
+  if (raw.repoMounts) {
+    for (const [repoId, settings] of Object.entries(raw.repoMounts)) {
       if (settings.overrideMount?.source) {
         settings.overrideMount.source = resolveSettingsPath(
           settings.overrideMount.source,

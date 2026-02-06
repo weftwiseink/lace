@@ -6,7 +6,7 @@ export const upCommand = defineCommand({
   meta: {
     name: "up",
     description:
-      "Start a devcontainer with prebuild features and plugin mounts",
+      "Start a devcontainer with prebuild features and repo mounts",
   },
   args: {
     "workspace-folder": {

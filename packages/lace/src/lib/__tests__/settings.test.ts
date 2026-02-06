@@ -73,7 +73,7 @@ describe("readSettingsConfig", () => {
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {
             overrideMount: {
               source: "/absolute/path/dotfiles",
@@ -85,20 +85,20 @@ describe("readSettingsConfig", () => {
     );
 
     const result = readSettingsConfig(settingsPath);
-    expect(result.plugins).toBeDefined();
-    expect(result.plugins?.["github.com/user/dotfiles"]).toBeDefined();
+    expect(result.repoMounts).toBeDefined();
+    expect(result.repoMounts?.["github.com/user/dotfiles"]).toBeDefined();
     expect(
-      result.plugins?.["github.com/user/dotfiles"].overrideMount?.source,
+      result.repoMounts?.["github.com/user/dotfiles"].overrideMount?.source,
     ).toBe("/absolute/path/dotfiles");
   });
 
-  it("parses valid JSON with full plugin config", () => {
+  it("parses valid JSON with full repo mount config", () => {
     const settingsPath = join(testDir, "settings.json");
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        plugins: {
-          "github.com/user/plugin": {
+        repoMounts: {
+          "github.com/user/repo": {
             overrideMount: {
               source: "/local/path",
               readonly: false,
@@ -111,10 +111,10 @@ describe("readSettingsConfig", () => {
     );
 
     const result = readSettingsConfig(settingsPath);
-    const plugin = result.plugins?.["github.com/user/plugin"];
-    expect(plugin?.overrideMount?.source).toBe("/local/path");
-    expect(plugin?.overrideMount?.readonly).toBe(false);
-    expect(plugin?.overrideMount?.target).toBe("/custom/target");
+    const repoMount = result.repoMounts?.["github.com/user/repo"];
+    expect(repoMount?.overrideMount?.source).toBe("/local/path");
+    expect(repoMount?.overrideMount?.readonly).toBe(false);
+    expect(repoMount?.overrideMount?.target).toBe("/custom/target");
   });
 
   it("expands tilde in source paths", () => {
@@ -122,7 +122,7 @@ describe("readSettingsConfig", () => {
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {
             overrideMount: {
               source: "~/code/dotfiles",
@@ -135,7 +135,7 @@ describe("readSettingsConfig", () => {
 
     const result = readSettingsConfig(settingsPath);
     expect(
-      result.plugins?.["github.com/user/dotfiles"].overrideMount?.source,
+      result.repoMounts?.["github.com/user/dotfiles"].overrideMount?.source,
     ).toBe(join(homedir(), "code/dotfiles"));
   });
 
@@ -150,7 +150,7 @@ describe("readSettingsConfig", () => {
 
   it("throws error for invalid JSON with parse position", () => {
     const settingsPath = join(testDir, "settings.json");
-    writeFileSync(settingsPath, '{ "plugins": { invalid } }', "utf-8");
+    writeFileSync(settingsPath, '{ "repoMounts": { invalid } }', "utf-8");
 
     expect(() => readSettingsConfig(settingsPath)).toThrow(SettingsConfigError);
     expect(() => readSettingsConfig(settingsPath)).toThrow(
@@ -158,12 +158,12 @@ describe("readSettingsConfig", () => {
     );
   });
 
-  it("parses empty plugins object", () => {
+  it("parses empty repoMounts object", () => {
     const settingsPath = join(testDir, "settings.json");
-    writeFileSync(settingsPath, JSON.stringify({ plugins: {} }), "utf-8");
+    writeFileSync(settingsPath, JSON.stringify({ repoMounts: {} }), "utf-8");
 
     const result = readSettingsConfig(settingsPath);
-    expect(result.plugins).toEqual({});
+    expect(result.repoMounts).toEqual({});
   });
 
   it("parses JSONC with comments", () => {
@@ -172,7 +172,7 @@ describe("readSettingsConfig", () => {
       settingsPath,
       `{
         // This is a comment
-        "plugins": {
+        "repoMounts": {
           "github.com/user/dotfiles": {
             "overrideMount": {
               "source": "/path/to/dotfiles"
@@ -184,7 +184,7 @@ describe("readSettingsConfig", () => {
     );
 
     const result = readSettingsConfig(settingsPath);
-    expect(result.plugins?.["github.com/user/dotfiles"]).toBeDefined();
+    expect(result.repoMounts?.["github.com/user/dotfiles"]).toBeDefined();
   });
 });
 
@@ -242,7 +242,7 @@ describe("loadSettings", () => {
     writeFileSync(
       settingsPath,
       JSON.stringify({
-        plugins: {
+        repoMounts: {
           "github.com/user/test": {
             overrideMount: { source: "/test/path" },
           },
@@ -253,9 +253,9 @@ describe("loadSettings", () => {
     process.env.LACE_SETTINGS = settingsPath;
 
     const result = loadSettings();
-    expect(result.plugins?.["github.com/user/test"]).toBeDefined();
+    expect(result.repoMounts?.["github.com/user/test"]).toBeDefined();
     expect(
-      result.plugins?.["github.com/user/test"].overrideMount?.source,
+      result.repoMounts?.["github.com/user/test"].overrideMount?.source,
     ).toBe("/test/path");
   });
 });

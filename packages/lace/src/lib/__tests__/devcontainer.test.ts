@@ -5,9 +5,9 @@ import { join } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   extractPrebuildFeatures,
-  extractPlugins,
-  derivePluginName,
-  getPluginNameOrAlias,
+  extractRepoMounts,
+  deriveRepoName,
+  getRepoNameOrAlias,
   parseRepoId,
   resolveBuildSource,
   resolveDockerfilePath,
@@ -295,98 +295,98 @@ describe("generateTempDevcontainerJson", () => {
   });
 });
 
-// --- Plugins extraction ---
+// --- Repo mounts extraction ---
 
-describe("extractPlugins", () => {
-  it("returns plugins from standard config", () => {
-    const raw = readFixture("plugins-standard.jsonc");
-    const result = extractPlugins(raw);
-    expect(result.kind).toBe("plugins");
-    if (result.kind === "plugins") {
-      expect(Object.keys(result.plugins)).toHaveLength(2);
-      expect(result.plugins).toHaveProperty("github.com/user/dotfiles");
-      expect(result.plugins).toHaveProperty(
+describe("extractRepoMounts", () => {
+  it("returns repo mounts from standard config", () => {
+    const raw = readFixture("repo-mounts-standard.jsonc");
+    const result = extractRepoMounts(raw);
+    expect(result.kind).toBe("repoMounts");
+    if (result.kind === "repoMounts") {
+      expect(Object.keys(result.repoMounts)).toHaveLength(2);
+      expect(result.repoMounts).toHaveProperty("github.com/user/dotfiles");
+      expect(result.repoMounts).toHaveProperty(
         "github.com/user/claude-plugins/plugins/my-plugin",
       );
     }
   });
 
-  it("returns plugins with aliases", () => {
-    const raw = readFixture("plugins-with-alias.jsonc");
-    const result = extractPlugins(raw);
-    expect(result.kind).toBe("plugins");
-    if (result.kind === "plugins") {
-      expect(result.plugins["github.com/alice/utils"].alias).toBe("alice-utils");
-      expect(result.plugins["github.com/bob/utils"].alias).toBe("bob-utils");
+  it("returns repo mounts with aliases", () => {
+    const raw = readFixture("repo-mounts-with-alias.jsonc");
+    const result = extractRepoMounts(raw);
+    expect(result.kind).toBe("repoMounts");
+    if (result.kind === "repoMounts") {
+      expect(result.repoMounts["github.com/alice/utils"].alias).toBe("alice-utils");
+      expect(result.repoMounts["github.com/bob/utils"].alias).toBe("bob-utils");
     }
   });
 
-  it("returns absent when plugins is missing", () => {
+  it("returns absent when repoMounts is missing", () => {
     const raw = readFixture("absent-prebuild.jsonc");
-    const result = extractPlugins(raw);
+    const result = extractRepoMounts(raw);
     expect(result.kind).toBe("absent");
   });
 
-  it("returns null sentinel when plugins is null", () => {
-    const raw = readFixture("plugins-null.jsonc");
-    const result = extractPlugins(raw);
+  it("returns null sentinel when repoMounts is null", () => {
+    const raw = readFixture("repo-mounts-null.jsonc");
+    const result = extractRepoMounts(raw);
     expect(result.kind).toBe("null");
   });
 
-  it("returns empty when plugins is {}", () => {
-    const raw = readFixture("plugins-empty.jsonc");
-    const result = extractPlugins(raw);
+  it("returns empty when repoMounts is {}", () => {
+    const raw = readFixture("repo-mounts-empty.jsonc");
+    const result = extractRepoMounts(raw);
     expect(result.kind).toBe("empty");
   });
 
   it("returns absent when customizations key is missing", () => {
     const raw = { build: { dockerfile: "Dockerfile" } };
-    const result = extractPlugins(raw);
+    const result = extractRepoMounts(raw);
     expect(result.kind).toBe("absent");
   });
 
   it("returns absent when customizations.lace is missing", () => {
     const raw = { customizations: { vscode: {} } };
-    const result = extractPlugins(raw);
+    const result = extractRepoMounts(raw);
     expect(result.kind).toBe("absent");
   });
 });
 
 // --- Name derivation ---
 
-describe("derivePluginName", () => {
+describe("deriveRepoName", () => {
   it("derives name from simple repo", () => {
-    expect(derivePluginName("github.com/user/repo")).toBe("repo");
+    expect(deriveRepoName("github.com/user/repo")).toBe("repo");
   });
 
   it("derives name from repo with subdirectory", () => {
-    expect(derivePluginName("github.com/user/repo/subdir")).toBe("subdir");
+    expect(deriveRepoName("github.com/user/repo/subdir")).toBe("subdir");
   });
 
   it("derives name from repo with deep path", () => {
-    expect(derivePluginName("github.com/user/repo/deep/path")).toBe("path");
+    expect(deriveRepoName("github.com/user/repo/deep/path")).toBe("path");
   });
 
   it("handles trailing slash", () => {
     // The filter removes empty segments
-    expect(derivePluginName("github.com/user/repo/")).toBe("repo");
+    expect(deriveRepoName("github.com/user/repo/")).toBe("repo");
   });
 });
 
-describe("getPluginNameOrAlias", () => {
+describe("getRepoNameOrAlias", () => {
   it("uses alias when provided", () => {
     expect(
-      getPluginNameOrAlias("github.com/user/utils", { alias: "user-utils" }),
+      getRepoNameOrAlias("github.com/user/utils", { alias: "user-utils" }),
     ).toBe("user-utils");
   });
 
   it("derives name when no alias", () => {
-    expect(getPluginNameOrAlias("github.com/user/repo", {})).toBe("repo");
+    expect(getRepoNameOrAlias("github.com/user/repo", {})).toBe("repo");
   });
 
   it("derives name from subdirectory when no alias", () => {
     expect(
-      getPluginNameOrAlias("github.com/user/repo/plugins/foo", {}),
+      getRepoNameOrAlias("github.com/user/repo/plugins/foo", {}),
     ).toBe("foo");
   });
 });

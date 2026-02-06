@@ -7,14 +7,14 @@ import type { RunSubprocess } from "@/lib/subprocess";
 import {
   validateNoConflicts,
   getDefaultTarget,
-  resolvePluginMounts,
+  resolveRepoMounts,
   generateMountSpec,
   generateSymlinkCommands,
   generateMountSpecs,
   MountsError,
-  type ResolvedPlugin,
+  type ResolvedRepoMount,
 } from "@/lib/mounts";
-import type { PluginsConfig } from "@/lib/devcontainer";
+import type { RepoMountsConfig } from "@/lib/devcontainer";
 import type { LaceSettings } from "@/lib/settings";
 
 let testDir: string;
@@ -35,38 +35,38 @@ afterEach(() => {
 
 describe("validateNoConflicts", () => {
   it("passes with unique names", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/user/dotfiles": {},
       "github.com/user/utils": {},
     };
-    expect(() => validateNoConflicts(plugins)).not.toThrow();
+    expect(() => validateNoConflicts(repoMounts)).not.toThrow();
   });
 
   it("passes with aliases that resolve conflicts", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/alice/utils": { alias: "alice-utils" },
       "github.com/bob/utils": { alias: "bob-utils" },
     };
-    expect(() => validateNoConflicts(plugins)).not.toThrow();
+    expect(() => validateNoConflicts(repoMounts)).not.toThrow();
   });
 
   it("throws on name conflict without aliases", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/alice/utils": {},
       "github.com/bob/utils": {},
     };
-    expect(() => validateNoConflicts(plugins)).toThrow(MountsError);
-    expect(() => validateNoConflicts(plugins)).toThrow(/Plugin name conflict/);
-    expect(() => validateNoConflicts(plugins)).toThrow(/utils/);
+    expect(() => validateNoConflicts(repoMounts)).toThrow(MountsError);
+    expect(() => validateNoConflicts(repoMounts)).toThrow(/Repo mount name conflict/);
+    expect(() => validateNoConflicts(repoMounts)).toThrow(/utils/);
   });
 
   it("provides alias suggestion in error", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/alice/utils": {},
       "github.com/bob/utils": {},
     };
     try {
-      validateNoConflicts(plugins);
+      validateNoConflicts(repoMounts);
     } catch (err) {
       expect((err as Error).message).toContain("alias");
     }
@@ -77,23 +77,23 @@ describe("validateNoConflicts", () => {
 
 describe("getDefaultTarget", () => {
   it("generates correct mount target", () => {
-    expect(getDefaultTarget("dotfiles")).toBe("/mnt/lace/plugins/dotfiles");
-    expect(getDefaultTarget("my-plugin")).toBe("/mnt/lace/plugins/my-plugin");
+    expect(getDefaultTarget("dotfiles")).toBe("/mnt/lace/repos/dotfiles");
+    expect(getDefaultTarget("my-repo")).toBe("/mnt/lace/repos/my-repo");
   });
 });
 
 // --- Mount resolution ---
 
-describe("resolvePluginMounts", () => {
-  it("resolves single plugin with override", () => {
+describe("resolveRepoMounts", () => {
+  it("resolves single repo mount with override", () => {
     const overrideSource = join(testDir, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/user/dotfiles": {},
     };
     const settings: LaceSettings = {
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: overrideSource,
@@ -102,61 +102,61 @@ describe("resolvePluginMounts", () => {
       },
     };
 
-    const result = resolvePluginMounts({
-      plugins,
+    const result = resolveRepoMounts({
+      repoMounts,
       settings,
       projectId: "test-project",
     });
 
-    expect(result.plugins).toHaveLength(1);
-    expect(result.plugins[0].repoId).toBe("github.com/user/dotfiles");
-    expect(result.plugins[0].nameOrAlias).toBe("dotfiles");
-    expect(result.plugins[0].source).toBe(overrideSource);
-    expect(result.plugins[0].target).toBe("/mnt/lace/plugins/dotfiles");
-    expect(result.plugins[0].readonly).toBe(true);
-    expect(result.plugins[0].isOverride).toBe(true);
-    expect(result.plugins[0].symlink).toBeUndefined();
+    expect(result.repoMounts).toHaveLength(1);
+    expect(result.repoMounts[0].repoId).toBe("github.com/user/dotfiles");
+    expect(result.repoMounts[0].nameOrAlias).toBe("dotfiles");
+    expect(result.repoMounts[0].source).toBe(overrideSource);
+    expect(result.repoMounts[0].target).toBe("/mnt/lace/repos/dotfiles");
+    expect(result.repoMounts[0].readonly).toBe(true);
+    expect(result.repoMounts[0].isOverride).toBe(true);
+    expect(result.repoMounts[0].symlink).toBeUndefined();
   });
 
-  it("resolves plugin with custom target and generates symlink", () => {
-    const overrideSource = join(testDir, "local-plugin");
+  it("resolves repo mount with custom target and generates symlink", () => {
+    const overrideSource = join(testDir, "local-repo");
     mkdirSync(overrideSource, { recursive: true });
 
-    const plugins: PluginsConfig = {
-      "github.com/user/claude-plugin": {},
+    const repoMounts: RepoMountsConfig = {
+      "github.com/user/claude-repo": {},
     };
     const settings: LaceSettings = {
-      plugins: {
-        "github.com/user/claude-plugin": {
+      repoMounts: {
+        "github.com/user/claude-repo": {
           overrideMount: {
             source: overrideSource,
-            target: "/home/user/code/claude-plugin",
+            target: "/home/user/code/claude-repo",
             readonly: false,
           },
         },
       },
     };
 
-    const result = resolvePluginMounts({
-      plugins,
+    const result = resolveRepoMounts({
+      repoMounts,
       settings,
       projectId: "test-project",
     });
 
-    expect(result.plugins[0].target).toBe("/home/user/code/claude-plugin");
-    expect(result.plugins[0].readonly).toBe(false);
-    expect(result.plugins[0].symlink).toEqual({
-      from: "/mnt/lace/plugins/claude-plugin",
-      to: "/home/user/code/claude-plugin",
+    expect(result.repoMounts[0].target).toBe("/home/user/code/claude-repo");
+    expect(result.repoMounts[0].readonly).toBe(false);
+    expect(result.repoMounts[0].symlink).toEqual({
+      from: "/mnt/lace/repos/claude-repo",
+      to: "/home/user/code/claude-repo",
     });
   });
 
   it("throws on override source not existing", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/user/dotfiles": {},
     };
     const settings: LaceSettings = {
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: join(testDir, "nonexistent"),
@@ -166,23 +166,23 @@ describe("resolvePluginMounts", () => {
     };
 
     expect(() =>
-      resolvePluginMounts({
-        plugins,
+      resolveRepoMounts({
+        repoMounts,
         settings,
         projectId: "test-project",
       }),
     ).toThrow(MountsError);
     expect(() =>
-      resolvePluginMounts({
-        plugins,
+      resolveRepoMounts({
+        repoMounts,
         settings,
         projectId: "test-project",
       }),
     ).toThrow(/override source does not exist/);
   });
 
-  it("resolves plugin via clone when no override", () => {
-    const plugins: PluginsConfig = {
+  it("resolves repo mount via clone when no override", () => {
+    const repoMounts: RepoMountsConfig = {
       "github.com/user/dotfiles": {},
     };
     const settings: LaceSettings = {};
@@ -193,18 +193,18 @@ describe("resolvePluginMounts", () => {
       stderr: "",
     }));
 
-    const result = resolvePluginMounts({
-      plugins,
+    const result = resolveRepoMounts({
+      repoMounts,
       settings,
       projectId: "test-project",
       subprocess: mockSubprocess,
     });
 
-    expect(result.plugins).toHaveLength(1);
-    expect(result.plugins[0].isOverride).toBe(false);
-    expect(result.plugins[0].readonly).toBe(true);
-    expect(result.plugins[0].source).toBe(
-      join(homedir(), ".config/lace/test-project/plugins/dotfiles"),
+    expect(result.repoMounts).toHaveLength(1);
+    expect(result.repoMounts[0].isOverride).toBe(false);
+    expect(result.repoMounts[0].readonly).toBe(true);
+    expect(result.repoMounts[0].source).toBe(
+      join(homedir(), ".config/lace/test-project/repos/dotfiles"),
     );
 
     // Verify clone was attempted
@@ -215,40 +215,40 @@ describe("resolvePluginMounts", () => {
   });
 
   it("throws on name conflict", () => {
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/alice/utils": {},
       "github.com/bob/utils": {},
     };
     const settings: LaceSettings = {};
 
     expect(() =>
-      resolvePluginMounts({
-        plugins,
+      resolveRepoMounts({
+        repoMounts,
         settings,
         projectId: "test-project",
       }),
     ).toThrow(MountsError);
     expect(() =>
-      resolvePluginMounts({
-        plugins,
+      resolveRepoMounts({
+        repoMounts,
         settings,
         projectId: "test-project",
       }),
-    ).toThrow(/Plugin name conflict/);
+    ).toThrow(/Repo mount name conflict/);
   });
 
-  it("handles plugins with aliases", () => {
+  it("handles repo mounts with aliases", () => {
     const aliceSource = join(testDir, "alice-utils");
     const bobSource = join(testDir, "bob-utils");
     mkdirSync(aliceSource, { recursive: true });
     mkdirSync(bobSource, { recursive: true });
 
-    const plugins: PluginsConfig = {
+    const repoMounts: RepoMountsConfig = {
       "github.com/alice/utils": { alias: "alice-utils" },
       "github.com/bob/utils": { alias: "bob-utils" },
     };
     const settings: LaceSettings = {
-      plugins: {
+      repoMounts: {
         "github.com/alice/utils": {
           overrideMount: { source: aliceSource },
         },
@@ -258,15 +258,15 @@ describe("resolvePluginMounts", () => {
       },
     };
 
-    const result = resolvePluginMounts({
-      plugins,
+    const result = resolveRepoMounts({
+      repoMounts,
       settings,
       projectId: "test-project",
     });
 
-    expect(result.plugins).toHaveLength(2);
-    expect(result.plugins.find((p) => p.nameOrAlias === "alice-utils")).toBeDefined();
-    expect(result.plugins.find((p) => p.nameOrAlias === "bob-utils")).toBeDefined();
+    expect(result.repoMounts).toHaveLength(2);
+    expect(result.repoMounts.find((p) => p.nameOrAlias === "alice-utils")).toBeDefined();
+    expect(result.repoMounts.find((p) => p.nameOrAlias === "bob-utils")).toBeDefined();
   });
 });
 
@@ -274,32 +274,32 @@ describe("resolvePluginMounts", () => {
 
 describe("generateMountSpec", () => {
   it("generates readonly mount spec", () => {
-    const plugin: ResolvedPlugin = {
+    const repoMount: ResolvedRepoMount = {
       repoId: "github.com/user/dotfiles",
       nameOrAlias: "dotfiles",
       source: "/home/user/dotfiles",
-      target: "/mnt/lace/plugins/dotfiles",
+      target: "/mnt/lace/repos/dotfiles",
       readonly: true,
       isOverride: true,
     };
 
-    expect(generateMountSpec(plugin)).toBe(
-      "type=bind,source=/home/user/dotfiles,target=/mnt/lace/plugins/dotfiles,readonly",
+    expect(generateMountSpec(repoMount)).toBe(
+      "type=bind,source=/home/user/dotfiles,target=/mnt/lace/repos/dotfiles,readonly",
     );
   });
 
   it("generates writable mount spec", () => {
-    const plugin: ResolvedPlugin = {
-      repoId: "github.com/user/plugin",
-      nameOrAlias: "plugin",
-      source: "/home/user/plugin",
-      target: "/mnt/lace/plugins/plugin",
+    const repoMount: ResolvedRepoMount = {
+      repoId: "github.com/user/repo",
+      nameOrAlias: "repo",
+      source: "/home/user/repo",
+      target: "/mnt/lace/repos/repo",
       readonly: false,
       isOverride: true,
     };
 
-    expect(generateMountSpec(plugin)).toBe(
-      "type=bind,source=/home/user/plugin,target=/mnt/lace/plugins/plugin",
+    expect(generateMountSpec(repoMount)).toBe(
+      "type=bind,source=/home/user/repo,target=/mnt/lace/repos/repo",
     );
   });
 });
@@ -308,102 +308,102 @@ describe("generateMountSpec", () => {
 
 describe("generateSymlinkCommands", () => {
   it("returns null when no symlinks needed", () => {
-    const plugins: ResolvedPlugin[] = [
+    const repoMounts: ResolvedRepoMount[] = [
       {
         repoId: "github.com/user/dotfiles",
         nameOrAlias: "dotfiles",
         source: "/home/user/dotfiles",
-        target: "/mnt/lace/plugins/dotfiles",
+        target: "/mnt/lace/repos/dotfiles",
         readonly: true,
         isOverride: true,
       },
     ];
 
-    expect(generateSymlinkCommands(plugins)).toBeNull();
+    expect(generateSymlinkCommands(repoMounts)).toBeNull();
   });
 
   it("generates single symlink command", () => {
-    const plugins: ResolvedPlugin[] = [
+    const repoMounts: ResolvedRepoMount[] = [
       {
-        repoId: "github.com/user/plugin",
-        nameOrAlias: "plugin",
-        source: "/home/user/code/plugin",
-        target: "/home/user/code/plugin",
+        repoId: "github.com/user/repo",
+        nameOrAlias: "repo",
+        source: "/home/user/code/repo",
+        target: "/home/user/code/repo",
         readonly: false,
         isOverride: true,
         symlink: {
-          from: "/mnt/lace/plugins/plugin",
-          to: "/home/user/code/plugin",
+          from: "/mnt/lace/repos/repo",
+          to: "/home/user/code/repo",
         },
       },
     ];
 
-    const result = generateSymlinkCommands(plugins);
+    const result = generateSymlinkCommands(repoMounts);
     expect(result).toContain("mkdir -p");
-    expect(result).toContain("rm -f '/mnt/lace/plugins/plugin'");
-    expect(result).toContain("ln -s '/home/user/code/plugin' '/mnt/lace/plugins/plugin'");
+    expect(result).toContain("rm -f '/mnt/lace/repos/repo'");
+    expect(result).toContain("ln -s '/home/user/code/repo' '/mnt/lace/repos/repo'");
   });
 
   it("generates multiple symlink commands joined with &&", () => {
-    const plugins: ResolvedPlugin[] = [
+    const repoMounts: ResolvedRepoMount[] = [
       {
-        repoId: "github.com/user/plugin1",
-        nameOrAlias: "plugin1",
+        repoId: "github.com/user/repo1",
+        nameOrAlias: "repo1",
         source: "/source1",
         target: "/target1",
         readonly: false,
         isOverride: true,
-        symlink: { from: "/mnt/lace/plugins/plugin1", to: "/target1" },
+        symlink: { from: "/mnt/lace/repos/repo1", to: "/target1" },
       },
       {
-        repoId: "github.com/user/plugin2",
-        nameOrAlias: "plugin2",
+        repoId: "github.com/user/repo2",
+        nameOrAlias: "repo2",
         source: "/source2",
         target: "/target2",
         readonly: false,
         isOverride: true,
-        symlink: { from: "/mnt/lace/plugins/plugin2", to: "/target2" },
+        symlink: { from: "/mnt/lace/repos/repo2", to: "/target2" },
       },
     ];
 
-    const result = generateSymlinkCommands(plugins);
+    const result = generateSymlinkCommands(repoMounts);
     expect(result).toContain("&&");
-    expect(result).toContain("plugin1");
-    expect(result).toContain("plugin2");
+    expect(result).toContain("repo1");
+    expect(result).toContain("repo2");
   });
 
   it("handles paths with special characters", () => {
-    const plugins: ResolvedPlugin[] = [
+    const repoMounts: ResolvedRepoMount[] = [
       {
-        repoId: "github.com/user/plugin",
-        nameOrAlias: "my-plugin",
-        source: "/home/user/my plugin",
-        target: "/home/user/my plugin",
+        repoId: "github.com/user/repo",
+        nameOrAlias: "my-repo",
+        source: "/home/user/my repo",
+        target: "/home/user/my repo",
         readonly: false,
         isOverride: true,
         symlink: {
-          from: "/mnt/lace/plugins/my-plugin",
-          to: "/home/user/my plugin",
+          from: "/mnt/lace/repos/my-repo",
+          to: "/home/user/my repo",
         },
       },
     ];
 
-    const result = generateSymlinkCommands(plugins);
+    const result = generateSymlinkCommands(repoMounts);
     // Single quotes handle spaces
-    expect(result).toContain("'/home/user/my plugin'");
+    expect(result).toContain("'/home/user/my repo'");
   });
 });
 
 // --- Generate all mount specs ---
 
 describe("generateMountSpecs", () => {
-  it("generates specs for all plugins", () => {
-    const plugins: ResolvedPlugin[] = [
+  it("generates specs for all repo mounts", () => {
+    const repoMounts: ResolvedRepoMount[] = [
       {
         repoId: "github.com/user/dotfiles",
         nameOrAlias: "dotfiles",
         source: "/home/user/dotfiles",
-        target: "/mnt/lace/plugins/dotfiles",
+        target: "/mnt/lace/repos/dotfiles",
         readonly: true,
         isOverride: true,
       },
@@ -411,13 +411,13 @@ describe("generateMountSpecs", () => {
         repoId: "github.com/user/utils",
         nameOrAlias: "utils",
         source: "/home/user/utils",
-        target: "/mnt/lace/plugins/utils",
+        target: "/mnt/lace/repos/utils",
         readonly: false,
         isOverride: true,
       },
     ];
 
-    const result = generateMountSpecs(plugins);
+    const result = generateMountSpecs(repoMounts);
     expect(result).toHaveLength(2);
     expect(result[0]).toContain("dotfiles");
     expect(result[0]).toContain("readonly");

@@ -2,7 +2,7 @@
   "build": { "dockerfile": "Dockerfile" },
   "customizations": {
     "lace": {
-      "plugins": {
+      "repoMounts": {
         "github.com/alice/utils": { "alias": "alice-utils" },
         "github.com/bob/utils": { "alias": "bob-utils" }
       }

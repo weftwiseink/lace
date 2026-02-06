@@ -15,23 +15,23 @@ export type ConfigBuildSource =
   | { kind: "dockerfile"; path: string }
   | { kind: "image"; image: string };
 
-/** Plugin options as declared in devcontainer.json */
-export interface PluginOptions {
+/** Repo mount options as declared in devcontainer.json */
+export interface RepoMountOptions {
   /**
-   * Explicit name for this plugin, used in mount path.
-   * Use when multiple plugins would have the same derived name.
+   * Explicit name for this repo mount, used in mount path.
+   * Use when multiple repo mounts would have the same derived name.
    */
   alias?: string;
 }
 
-/** Plugin configuration from devcontainer.json */
-export interface PluginsConfig {
-  [repoId: string]: PluginOptions;
+/** Repo mounts configuration from devcontainer.json */
+export interface RepoMountsConfig {
+  [repoId: string]: RepoMountOptions;
 }
 
-/** Discriminated result for plugins extraction. */
-export type PluginsResult =
-  | { kind: "plugins"; plugins: PluginsConfig }
+/** Discriminated result for repo mounts extraction. */
+export type RepoMountsResult =
+  | { kind: "repoMounts"; repoMounts: RepoMountsConfig }
   | { kind: "absent" }
   | { kind: "null" }
   | { kind: "empty" };
@@ -62,7 +62,7 @@ export interface DevcontainerConfig {
   configPath: string;
 }
 
-/** Minimal parsed devcontainer.json for plugins/mounts (no Dockerfile required). */
+/** Minimal parsed devcontainer.json for repo mounts (no Dockerfile required). */
 export interface DevcontainerConfigMinimal {
   /** The raw parsed JSONC object. */
   raw: Record<string, unknown>;
@@ -231,9 +231,9 @@ export function generateTempDevcontainerJson(
 }
 
 /**
- * Extract plugins configuration from a parsed devcontainer config.
+ * Extract repo mounts configuration from a parsed devcontainer config.
  */
-export function extractPlugins(raw: Record<string, unknown>): PluginsResult {
+export function extractRepoMounts(raw: Record<string, unknown>): RepoMountsResult {
   const customizations = raw.customizations as
     | Record<string, unknown>
     | undefined;
@@ -242,22 +242,22 @@ export function extractPlugins(raw: Record<string, unknown>): PluginsResult {
   const lace = customizations.lace as Record<string, unknown> | undefined;
   if (!lace) return { kind: "absent" };
 
-  if (!("plugins" in lace)) return { kind: "absent" };
+  if (!("repoMounts" in lace)) return { kind: "absent" };
 
-  const plugins = lace.plugins;
-  if (plugins === null) return { kind: "null" };
-  if (typeof plugins === "object" && Object.keys(plugins as object).length === 0) {
+  const repoMounts = lace.repoMounts;
+  if (repoMounts === null) return { kind: "null" };
+  if (typeof repoMounts === "object" && Object.keys(repoMounts as object).length === 0) {
     return { kind: "empty" };
   }
 
   return {
-    kind: "plugins",
-    plugins: plugins as PluginsConfig,
+    kind: "repoMounts",
+    repoMounts: repoMounts as RepoMountsConfig,
   };
 }
 
 /**
- * Derive the plugin name from a repo identifier.
+ * Derive the repo name from a repo identifier.
  * Returns the last path segment of the repoId.
  *
  * Examples:
@@ -265,20 +265,20 @@ export function extractPlugins(raw: Record<string, unknown>): PluginsResult {
  * - "github.com/user/repo/subdir" -> "subdir"
  * - "github.com/user/repo/deep/path" -> "path"
  */
-export function derivePluginName(repoId: string): string {
+export function deriveRepoName(repoId: string): string {
   const segments = repoId.split("/").filter((s) => s.length > 0);
   return segments[segments.length - 1] || repoId;
 }
 
 /**
- * Get the name or alias for a plugin.
+ * Get the name or alias for a repo mount.
  * Uses the alias if specified, otherwise derives from repoId.
  */
-export function getPluginNameOrAlias(
+export function getRepoNameOrAlias(
   repoId: string,
-  options: PluginOptions,
+  options: RepoMountOptions,
 ): string {
-  return options.alias ?? derivePluginName(repoId);
+  return options.alias ?? deriveRepoName(repoId);
 }
 
 /**

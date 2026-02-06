@@ -85,12 +85,12 @@ afterEach(() => {
   delete process.env.LACE_SETTINGS;
 });
 
-const SIMPLE_PLUGINS_JSON = JSON.stringify(
+const SIMPLE_REPO_MOUNTS_JSON = JSON.stringify(
   {
     build: { dockerfile: "Dockerfile" },
     customizations: {
       lace: {
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {},
         },
       },
@@ -100,14 +100,14 @@ const SIMPLE_PLUGINS_JSON = JSON.stringify(
   2,
 );
 
-const MULTI_PLUGINS_JSON = JSON.stringify(
+const MULTI_REPO_MOUNTS_JSON = JSON.stringify(
   {
     build: { dockerfile: "Dockerfile" },
     customizations: {
       lace: {
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {},
-          "github.com/user/claude-plugin": { alias: "claude" },
+          "github.com/user/claude-repo": { alias: "claude" },
         },
       },
     },
@@ -116,12 +116,12 @@ const MULTI_PLUGINS_JSON = JSON.stringify(
   2,
 );
 
-const CONFLICT_PLUGINS_JSON = JSON.stringify(
+const CONFLICT_REPO_MOUNTS_JSON = JSON.stringify(
   {
     build: { dockerfile: "Dockerfile" },
     customizations: {
       lace: {
-        plugins: {
+        repoMounts: {
           "github.com/alice/utils": {},
           "github.com/bob/utils": {},
         },
@@ -134,14 +134,14 @@ const CONFLICT_PLUGINS_JSON = JSON.stringify(
 
 describe("resolve-mounts: happy path (all overridden)", () => {
   it("writes resolved-mounts.json with correct content", () => {
-    setupWorkspace(SIMPLE_PLUGINS_JSON);
+    setupWorkspace(SIMPLE_REPO_MOUNTS_JSON);
 
     // Create override source directory
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: overrideSource,
@@ -156,7 +156,7 @@ describe("resolve-mounts: happy path (all overridden)", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.message).toContain("Resolved 1 plugin(s)");
+    expect(result.message).toContain("Resolved 1 repo mount(s)");
     expect(result.message).toContain("1 override(s)");
 
     // Verify file was written
@@ -167,16 +167,16 @@ describe("resolve-mounts: happy path (all overridden)", () => {
     ) as ResolvedMounts;
 
     expect(resolved.version).toBe(2);
-    expect(resolved.plugins).toHaveLength(1);
-    expect(resolved.plugins[0].repoId).toBe("github.com/user/dotfiles");
-    expect(resolved.plugins[0].source).toBe(overrideSource);
-    expect(resolved.plugins[0].isOverride).toBe(true);
+    expect(resolved.repoMounts).toHaveLength(1);
+    expect(resolved.repoMounts[0].repoId).toBe("github.com/user/dotfiles");
+    expect(resolved.repoMounts[0].source).toBe(overrideSource);
+    expect(resolved.repoMounts[0].isOverride).toBe(true);
   });
 });
 
 describe("resolve-mounts: happy path (shallow clones)", () => {
-  it("clones plugins and generates mounts", () => {
-    setupWorkspace(SIMPLE_PLUGINS_JSON);
+  it("clones repos and generates mounts", () => {
+    setupWorkspace(SIMPLE_REPO_MOUNTS_JSON);
     setupSettings({});
 
     const result = runResolveMounts({
@@ -196,13 +196,13 @@ describe("resolve-mounts: happy path (shallow clones)", () => {
     );
 
     // Verify resolved output
-    expect(result.resolved?.plugins[0].isOverride).toBe(false);
+    expect(result.resolved?.repoMounts[0].isOverride).toBe(false);
     expect(result.mountSpecs).toHaveLength(1);
     expect(result.mountSpecs?.[0]).toContain("type=bind");
   });
 });
 
-describe("resolve-mounts: no plugins declared", () => {
+describe("resolve-mounts: no repo mounts declared", () => {
   it("returns info message without error", () => {
     setupWorkspace(
       JSON.stringify({
@@ -216,13 +216,13 @@ describe("resolve-mounts: no plugins declared", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.message).toContain("No plugins configured");
+    expect(result.message).toContain("No repo mounts configured");
   });
 });
 
 describe("resolve-mounts: clone failure", () => {
   it("exits non-zero with error message", () => {
-    setupWorkspace(SIMPLE_PLUGINS_JSON);
+    setupWorkspace(SIMPLE_REPO_MOUNTS_JSON);
     setupSettings({});
 
     const result = runResolveMounts({
@@ -231,15 +231,15 @@ describe("resolve-mounts: clone failure", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.message).toContain("Failed to clone plugin");
+    expect(result.message).toContain("Failed to clone repo");
   });
 });
 
 describe("resolve-mounts: override source missing", () => {
   it("exits non-zero with error message", () => {
-    setupWorkspace(SIMPLE_PLUGINS_JSON);
+    setupWorkspace(SIMPLE_REPO_MOUNTS_JSON);
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: join(workspaceRoot, "nonexistent"),
@@ -260,7 +260,7 @@ describe("resolve-mounts: override source missing", () => {
 
 describe("resolve-mounts: name conflict", () => {
   it("exits non-zero with guidance", () => {
-    setupWorkspace(CONFLICT_PLUGINS_JSON);
+    setupWorkspace(CONFLICT_REPO_MOUNTS_JSON);
     setupSettings({});
 
     const result = runResolveMounts({
@@ -269,7 +269,7 @@ describe("resolve-mounts: name conflict", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.message).toContain("Plugin name conflict");
+    expect(result.message).toContain("Repo mount name conflict");
     expect(result.message).toContain("utils");
     expect(result.message).toContain("alias");
   });
@@ -277,14 +277,14 @@ describe("resolve-mounts: name conflict", () => {
 
 describe("resolve-mounts: --dry-run", () => {
   it("reports planned actions without side effects", () => {
-    setupWorkspace(MULTI_PLUGINS_JSON);
+    setupWorkspace(MULTI_REPO_MOUNTS_JSON);
 
     // Create one override
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },
@@ -299,7 +299,7 @@ describe("resolve-mounts: --dry-run", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.message).toContain("Dry run");
-    expect(result.message).toContain("2 plugin(s)");
+    expect(result.message).toContain("2 repo mount(s)");
     expect(result.message).toContain("[override]");
     expect(result.message).toContain("[clone]");
 
@@ -309,7 +309,7 @@ describe("resolve-mounts: --dry-run", () => {
   });
 
   it("detects name conflicts even in dry-run mode", () => {
-    setupWorkspace(CONFLICT_PLUGINS_JSON);
+    setupWorkspace(CONFLICT_REPO_MOUNTS_JSON);
     setupSettings({});
 
     const result = runResolveMounts({
@@ -319,20 +319,20 @@ describe("resolve-mounts: --dry-run", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.message).toContain("Plugin name conflict");
+    expect(result.message).toContain("Repo mount name conflict");
     expect(result.message).toContain("alias");
   });
 });
 
 describe("resolve-mounts: symlink generation", () => {
   it("generates symlink command for custom target", () => {
-    setupWorkspace(SIMPLE_PLUGINS_JSON);
+    setupWorkspace(SIMPLE_REPO_MOUNTS_JSON);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: overrideSource,
@@ -350,7 +350,7 @@ describe("resolve-mounts: symlink generation", () => {
     expect(result.exitCode).toBe(0);
     expect(result.symlinkCommand).not.toBeNull();
     expect(result.symlinkCommand).toContain("ln -s");
-    expect(result.symlinkCommand).toContain("/mnt/lace/plugins/dotfiles");
+    expect(result.symlinkCommand).toContain("/mnt/lace/repos/dotfiles");
     expect(result.symlinkCommand).toContain("/home/user/dotfiles");
   });
 });
@@ -368,14 +368,14 @@ describe("resolve-mounts: devcontainer.json missing", () => {
   });
 });
 
-describe("resolve-mounts: plugins explicitly null", () => {
+describe("resolve-mounts: repoMounts explicitly null", () => {
   it("exits silently", () => {
     setupWorkspace(
       JSON.stringify({
         build: { dockerfile: "Dockerfile" },
         customizations: {
           lace: {
-            plugins: null,
+            repoMounts: null,
           },
         },
       }),
@@ -391,19 +391,19 @@ describe("resolve-mounts: plugins explicitly null", () => {
   });
 });
 
-describe("resolve-mounts: multiple plugins with mixed resolution", () => {
-  it("handles override and clone plugins together", () => {
-    setupWorkspace(MULTI_PLUGINS_JSON);
+describe("resolve-mounts: multiple repo mounts with mixed resolution", () => {
+  it("handles override and clone repo mounts together", () => {
+    setupWorkspace(MULTI_REPO_MOUNTS_JSON);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },
-        // claude-plugin has no override, will be cloned
+        // claude-repo has no override, will be cloned
       },
     });
 
@@ -413,12 +413,12 @@ describe("resolve-mounts: multiple plugins with mixed resolution", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.message).toContain("2 plugin(s)");
+    expect(result.message).toContain("2 repo mount(s)");
     expect(result.message).toContain("1 override(s)");
     expect(result.message).toContain("1 clone(s)");
 
-    // Verify both plugins are in the result
-    expect(result.resolved?.plugins).toHaveLength(2);
+    // Verify both repo mounts are in the result
+    expect(result.resolved?.repoMounts).toHaveLength(2);
     expect(result.mountSpecs).toHaveLength(2);
   });
 });

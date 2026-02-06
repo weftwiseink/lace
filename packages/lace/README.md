@@ -176,3 +176,44 @@ import { runPrebuild, runRestore, runStatus } from "lace";
 | `writeMetadata(dir, data)` | Write prebuild metadata. |
 | `contextsChanged(dir, dockerfile, devcontainerJson)` | Compare current context against cache. Returns true if rebuild needed. |
 | `mergeLockFile(projectLockPath, prebuildDir)` | Merge prebuild lock entries into the project lock file. |
+
+## Repo Mounts
+
+Lace can clone git repos and bind-mount them into the container at `/mnt/lace/repos/<name>`. Declare repo mounts in `customizations.lace.repoMounts`:
+
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "repoMounts": {
+        "github.com/user/dotfiles": {},
+        "github.com/user/shared-tools": { "alias": "tools" }
+      }
+    }
+  }
+}
+```
+
+During `lace up`, each repo is shallow-cloned to `~/.config/lace/<project>/repos/<name>` on the host, then mounted read-only into the container. Repos with subdirectory paths (e.g., `github.com/user/repo/sub/dir`) clone the full repo but mount only the subdirectory.
+
+User-level overrides in `~/.config/lace/settings.json` can point a repo mount at a local path instead of cloning:
+
+```jsonc
+{
+  "repoMounts": {
+    "github.com/user/dotfiles": {
+      "overrideMount": { "source": "~/code/dotfiles" }
+    }
+  }
+}
+```
+
+## Wezterm Port Discovery
+
+Lace auto-assigns an SSH port in the 22425-22499 range for each container's wezterm mux server, avoiding conflicts when multiple containers run simultaneously. The port is injected into `appPort` in the generated `.lace/devcontainer.json`.
+
+On each `lace up`, lace checks whether the previously assigned port is still available. If it is, the port is reused for stability. If not (another container took it), a new port is assigned from the range.
+
+## Prebuilds
+
+Features listed under `customizations.lace.prebuildFeatures` are pre-built into a cached image (`lace.local/<base-image>`) before container creation. This moves slow feature installations (e.g., neovim, claude code) out of the container startup path. The devcontainer's `image` field is then rewritten to point at the pre-built image.

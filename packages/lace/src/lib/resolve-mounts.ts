@@ -3,19 +3,19 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   readDevcontainerConfigMinimal,
-  extractPlugins,
+  extractRepoMounts,
   DevcontainerConfigError,
 } from "./devcontainer";
 import { loadSettings, SettingsConfigError } from "./settings";
 import {
-  resolvePluginMounts,
+  resolveRepoMounts,
   validateNoConflicts,
   generateMountSpecs,
   generateSymlinkCommands,
   MountsError,
   type ResolvedMounts,
 } from "./mounts";
-import { deriveProjectId } from "./plugin-clones";
+import { deriveProjectId } from "./repo-clones";
 import type { RunSubprocess } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 
@@ -41,7 +41,7 @@ export interface ResolveMountsResult {
 
 /**
  * Run the resolve-mounts workflow:
- * 1. Read devcontainer.json and extract plugins
+ * 1. Read devcontainer.json and extract repo mounts
  * 2. Read user's settings.json
  * 3. Resolve mounts (clone or use overrides)
  * 4. Write .lace/resolved-mounts.json
@@ -75,14 +75,14 @@ export function runResolveMounts(
     throw err;
   }
 
-  // 2. Extract plugins configuration
-  const pluginsResult = extractPlugins(config.raw);
+  // 2. Extract repo mounts configuration
+  const repoMountsResult = extractRepoMounts(config.raw);
 
-  switch (pluginsResult.kind) {
+  switch (repoMountsResult.kind) {
     case "absent":
       return {
         exitCode: 0,
-        message: "No plugins configured in devcontainer.json",
+        message: "No repo mounts configured in devcontainer.json",
       };
 
     case "null":
@@ -95,12 +95,12 @@ export function runResolveMounts(
     case "empty":
       return {
         exitCode: 0,
-        message: "No plugins configured (empty object)",
+        message: "No repo mounts configured (empty object)",
       };
   }
 
-  const plugins = pluginsResult.plugins;
-  const pluginCount = Object.keys(plugins).length;
+  const repoMounts = repoMountsResult.repoMounts;
+  const repoMountCount = Object.keys(repoMounts).length;
 
   // 3. Load user settings
   let settings;
@@ -121,7 +121,7 @@ export function runResolveMounts(
 
   // 5. Validate no name conflicts (even in dry-run)
   try {
-    validateNoConflicts(plugins);
+    validateNoConflicts(repoMounts);
   } catch (err) {
     if (err instanceof MountsError) {
       return {
@@ -134,10 +134,10 @@ export function runResolveMounts(
 
   // Dry run mode
   if (dryRun) {
-    const pluginNames = Object.entries(plugins)
+    const repoMountNames = Object.entries(repoMounts)
       .map(([repoId, opts]) => {
         const alias = opts.alias ? ` (alias: ${opts.alias})` : "";
-        const hasOverride = settings.plugins?.[repoId]?.overrideMount
+        const hasOverride = settings.repoMounts?.[repoId]?.overrideMount
           ? " [override]"
           : " [clone]";
         return `  - ${repoId}${alias}${hasOverride}`;
@@ -147,16 +147,16 @@ export function runResolveMounts(
     return {
       exitCode: 0,
       message:
-        `Dry run: Would resolve ${pluginCount} plugin(s) for project '${projectId}':\n` +
-        pluginNames,
+        `Dry run: Would resolve ${repoMountCount} repo mount(s) for project '${projectId}':\n` +
+        repoMountNames,
     };
   }
 
   // 5. Resolve mounts
   let resolved: ResolvedMounts;
   try {
-    resolved = resolvePluginMounts({
-      plugins,
+    resolved = resolveRepoMounts({
+      repoMounts,
       settings,
       projectId,
       subprocess,
@@ -172,8 +172,8 @@ export function runResolveMounts(
   }
 
   // 6. Generate mount specs and symlink commands
-  const mountSpecs = generateMountSpecs(resolved.plugins);
-  const symlinkCommand = generateSymlinkCommands(resolved.plugins);
+  const mountSpecs = generateMountSpecs(resolved.repoMounts);
+  const symlinkCommand = generateSymlinkCommands(resolved.repoMounts);
 
   // 7. Write resolved-mounts.json
   const laceDir = join(workspaceFolder, ".lace");
@@ -183,10 +183,10 @@ export function runResolveMounts(
   writeFileSync(outputPath, JSON.stringify(resolved, null, 2) + "\n", "utf-8");
 
   // 8. Generate summary
-  const overrideCount = resolved.plugins.filter((p) => p.isOverride).length;
-  const cloneCount = resolved.plugins.filter((p) => !p.isOverride).length;
+  const overrideCount = resolved.repoMounts.filter((p) => p.isOverride).length;
+  const cloneCount = resolved.repoMounts.filter((p) => !p.isOverride).length;
 
-  let summary = `Resolved ${pluginCount} plugin(s):`;
+  let summary = `Resolved ${repoMountCount} repo mount(s):`;
   if (overrideCount > 0) {
     summary += ` ${overrideCount} override(s)`;
   }
@@ -195,7 +195,7 @@ export function runResolveMounts(
   }
 
   if (symlinkCommand) {
-    const symlinkCount = resolved.plugins.filter((p) => p.symlink).length;
+    const symlinkCount = resolved.repoMounts.filter((p) => p.symlink).length;
     summary += `, ${symlinkCount} symlink(s)`;
   }
 

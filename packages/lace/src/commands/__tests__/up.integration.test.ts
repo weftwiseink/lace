@@ -129,12 +129,12 @@ afterEach(() => {
 
 const STANDARD_DOCKERFILE = "FROM node:24-bookworm\nRUN apt-get update\n";
 
-const PLUGINS_ONLY_JSON = JSON.stringify(
+const REPO_MOUNTS_ONLY_JSON = JSON.stringify(
   {
     build: { dockerfile: "Dockerfile" },
     customizations: {
       lace: {
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {},
         },
       },
@@ -167,7 +167,7 @@ const FULL_CONFIG_JSON = JSON.stringify(
         prebuildFeatures: {
           "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
         },
-        plugins: {
+        repoMounts: {
           "github.com/user/dotfiles": {},
         },
       },
@@ -185,15 +185,15 @@ const MINIMAL_JSON = JSON.stringify(
   2,
 );
 
-describe("lace up: plugins with all overridden", () => {
+describe("lace up: repo mounts with all overridden", () => {
   it("generates extended config and invokes devcontainer", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },
@@ -223,9 +223,9 @@ describe("lace up: plugins with all overridden", () => {
   });
 });
 
-describe("lace up: plugins with clones", () => {
-  it("clones plugins and generates extended config", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+describe("lace up: repo mounts with clones", () => {
+  it("clones repos and generates extended config", async () => {
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
     setupSettings({});
 
     const result = await runUp({
@@ -270,7 +270,7 @@ describe("lace up: prebuild only", () => {
   });
 });
 
-describe("lace up: full config (prebuild + plugins)", () => {
+describe("lace up: full config (prebuild + repo mounts)", () => {
   it("runs all phases in order", async () => {
     setupWorkspace(FULL_CONFIG_JSON, STANDARD_DOCKERFILE);
 
@@ -278,7 +278,7 @@ describe("lace up: full config (prebuild + plugins)", () => {
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },
@@ -298,7 +298,7 @@ describe("lace up: full config (prebuild + plugins)", () => {
   });
 });
 
-describe("lace up: no plugins or prebuild", () => {
+describe("lace up: no repo mounts or prebuild", () => {
   it("assigns port and generates extended config with port mapping", async () => {
     setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
 
@@ -329,9 +329,9 @@ describe("lace up: no plugins or prebuild", () => {
 
 describe("lace up: resolution failures abort before devcontainer up", () => {
   it("aborts on resolve-mounts failure", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: join(workspaceRoot, "nonexistent") },
         },
@@ -358,13 +358,13 @@ describe("lace up: resolution failures abort before devcontainer up", () => {
 
 describe("lace up: symlink generation", () => {
   it("adds symlink command to postCreateCommand", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: overrideSource,
@@ -396,7 +396,7 @@ describe("lace up: symlink generation", () => {
         postCreateCommand: "echo hello",
         customizations: {
           lace: {
-            plugins: {
+            repoMounts: {
               "github.com/user/dotfiles": {},
             },
           },
@@ -412,7 +412,7 @@ describe("lace up: symlink generation", () => {
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: {
             source: overrideSource,
@@ -441,13 +441,13 @@ describe("lace up: symlink generation", () => {
 
 describe("lace up: devcontainer up integration", () => {
   it("passes through to devcontainer up with extended config", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },
@@ -475,13 +475,13 @@ describe("lace up: devcontainer up integration", () => {
   });
 
   it("handles devcontainer up failure", async () => {
-    setupWorkspace(PLUGINS_ONLY_JSON, STANDARD_DOCKERFILE);
+    setupWorkspace(REPO_MOUNTS_ONLY_JSON, STANDARD_DOCKERFILE);
 
     const overrideSource = join(workspaceRoot, "local-dotfiles");
     mkdirSync(overrideSource, { recursive: true });
 
     setupSettings({
-      plugins: {
+      repoMounts: {
         "github.com/user/dotfiles": {
           overrideMount: { source: overrideSource },
         },

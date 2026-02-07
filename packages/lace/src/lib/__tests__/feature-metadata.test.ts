@@ -173,6 +173,30 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     ).rejects.toThrow(/CLI returned invalid JSON/);
   });
 
+  // Scenario 4b: CLI returns manifest wrapped under "manifest" key (real CLI format)
+  it("parses metadata from nested manifest key (real devcontainer CLI format)", async () => {
+    const subprocess = mockSubprocess({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        manifest: {
+          schemaVersion: 2,
+          annotations: {
+            "dev.containers.metadata": JSON.stringify(weztermMetadata),
+          },
+        },
+        canonicalId: "ghcr.io/org/feat@sha256:abc123",
+      }),
+      stderr: "",
+    });
+
+    const result = await fetchFeatureMetadata(
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1.0.0",
+      { subprocess, cacheDir },
+    );
+
+    expect(result).toEqual(weztermMetadata);
+  });
+
   // Scenario 5: Missing dev.containers.metadata annotation
   it("throws MetadataFetchError when annotation is missing", async () => {
     const subprocess = mockSubprocess({

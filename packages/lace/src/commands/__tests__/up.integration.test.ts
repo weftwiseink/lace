@@ -521,14 +521,20 @@ describe("lace up: devcontainer.json missing", () => {
 
 const weztermMetadata: FeatureMetadata = {
   id: "wezterm-server",
-  version: "1.0.0",
+  version: "1.1.0",
   options: {
+    version: { type: "string", default: "20240203-110809-5046fc22" },
     sshPort: { type: "string", default: "2222" },
+    createRuntimeDir: { type: "boolean", default: true },
   },
   customizations: {
     lace: {
       ports: {
-        sshPort: { label: "wezterm ssh", onAutoForward: "silent" },
+        sshPort: {
+          label: "wezterm ssh",
+          onAutoForward: "silent",
+          requireLocalPort: true,
+        },
       },
     },
   },

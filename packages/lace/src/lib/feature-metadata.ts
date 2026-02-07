@@ -115,6 +115,9 @@ interface ReadFsCacheOptions {
 /** Shape of the OCI manifest JSON returned by the devcontainer CLI. */
 interface OciManifest {
   annotations?: Record<string, string>;
+  manifest?: {
+    annotations?: Record<string, string>;
+  };
 }
 
 // ── Internal: In-memory cache ──
@@ -259,7 +262,11 @@ function fetchFromRegistry(
     );
   }
 
-  const metadataStr = manifest.annotations?.["dev.containers.metadata"];
+  // The devcontainer CLI wraps the manifest under a "manifest" key in its JSON output.
+  // Check both the top-level and nested locations for the annotations.
+  const metadataStr =
+    manifest.manifest?.annotations?.["dev.containers.metadata"] ??
+    manifest.annotations?.["dev.containers.metadata"];
   if (!metadataStr) {
     throw new MetadataFetchError(
       featureId,

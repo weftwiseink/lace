@@ -4,66 +4,60 @@
 
 Secure, reproducible workspaces for AI coding agents using devcontainers, git worktrees, and terminal-native tooling.
 
-## What is lace?
+## Packages
 
-Lace provides infrastructure for managing isolated agent workspaces:
+### [`packages/lace`](packages/lace/)
 
-- **Devcontainer features** for agent-oriented tooling (claude code, neovim, wezterm mux, nushell)
-- **Worktree-aware containers** that expose multiple branches through a single container
-- **Terminal-native development** via WezTerm SSH domain multiplexing + Neovim
-- **Pre-baked images** that layer devcontainer features onto base images at build time
+Devcontainer orchestration CLI. Wraps the standard `devcontainer` CLI with:
 
-## Project Structure
+- **Port allocation** -- auto-assigns ports in the 22425--22499 range with symmetric host/container mapping
+- **Template variables** -- `${lace.port(featureId/optionName)}` expressions resolved at build time
+- **Feature metadata** -- fetches and validates `devcontainer-feature.json` from OCI registries, auto-injects port templates
+- **Prebuilds** -- pre-bakes slow features (neovim, claude code) into cached local images for fast startup
+- **Repo mounts** -- clones repos and bind-mounts them into the container, with local override support
+
+```sh
+npm install lace
+lace up --workspace-folder .
+```
+
+See [`packages/lace/README.md`](packages/lace/README.md) for full documentation.
+
+### [`devcontainers/features`](devcontainers/features/)
+
+Devcontainer features published to `ghcr.io/weftwiseink/devcontainer-features`:
+
+| Feature | Description |
+|---------|-------------|
+| [`wezterm-server`](devcontainers/features/src/wezterm-server/) | Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains. |
+
+## Quick start
+
+```sh
+# Install dependencies
+pnpm install
+
+# Build the lace CLI
+pnpm --filter lace build
+
+# Run tests
+pnpm --filter lace test
+```
+
+## Project structure
 
 ```
 lace/
-├── .devcontainer/         # Reference devcontainer setup
-├── config/                # Terminal environment configs (wezterm, nvim)
-├── devcontainers/
-│   └── features/          # Devcontainer features for publishing
 ├── packages/
-│   └── lace/              # Devcontainer wrapper CLI (npm)
+│   └── lace/              # Devcontainer orchestration CLI
+├── devcontainers/
+│   └── features/          # Devcontainer features (OCI-published)
+│       └── src/
+│           └── wezterm-server/
+├── .devcontainer/         # This project's own devcontainer config
+├── config/                # Terminal environment configs (wezterm, nvim)
 ├── bin/                   # Launcher scripts
 └── cdocs/                 # Project documentation
-```
-
-## Key Concepts
-
-**Worktree-mounted containers**: A bare git repo is mounted at `/workspace`, giving the container access to all worktrees simultaneously. Each worktree gets its own WezTerm workspace via SSH domain multiplexing.
-
-**Feature-based tooling**: Agent tools (claude, neovim, wezterm-mux-server, nushell) are installed as devcontainer features rather than baked into Dockerfiles, making them composable across projects.
-
-**Pre-baked images**: The `lace` CLI can pre-build feature layers onto base images using the devcontainer CLI, caching them as `lace.local/<base-image>` to avoid cold-start installation at container creation time.
-
-## Quick Start: Devcontainer Workspace
-
-Open a WezTerm window connected to the lace devcontainer with a single command:
-
-```bash
-# Standalone: starts container (if needed) and opens WezTerm
-./bin/open-lace-workspace
-
-# Rebuild container image
-./bin/open-lace-workspace --rebuild
-
-# Piped: control devcontainer up flags directly
-devcontainer up --workspace-folder . | ./bin/open-lace-workspace
-```
-
-If a container is already running, the script prompts to reconnect, rebuild, or quit. It also detects existing WezTerm connections to avoid duplicate windows.
-
-**Prerequisites:**
-
-- [WezTerm](https://wezfurlong.org/wezterm/installation.html) installed on the host
-- SSH key pair at `~/.ssh/lace_devcontainer` (`ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""`)
-- [devcontainer CLI](https://github.com/devcontainers/cli) (standalone mode only: `npm install -g @devcontainers/cli`)
-
-The script validates prerequisites, waits for SSH readiness, and opens a new WezTerm window at `/workspace/main` inside the container. See `bin/open-lace-workspace --help` for full usage, exit codes, and troubleshooting.
-
-## Development
-
-```bash
-pnpm install
 ```
 
 ## License

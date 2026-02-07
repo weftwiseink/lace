@@ -1,6 +1,6 @@
 # lace
 
-A devcontainer CLI that pre-bakes features onto base images at build time, eliminating cold-start installation delays during `devcontainer up`.
+Devcontainer orchestration CLI. Manages port allocation, feature prebuilds, repo mounts, and template resolution on top of the standard `devcontainer` CLI.
 
 ## Install
 
@@ -12,7 +12,142 @@ npm install lace
 
 ## Quick start
 
-1. Add `prebuildFeatures` to your `.devcontainer/devcontainer.json`:
+```sh
+lace up --workspace-folder .
+```
+
+`lace up` reads `.devcontainer/devcontainer.json`, resolves templates, allocates ports, runs prebuilds and repo mounts if configured, generates an extended config at `.lace/devcontainer.json`, and invokes `devcontainer up` with it.
+
+## Commands
+
+### `lace up`
+
+The main command. Runs the full orchestration pipeline:
+
+1. Fetch and validate feature metadata from OCI registries
+2. Auto-inject `${lace.port()}` templates for features with port declarations
+3. Resolve all templates (port allocation)
+4. Prebuild features (if `prebuildFeatures` configured)
+5. Resolve repo mounts (if `repoMounts` configured)
+6. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
+7. Invoke `devcontainer up`
+
+```sh
+lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation]
+```
+
+| Flag | Effect |
+|------|--------|
+| `--workspace-folder <path>` | Workspace folder (defaults to cwd). |
+| `--no-cache` | Bypass filesystem cache for floating feature tags (pinned versions still use cache). |
+| `--skip-metadata-validation` | Skip feature metadata fetch/validation entirely (offline/emergency). |
+
+Any unrecognized flags are passed through to `devcontainer up`.
+
+### `lace prebuild`
+
+Pre-bake features onto the base image. Supports both Dockerfile-based and image-based configs.
+
+```sh
+lace prebuild [--dry-run] [--force]
+```
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Show planned actions without building or modifying files. |
+| `--force` | Bypass cache and force a full rebuild. |
+
+### `lace restore`
+
+Undo the prebuild rewrite, restoring the original Dockerfile FROM or devcontainer.json `image` field. The `.lace/prebuild/` cache is preserved for future reactivation.
+
+```sh
+lace restore
+```
+
+### `lace status`
+
+Show current prebuild state: active, cached, or inactive. Reports the original image reference, prebuild tag, build timestamp, and whether the config has changed since the last build.
+
+```sh
+lace status
+```
+
+### `lace resolve-mounts`
+
+Resolve repo mounts independently (normally run as part of `lace up`).
+
+```sh
+lace resolve-mounts [--workspace-folder <path>] [--dry-run]
+```
+
+## Port allocation
+
+Lace allocates ports in the range 22425--22499 and uses a **symmetric port model**: the same port number is used on both the host and inside the container. This avoids port-mapping confusion when multiple containers run simultaneously.
+
+Allocated ports are persisted in `.lace/port-assignments.json` and reused across runs for stability. If a previously assigned port is occupied, lace reassigns from the range.
+
+For each allocated port, lace auto-generates:
+- `appPort` entries (Docker `-p` bindings, e.g. `"22430:22430"`)
+- `forwardPorts` entries (VS Code port forwarding)
+- `portsAttributes` entries (labels and `requireLocalPort: true`)
+
+User-provided entries in any of these fields suppress the corresponding auto-generated entry for that port.
+
+## Template variables
+
+Lace resolves `${lace.port(<label>)}` expressions anywhere in the devcontainer config. The label format is `featureShortId/optionName`:
+
+```jsonc
+{
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "port": "${lace.port(sshd/port)}"
+    }
+  }
+}
+```
+
+**Type coercion**: When a `${lace.port()}` expression is the entire string value, it resolves to an integer. When embedded in a larger string, it resolves to a string with the port number substituted.
+
+### Auto-injection
+
+Features can declare port options in their `devcontainer-feature.json` via `customizations.lace.ports`:
+
+```jsonc
+{
+  "id": "sshd",
+  "options": {
+    "port": { "type": "string", "default": "2222" }
+  },
+  "customizations": {
+    "lace": {
+      "ports": {
+        "port": {
+          "label": "SSH",
+          "requireLocalPort": true
+        }
+      }
+    }
+  }
+}
+```
+
+When a feature declares `customizations.lace.ports`, lace auto-injects `${lace.port()}` templates for any port options the user has **not** explicitly set. This means zero-config port allocation -- just include the feature and lace handles the rest.
+
+## Feature metadata
+
+Lace fetches `devcontainer-feature.json` metadata from OCI registries (via `devcontainer features info manifest`) for every feature in your config. This enables:
+
+- **Option validation**: warns if you pass an option name not in the feature's schema
+- **Port declaration validation**: ensures `customizations.lace.ports` keys match option names
+- **Auto-injection**: injects port templates for declared port options
+
+Metadata is cached at `~/.config/lace/cache/features/`. Pinned versions (exact semver, digest refs) are cached permanently. Floating tags (major-only, `latest`) expire after 24 hours.
+
+## Prebuilds
+
+Features listed under `customizations.lace.prebuildFeatures` are pre-built into a cached local image before container creation:
 
 ```jsonc
 {
@@ -31,155 +166,17 @@ npm install lace
 }
 ```
 
-2. Prebuild, then start your devcontainer as usual:
-
-```sh
-lace prebuild
-devcontainer up --workspace-folder .
-```
-
-3. Restore the Dockerfile before committing (the rewritten FROM is local-only):
-
-```sh
-lace restore
-git add . && git commit
-lace prebuild   # instant re-activation from cache
-```
-
-## Configuration
-
-Lace reads `.devcontainer/devcontainer.json`. The only lace-specific key is `customizations.lace.prebuildFeatures`, which uses the same format as the top-level `features` key.
-
-```jsonc
-{
-  "build": { "dockerfile": "Dockerfile" },
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {},
-        "ghcr.io/devcontainers/features/node:1": { "version": "22" }
-      }
-    }
-  },
-  "features": {
-    "ghcr.io/devcontainers/features/sshd:1": {}
-  }
-}
-```
-
 Rules:
+- A feature cannot appear in both `prebuildFeatures` and `features` (overlap detection is version-insensitive).
+- Both Dockerfile-based and image-based configs are supported.
+- Set `prebuildFeatures` to `null` to silently skip, or `{}` to skip with a message.
+- `${lace.port()}` expressions in `prebuildFeatures` are **not** resolved (a warning is emitted). Prebuild features use their default option values.
 
-- A feature cannot appear in both `prebuildFeatures` and `features`. Overlap detection is version-insensitive.
-- A Dockerfile-based build is required. Image-based configs are not supported.
-- Set `prebuildFeatures` to `null` to silently skip prebuild, or `{}` to skip with a message.
-- If `customizations.lace` is absent, lace reports nothing to prebuild and exits cleanly.
+The prebuild image is tagged `lace.local/<base-image>` and stored in the local Docker daemon only. After building, lace rewrites the Dockerfile FROM or `image` field to point at it. Use `lace restore` before committing to revert the rewrite.
 
-## Commands
+## Repo mounts
 
-### `lace prebuild`
-
-Pre-bake features onto the base image. Rewrites the Dockerfile FROM line to point to the local pre-baked image.
-
-```sh
-lace prebuild [--dry-run] [--force]
-```
-
-| Flag | Effect |
-|------|--------|
-| `--dry-run` | Show planned actions without building or modifying files. |
-| `--force` | Bypass cache and force a full rebuild. |
-
-If a previous cache is still fresh (e.g., after `lace restore`), lace reactivates the prebuild by rewriting the Dockerfile without rebuilding. See [prebuild internals](docs/prebuild.md) for the full pipeline.
-
-### `lace restore`
-
-Undo the FROM rewrite, restoring the Dockerfile to its original state. The `.lace/prebuild/` cache is preserved for future reactivation.
-
-```sh
-lace restore
-```
-
-### `lace status`
-
-Show the current prebuild state: active, cached, or inactive. Reports the original FROM reference, pre-baked tag, build timestamp, and whether the config has drifted since the last build.
-
-```sh
-lace status
-```
-
-## How it works
-
-Lace splits your devcontainer features into two groups: prebuild features are baked into the base image once, while runtime features install normally via `devcontainer up`. On prebuild, lace generates a temporary build context, runs `devcontainer build` to produce a local image tagged `lace.local/...`, then rewrites your Dockerfile's FROM line to use it.
-
-The `lace.local/` prefix is a local-only convention. These images live only in the local Docker daemon and are never pushed to a registry. The tag format is bidirectional, so `lace restore` can recover the original FROM reference from the tag alone.
-
-For the full pipeline walkthrough, FROM rewriting details, cache internals, and lock file integration, see [docs/prebuild.md](docs/prebuild.md).
-
-## .gitignore and workflow
-
-Add `.lace/` to your `.gitignore`. It contains machine-specific build artifacts.
-
-```
-.lace/
-```
-
-Always restore before committing. The rewritten FROM points to `lace.local/...`, which only exists locally:
-
-```sh
-lace restore
-git add . && git commit
-lace prebuild
-```
-
-Use `lace status` to check whether a prebuild is active or stale, and `lace prebuild --dry-run` to preview actions without modifying anything.
-
-## API
-
-Lace exports its core functions for programmatic use:
-
-```ts
-import { runPrebuild, runRestore, runStatus } from "lace";
-```
-
-### Orchestration
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `runPrebuild` | `(options?: PrebuildOptions) => PrebuildResult` | Run the full prebuild pipeline. |
-| `runRestore` | `(options?: RestoreOptions) => RestoreResult` | Restore the Dockerfile (cache preserved). |
-| `runStatus` | `(options?: StatusOptions) => StatusResult` | Report current prebuild state. |
-
-### Dockerfile utilities
-
-| Function | Description |
-|----------|-------------|
-| `parseDockerfile(content)` | AST-based parsing of the first FROM instruction and its ARG prelude. |
-| `generateTag(imageName, tag, digest)` | Generate a `lace.local/` image tag. |
-| `parseTag(laceTag)` | Reverse a `lace.local/` tag to the original image reference. |
-| `rewriteFrom(content, newImageRef)` | Rewrite the first FROM line, preserving platform and alias. |
-| `restoreFrom(content, originalImageRef)` | Restore the first FROM line to the original reference. |
-| `generatePrebuildDockerfile(parsed)` | Generate a minimal Dockerfile from parsed data. |
-
-### Config utilities
-
-| Function | Description |
-|----------|-------------|
-| `readDevcontainerConfig(filePath)` | Read and parse a devcontainer.json (JSONC). |
-| `extractPrebuildFeatures(raw)` | Extract `prebuildFeatures` with discriminated result types. |
-| `validateNoOverlap(prebuild, features)` | Check for duplicate features across both maps. |
-
-### Metadata and cache utilities
-
-| Function | Description |
-|----------|-------------|
-| `readMetadata(dir)` | Read prebuild metadata from `.lace/prebuild/`. Returns null if absent. |
-| `writeMetadata(dir, data)` | Write prebuild metadata. |
-| `contextsChanged(dir, dockerfile, devcontainerJson)` | Compare current context against cache. Returns true if rebuild needed. |
-| `mergeLockFile(projectLockPath, prebuildDir)` | Merge prebuild lock entries into the project lock file. |
-
-## Repo Mounts
-
-Lace can clone git repos and bind-mount them into the container at `/mnt/lace/repos/<name>`. Declare repo mounts in `customizations.lace.repoMounts`:
+Declare repos to clone and mount into the container:
 
 ```jsonc
 {
@@ -194,26 +191,52 @@ Lace can clone git repos and bind-mount them into the container at `/mnt/lace/re
 }
 ```
 
-During `lace up`, each repo is shallow-cloned to `~/.config/lace/<project>/repos/<name>` on the host, then mounted read-only into the container. Repos with subdirectory paths (e.g., `github.com/user/repo/sub/dir`) clone the full repo but mount only the subdirectory.
+Each repo is shallow-cloned to `~/.config/lace/<project>/repos/<name>` on the host and bind-mounted read-only at `/mnt/lace/repos/<name>` in the container. Repos with subdirectory paths (e.g., `github.com/user/repo/sub/dir`) clone the full repo but mount only the subdirectory.
 
-User-level overrides in `~/.config/lace/settings.json` can point a repo mount at a local path instead of cloning:
+The `alias` option provides an explicit name when multiple repos would derive the same name.
+
+### Settings overrides
+
+User-level settings at `~/.config/lace/settings.json` (or `~/.lace/settings.json`, or `$LACE_SETTINGS`) can override repo mounts to point at local paths instead of cloning:
 
 ```jsonc
 {
   "repoMounts": {
     "github.com/user/dotfiles": {
-      "overrideMount": { "source": "~/code/dotfiles" }
+      "overrideMount": {
+        "source": "~/code/dotfiles",
+        "readonly": true,
+        "target": "/home/node/.dotfiles"
+      }
     }
   }
 }
 ```
 
-## Wezterm Port Discovery
+When `target` differs from the default (`/mnt/lace/repos/<name>`), lace generates a symlink from the default location to the custom target via `postCreateCommand`.
 
-Lace auto-assigns an SSH port in the 22425-22499 range for each container's wezterm mux server, avoiding conflicts when multiple containers run simultaneously. The port is injected into `appPort` in the generated `.lace/devcontainer.json`.
+## .gitignore
 
-On each `lace up`, lace checks whether the previously assigned port is still available. If it is, the port is reused for stability. If not (another container took it), a new port is assigned from the range.
+Add `.lace/` to your `.gitignore`. It contains machine-specific artifacts (port assignments, prebuild cache, generated configs):
 
-## Prebuilds
+```
+.lace/
+```
 
-Features listed under `customizations.lace.prebuildFeatures` are pre-built into a cached image (`lace.local/<base-image>`) before container creation. This moves slow feature installations (e.g., neovim, claude code) out of the container startup path. The devcontainer's `image` field is then rewritten to point at the pre-built image.
+## Workflow
+
+```sh
+# Normal development
+lace up
+
+# Before committing (if using prebuilds)
+lace restore
+git add . && git commit
+lace prebuild   # instant re-activation from cache
+
+# Check prebuild state
+lace status
+
+# Force rebuild after changing prebuild features
+lace prebuild --force
+```

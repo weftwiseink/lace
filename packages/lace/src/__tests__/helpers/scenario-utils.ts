@@ -304,7 +304,7 @@ export function getSshBanner(port: number, timeoutMs = 5000): Promise<string> {
  */
 export function stopContainer(containerId: string): void {
   try {
-    execSync(`docker rm -f ${containerId}`, { stdio: "pipe" });
+    execSync(`docker rm -f "${containerId}"`, { stdio: "pipe" });
   } catch {
     // Ignore errors -- container may already be stopped
   }

@@ -21,7 +21,7 @@ import {
   type FeatureMetadata,
 } from "./feature-metadata";
 import { PortAllocator } from "./port-allocator";
-import type { PortAllocation } from "./port-allocator";
+import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
 import {
   autoInjectPortTemplates,
   resolveTemplates,
@@ -128,10 +128,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // This replaces the old hardcoded port assignment phase.
   let metadataMap: Map<string, FeatureMetadata | null> = new Map();
   let templateResult: TemplateResolutionResult | null = null;
-  let featurePortMetadata: Map<
-    string,
-    { label?: string; requireLocalPort?: boolean; onAutoForward?: string }
-  > | null = null;
+  let featurePortMetadata: Map<string, FeaturePortDeclaration> | null = null;
 
   if (featureIds.length > 0) {
     // Step 1: Fetch feature metadata
@@ -382,10 +379,7 @@ interface GenerateExtendedConfigOptions {
   symlinkCommand: string | null;
   resolvedConfig: Record<string, unknown>;
   allocations: PortAllocation[];
-  featurePortMetadata: Map<
-    string,
-    { label?: string; requireLocalPort?: boolean; onAutoForward?: string }
-  > | null;
+  featurePortMetadata: Map<string, FeaturePortDeclaration> | null;
 }
 
 /**

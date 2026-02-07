@@ -12,8 +12,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { runUp } from "@/lib/up";
 import { clearMetadataCache } from "@/lib/feature-metadata";
 import {

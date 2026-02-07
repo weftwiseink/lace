@@ -67,6 +67,8 @@ export interface PortAttributes {
   label: string;
   /** Whether to require the exact local port number (fail if unavailable). */
   requireLocalPort: boolean;
+  /** Auto-forward behavior: "silent", "notify", "openBrowser", "openPreview", "ignore". */
+  onAutoForward?: string;
 }
 
 /** Auto-generated port entries to merge into the final config. */
@@ -85,6 +87,8 @@ export interface FeaturePortDeclaration {
   label?: string;
   /** Whether to require the exact local port. Default: true. */
   requireLocalPort?: boolean;
+  /** Auto-forward behavior: "silent", "notify", "openBrowser", "openPreview", "ignore". */
+  onAutoForward?: string;
 }
 
 // ── PortAllocator ──

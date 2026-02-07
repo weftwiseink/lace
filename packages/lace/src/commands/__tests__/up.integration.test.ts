@@ -900,10 +900,11 @@ describe("lace up: auto-inject port templates from metadata", () => {
     // forwardPorts
     expect(extended.forwardPorts).toContain(port);
 
-    // portsAttributes with feature-declared label
+    // portsAttributes with feature-declared label and onAutoForward
     expect(extended.portsAttributes?.[String(port)]).toEqual({
       label: "wezterm ssh (lace)",
       requireLocalPort: true,
+      onAutoForward: "silent",
     });
 
     // Port assignments file persisted

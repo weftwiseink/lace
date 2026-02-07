@@ -1,7 +1,7 @@
 {
     "name": "Wezterm Server",
     "id": "wezterm-server",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Installs wezterm-mux-server and wezterm CLI for headless terminal multiplexing via SSH domains. Extracts binaries from platform-native packages to avoid X11/Wayland GUI dependencies.",
     "options": {
         "version": {
@@ -9,10 +9,26 @@
             "default": "20240203-110809-5046fc22",
             "description": "Wezterm release version string (e.g., 20240203-110809-5046fc22)"
         },
+        "sshPort": {
+            "type": "string",
+            "default": "2222",
+            "description": "SSH port for wezterm-mux-server access. When used with lace, this is auto-assigned from the 22425-22499 range."
+        },
         "createRuntimeDir": {
             "type": "boolean",
             "default": true,
             "description": "Create /run/user/<uid> runtime directory for wezterm-mux-server (UID resolved from _REMOTE_USER)"
+        }
+    },
+    "customizations": {
+        "lace": {
+            "ports": {
+                "sshPort": {
+                    "label": "wezterm ssh",
+                    "onAutoForward": "silent",
+                    "requireLocalPort": true
+                }
+            }
         }
     },
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/wezterm-server",

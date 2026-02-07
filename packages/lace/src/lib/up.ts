@@ -130,7 +130,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   let templateResult: TemplateResolutionResult | null = null;
   let featurePortMetadata: Map<
     string,
-    { label?: string; requireLocalPort?: boolean }
+    { label?: string; requireLocalPort?: boolean; onAutoForward?: string }
   > | null = null;
 
   if (featureIds.length > 0) {
@@ -384,7 +384,7 @@ interface GenerateExtendedConfigOptions {
   allocations: PortAllocation[];
   featurePortMetadata: Map<
     string,
-    { label?: string; requireLocalPort?: boolean }
+    { label?: string; requireLocalPort?: boolean; onAutoForward?: string }
   > | null;
 }
 

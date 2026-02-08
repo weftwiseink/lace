@@ -3,8 +3,8 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-06T15:00:00-08:00
 type: report
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [status, architecture, api-redesign, features, plugins, ports, handoff]
 references:
   - cdocs/reports/2026-02-05-plugin-architecture-devcontainer-features-analysis.md

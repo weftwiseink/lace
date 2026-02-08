@@ -31,7 +31,24 @@ Devcontainer features published to `ghcr.io/weftwiseink/devcontainer-features`:
 |---------|-------------|
 | [`wezterm-server`](devcontainers/features/src/wezterm-server/) | Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains. |
 
-## Quick start
+## Dogfooding
+
+To use your local build of `lace` against other projects (e.g. a dotfiles devcontainer):
+
+```sh
+# Build and link globally (one-time setup)
+pnpm install
+pnpm --filter lace build
+cd packages/lace && npm link
+
+# Now `lace` is available everywhere
+cd ~/code/personal/dotfiles
+lace up
+```
+
+The global link is a symlink to the source directory, so future `pnpm --filter lace build` runs update the CLI automatically -- no need to re-link.
+
+## Development
 
 ```sh
 # Install dependencies

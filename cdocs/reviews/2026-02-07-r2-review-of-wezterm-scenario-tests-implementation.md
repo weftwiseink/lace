@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-07T08:30:00-08:00
 task_list: lace/feature-overhaul
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, implementation_review, testing, onAutoForward, code_quality, scenario_tests]
 ---

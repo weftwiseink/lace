@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-07T15:00:00-08:00
 task_list: lace/feature-overhaul
 type: devlog
-state: live
+state: archived
 status: done
 tags: [testing, wezterm-server, feature-awareness-v2, implementation]
 references:

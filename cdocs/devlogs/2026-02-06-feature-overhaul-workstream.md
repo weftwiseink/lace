@@ -3,8 +3,8 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-06T10:00:00-08:00
 type: devlog
-state: live
-status: complete
+state: archived
+status: done
 tags: [features, architecture, port-management, refactor, templating]
 ---
 

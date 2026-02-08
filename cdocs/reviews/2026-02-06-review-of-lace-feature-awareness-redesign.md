@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-06T11:30:00-08:00
 task_list: lace/feature-overhaul
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, architecture, symmetric-ports, template-scope, override-semantics, spec-compliance]
 rounds:

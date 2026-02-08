@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-06T14:30:00-08:00
 task_list: lace/feature-overhaul
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, devcontainer-spec, ports, spec-research, architecture]
 round: 1

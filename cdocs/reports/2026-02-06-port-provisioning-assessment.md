@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-06T10:30:00-08:00
 task_list: lace/feature-overhaul
 type: report
-state: live
-status: revised
+state: archived
+status: done
 tags: [assessment, ports, devcontainer-spec, architecture, wezterm]
 last_reviewed:
   status: revision_requested

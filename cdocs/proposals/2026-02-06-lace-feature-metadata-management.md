@@ -3,8 +3,8 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-06T19:30:00-08:00
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 tags: [features, metadata, oci, caching, validation, devcontainer-spec]
 references:
   - cdocs/reports/2026-02-06-feature-manifest-fetching-options.md

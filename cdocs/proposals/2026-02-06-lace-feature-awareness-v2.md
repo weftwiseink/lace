@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-06T20:00:00-08:00
 task_list: lace/feature-overhaul
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 tags: [architecture, features, templating, ports, refactor, devcontainer-spec]
 last_reviewed:
   status: accepted

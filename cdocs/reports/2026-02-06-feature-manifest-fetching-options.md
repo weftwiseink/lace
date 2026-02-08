@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-06T10:15:00-08:00
 task_list: lace/feature-overhaul
 type: report
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [investigation, features, oci, devcontainer-cli, caching, architecture]
 ---
 

@@ -4,8 +4,9 @@ first_authored:
   at: 2026-02-06T10:00:00-08:00
 task_list: lace/rename-plugins-to-repo-mounts
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
+implementation_commit: 1805379
 tags: [refactor, naming, repo-mounts, plugins, devcontainer, lace-cli]
 revisions:
   - at: 2026-02-06T10:30:00-08:00

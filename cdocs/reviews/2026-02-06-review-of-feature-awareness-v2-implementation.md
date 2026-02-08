@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-06T14:10:00-08:00
 task_list: lace/feature-overhaul
 type: review
-state: live
+state: archived
 status: done
 tags: [self, architecture, test_coverage, migration_cleanup, code_quality]
 ---

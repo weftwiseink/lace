@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-07T10:00:00-08:00
 task_list: lace/feature-overhaul
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 tags: [testing, wezterm-server, feature-awareness-v2, integration-tests, ports, devcontainer-features]
 last_reviewed:
   status: revision_requested

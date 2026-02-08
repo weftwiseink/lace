@@ -3,7 +3,7 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-06T13:45:00-08:00
 type: devlog
-state: live
+state: archived
 status: done
 tags: [features, ports, templating, refactor]
 implements: cdocs/proposals/2026-02-06-lace-feature-awareness-v2.md

@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-06T11:15:00-08:00
 task_list: lace/rename-plugins-to-repo-mounts
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, refactor, naming, completeness-check, revision_review]
 ---

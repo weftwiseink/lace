@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   readDevcontainerConfig,
@@ -420,6 +420,37 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
   // Start with the template-resolved config
   let extended: Record<string, unknown> = { ...resolvedConfig };
 
+  // Rewrite build.dockerfile path to be relative to the .lace/ output directory
+  // instead of the original .devcontainer/ directory. The devcontainer CLI resolves
+  // the dockerfile path relative to the config file's location.
+  const devcontainerDir = join(workspaceFolder, ".devcontainer");
+  const laceDir = join(workspaceFolder, ".lace");
+  const build = extended.build as
+    | Record<string, unknown>
+    | undefined;
+  if (build?.dockerfile && typeof build.dockerfile === "string") {
+    const originalDockerfilePath = resolve(devcontainerDir, build.dockerfile);
+    build.dockerfile = relative(laceDir, originalDockerfilePath);
+    extended.build = build;
+  } else if (
+    extended.dockerfile &&
+    typeof extended.dockerfile === "string"
+  ) {
+    // Legacy `dockerfile` field (not nested in `build`)
+    const originalDockerfilePath = resolve(
+      devcontainerDir,
+      extended.dockerfile as string,
+    );
+    extended.dockerfile = relative(laceDir, originalDockerfilePath);
+  }
+
+  // Also rewrite build.context if it is relative (resolve from .devcontainer/, rewrite for .lace/)
+  if (build?.context && typeof build.context === "string" && !build.context.startsWith("/")) {
+    const originalContextPath = resolve(devcontainerDir, build.context);
+    build.context = relative(laceDir, originalContextPath);
+    extended.build = build;
+  }
+
   // Auto-generate port entries and merge them
   if (allocations.length > 0) {
     const generated = generatePortEntries(
@@ -459,7 +490,6 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
   }
 
   // Write extended config
-  const laceDir = join(workspaceFolder, ".lace");
   mkdirSync(laceDir, { recursive: true });
 
   const outputPath = join(laceDir, "devcontainer.json");

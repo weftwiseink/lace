@@ -1,0 +1,224 @@
+#!/bin/bash
+# wez-into -- Connect to a lace devcontainer via WezTerm.
+#
+# Usage:
+#   wez-into                    Interactive picker (fzf or bash select)
+#   wez-into <project>          Connect to named project
+#   wez-into --list             List running project names
+#   wez-into --status           Show running projects with ports and paths
+#   wez-into --dry-run <proj>   Print the wezterm connect command without executing
+#   wez-into --help             Show this help
+#
+# Prerequisites: wezterm, docker, lace-discover on PATH or at known location
+
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+
+err() { echo "${SCRIPT_NAME}: error: $*" >&2; }
+info() { echo "${SCRIPT_NAME}: $*" >&2; }
+
+# --- Locate lace-discover ---
+LACE_DISCOVER=""
+if command -v lace-discover &>/dev/null; then
+  LACE_DISCOVER="lace-discover"
+else
+  # Check known locations
+  for candidate in \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lace-discover" \
+    "$HOME/code/weft/lace/bin/lace-discover" \
+    "/var/home/$(whoami)/code/weft/lace/bin/lace-discover"; do
+    if [[ -x "$candidate" ]]; then
+      LACE_DISCOVER="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$LACE_DISCOVER" ]]; then
+  err "lace-discover not found on PATH or at known locations"
+  err "Install it or symlink to ~/.local/bin/"
+  exit 1
+fi
+
+# --- Discovery helper ---
+discover() {
+  "$LACE_DISCOVER" "$@"
+}
+
+# --- Argument parsing ---
+PROJECT=""
+ACTION=""
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --list)
+      ACTION="list"
+      shift
+      ;;
+    --status)
+      ACTION="status"
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -h|--help)
+      ACTION="help"
+      shift
+      ;;
+    -*)
+      err "unknown option: $1"
+      echo "Usage: wez-into [PROJECT] [--list] [--status] [--dry-run] [--help]" >&2
+      exit 1
+      ;;
+    *)
+      PROJECT="$1"
+      shift
+      ;;
+  esac
+done
+
+# --- Execute wezterm connect (or dry-run) ---
+do_connect() {
+  local project="$1"
+  local port="$2"
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "wezterm connect lace:$port --workspace $project"
+    exit 0
+  fi
+
+  # Check wezterm prerequisite only when actually connecting
+  if ! command -v wezterm &>/dev/null; then
+    err "wezterm not found on PATH"
+    exit 1
+  fi
+
+  info "connecting to $project on port $port..."
+  exec wezterm connect "lace:$port" --workspace "$project"
+}
+
+# --- Execute action ---
+case "$ACTION" in
+  list)
+    discover | cut -d: -f1
+    exit 0
+    ;;
+  status)
+    projects_output=$(discover)
+    if [[ -z "$projects_output" ]]; then
+      info "no running devcontainers found"
+      exit 0
+    fi
+    printf "%-20s %-8s %-10s %s\n" "PROJECT" "PORT" "USER" "PATH"
+    printf "%-20s %-8s %-10s %s\n" "-------" "----" "----" "----"
+    echo "$projects_output" | while IFS=: read -r name port user path; do
+      printf "%-20s %-8s %-10s %s\n" "$name" "$port" "$user" "$path"
+    done
+    exit 0
+    ;;
+  help)
+    cat <<'EOF'
+wez-into -- Connect to a lace devcontainer via WezTerm
+
+Usage:
+  wez-into                    Interactive picker (fzf or bash select)
+  wez-into <project>          Connect to named project
+  wez-into --list             List running project names
+  wez-into --status           Show running projects with ports and paths
+  wez-into --dry-run <proj>   Print the connect command without executing
+  wez-into --help             Show this help
+
+Projects are discovered via Docker (containers with devcontainer.local_folder
+label and SSH ports in the 22425-22499 range). Discovery is performed by
+lace-discover.
+
+Connection uses WezTerm SSH domains pre-registered by the lace.wezterm plugin:
+  wezterm connect lace:<port> --workspace <project>
+
+The --dry-run flag prints the wezterm connect command that would be executed,
+without actually running it. Useful for debugging.
+
+Examples:
+  wez-into lace               Connect to the lace devcontainer
+  wez-into dotfiles            Connect to the dotfiles devcontainer
+  wez-into                    Pick from running projects interactively
+  wez-into --list             Show names of running projects
+  wez-into --status           Show a table of running projects
+  wez-into --dry-run lace     Print the connect command for lace
+EOF
+    exit 0
+    ;;
+esac
+
+# --- Connect to a specific project ---
+if [[ -n "$PROJECT" ]]; then
+  port=""
+
+  while IFS=: read -r name p user path; do
+    if [[ "$name" == "$PROJECT" ]]; then
+      port="$p"
+      break
+    fi
+  done < <(discover)
+
+  if [[ -z "$port" ]]; then
+    err "project '$PROJECT' not found in running containers"
+    running=$(discover | cut -d: -f1)
+    if [[ -n "$running" ]]; then
+      err ""
+      err "running projects:"
+      echo "$running" | sed 's/^/  /' >&2
+    else
+      err "no running devcontainers found"
+      err "start a container with: devcontainer up --workspace-folder <path>"
+    fi
+    exit 1
+  fi
+
+  do_connect "$PROJECT" "$port"
+fi
+
+# --- Interactive picker ---
+mapfile -t PROJECTS < <(discover)
+
+if [[ ${#PROJECTS[@]} -eq 0 ]]; then
+  err "no running devcontainers found"
+  err "start a container with: devcontainer up --workspace-folder <path>"
+  exit 1
+fi
+
+if [[ ${#PROJECTS[@]} -eq 1 ]]; then
+  IFS=: read -r name port user path <<< "${PROJECTS[0]}"
+  info "one project found: $name"
+  do_connect "$name" "$port"
+fi
+
+# Multiple projects -- show picker
+if command -v fzf &>/dev/null; then
+  SELECTED=$(printf '%s\n' "${PROJECTS[@]}" | \
+    awk -F: '{printf "%-20s :%s  %s\n", $1, $2, $4}' | \
+    fzf --prompt="wez-into> " --height=10 --reverse)
+  [[ -z "$SELECTED" ]] && exit 0
+  PROJECT=$(echo "$SELECTED" | awk '{print $1}')
+else
+  PS3="wez-into> "
+  mapfile -t NAMES < <(printf '%s\n' "${PROJECTS[@]}" | cut -d: -f1)
+  select PROJECT in "${NAMES[@]}"; do
+    [[ -n "$PROJECT" ]] && break
+  done
+fi
+
+# Find port for selected project
+for proj in "${PROJECTS[@]}"; do
+  if [[ "${proj%%:*}" == "$PROJECT" ]]; then
+    IFS=: read -r _ port _ _ <<< "$proj"
+    do_connect "$PROJECT" "$port"
+  fi
+done
+
+err "internal error: selected project not found"
+exit 1

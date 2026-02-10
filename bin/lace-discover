@@ -86,10 +86,23 @@ discover_projects() {
     # Skip containers without a valid SSH port in range
     [[ -z "$ssh_port" ]] && continue
 
-    # Get container user
-    user=$(docker inspect "$container_id" --format '{{.Config.User}}' 2>/dev/null || echo "")
-    # Default to "node" if user is empty (root or unset)
-    [[ -z "$user" || "$user" == "root" ]] && user="node"
+    # Get container user from devcontainer metadata remoteUser (most reliable),
+    # falling back to Config.User, then to "node" default.
+    # Config.User is the container's default process user, which may be "root"
+    # even when the SSH-accessible user is different (e.g., "vscode").
+    user=""
+    metadata=$(docker inspect "$container_id" --format '{{index .Config.Labels "devcontainer.metadata"}}' 2>/dev/null || echo "")
+    if [[ -n "$metadata" ]]; then
+      # Extract remoteUser from the JSON metadata array
+      remote_user=$(echo "$metadata" | grep -oP '"remoteUser"\s*:\s*"\K[^"]+' || true)
+      [[ -n "$remote_user" ]] && user="$remote_user"
+    fi
+    # Fallback: Config.User
+    if [[ -z "$user" ]]; then
+      user=$(docker inspect "$container_id" --format '{{.Config.User}}' 2>/dev/null || echo "")
+      # Default to "node" if user is empty (root or unset)
+      [[ -z "$user" || "$user" == "root" ]] && user="node"
+    fi
 
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
       # Output JSON object (without trailing comma - handled by caller)

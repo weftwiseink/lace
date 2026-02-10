@@ -15,6 +15,10 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 
+# Dedicated known_hosts file for lace devcontainers.
+# Must match M.KNOWN_HOSTS_FILE in the lace.wezterm plugin.
+LACE_KNOWN_HOSTS="$HOME/.ssh/lace_known_hosts"
+
 err() { echo "${SCRIPT_NAME}: error: $*" >&2; }
 info() { echo "${SCRIPT_NAME}: $*" >&2; }
 
@@ -81,6 +85,37 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- Host key management ---
+# Refresh the host key for a port in the lace known_hosts file.
+# Removes any stale entry (from container recreation) and pre-populates
+# the current key via ssh-keyscan. This prevents WezTerm's host key trust
+# prompt entirely -- the key is already known when wezterm connect runs.
+#
+# WezTerm does NOT implement StrictHostKeyChecking, so there is no way to
+# skip the prompt via ssh_option. Pre-populating known_hosts is the only
+# mechanism available.
+refresh_host_key() {
+  local port="$1"
+
+  # Ensure the file exists (ssh-keygen -R fails on missing file)
+  mkdir -p "$(dirname "$LACE_KNOWN_HOSTS")"
+  touch "$LACE_KNOWN_HOSTS"
+
+  # Remove stale entry for this port (ignores errors if no entry exists)
+  ssh-keygen -f "$LACE_KNOWN_HOSTS" -R "[localhost]:$port" 2>/dev/null || true
+
+  # Pre-populate with the container's current host key.
+  # ssh-keyscan is lightweight and fast for localhost connections.
+  local keys
+  keys=$(ssh-keyscan -p "$port" localhost 2>/dev/null) || true
+  if [[ -n "$keys" ]]; then
+    echo "$keys" >> "$LACE_KNOWN_HOSTS"
+  else
+    # ssh-keyscan failed (container not ready?). WezTerm will prompt once.
+    info "warning: could not scan host key for port $port (container may still be starting)"
+  fi
+}
+
 # --- Execute wezterm connect (or dry-run) ---
 do_connect() {
   local project="$1"
@@ -96,6 +131,9 @@ do_connect() {
     err "wezterm not found on PATH"
     exit 1
   fi
+
+  # Pre-populate the host key so WezTerm doesn't prompt for trust
+  refresh_host_key "$port"
 
   info "connecting to $project on port $port..."
   exec wezterm connect "lace:$port" --workspace "$project"

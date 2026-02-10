@@ -4,6 +4,8 @@
 # Usage:
 #   wez-into                    Interactive picker (fzf or bash select)
 #   wez-into <project>          Connect to named project
+#   wez-into --start <project>  Start a stopped container, then connect
+#   wez-into --start            Pick from stopped containers to start
 #   wez-into --list             List running project names
 #   wez-into --status           Show running projects with ports and paths
 #   wez-into --dry-run <proj>   Print the wezterm connect command without executing
@@ -14,6 +16,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Dedicated known_hosts file for lace devcontainers.
 # Must match M.KNOWN_HOSTS_FILE in the lace.wezterm plugin.
@@ -29,7 +32,7 @@ if command -v lace-discover &>/dev/null; then
 else
   # Check known locations
   for candidate in \
-    "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lace-discover" \
+    "$SCRIPT_DIR/lace-discover" \
     "$HOME/code/weft/lace/bin/lace-discover" \
     "/var/home/$(whoami)/code/weft/lace/bin/lace-discover"; do
     if [[ -x "$candidate" ]]; then
@@ -45,18 +48,135 @@ if [[ -z "$LACE_DISCOVER" ]]; then
   exit 1
 fi
 
+# --- Locate lace CLI ---
+# Used by --start to run `lace up --workspace-folder <path>`.
+# Check co-located path first (bin/wez-into -> packages/lace/bin/lace),
+# then known locations, then PATH.
+locate_lace_cli() {
+  local candidate
+  for candidate in \
+    "$SCRIPT_DIR/../packages/lace/bin/lace" \
+    "$HOME/code/weft/lace/packages/lace/bin/lace" \
+    "/var/home/$(whoami)/code/weft/lace/packages/lace/bin/lace"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  # Fall back to PATH
+  local path_lace
+  path_lace="$(command -v lace 2>/dev/null || true)"
+  if [[ -n "$path_lace" ]]; then
+    echo "$path_lace"
+    return 0
+  fi
+  return 1
+}
+
 # --- Discovery helper ---
 discover() {
   "$LACE_DISCOVER" "$@"
+}
+
+# --- Stopped container discovery ---
+# Query Docker for stopped devcontainers with the devcontainer.local_folder label.
+# Output format: name\tworkspace_path per line
+discover_stopped() {
+  docker ps -a \
+    --filter "label=devcontainer.local_folder" \
+    --filter "status=exited" \
+    --format '{{.Label "devcontainer.local_folder"}}' 2>/dev/null \
+  | while IFS= read -r local_folder; do
+    [[ -z "$local_folder" ]] && continue
+    local name
+    name=$(basename "$local_folder")
+    printf '%s\t%s\n' "$name" "$local_folder"
+  done
+}
+
+# --- Start a stopped container and connect ---
+# Runs `lace up --workspace-folder <path>`, then re-discovers and connects.
+start_and_connect() {
+  local project="$1"
+  local workspace_path="$2"
+
+  local lace_cli
+  lace_cli="$(locate_lace_cli)" || {
+    err "lace CLI not found"
+    err "Expected at: $SCRIPT_DIR/../packages/lace/bin/lace"
+    err "Or install lace on PATH"
+    exit 1
+  }
+
+  info "starting $project via lace up --workspace-folder $workspace_path ..."
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "lace up --workspace-folder $workspace_path"
+    echo "# then: wezterm connect lace:<port> --workspace $project"
+    exit 0
+  fi
+
+  # Run lace up and capture output
+  local up_output up_exit
+  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" 2>&1) || up_exit=$?
+  up_exit=${up_exit:-0}
+
+  if [[ $up_exit -ne 0 ]]; then
+    err "lace up failed (exit $up_exit):"
+    echo "$up_output" >&2
+    exit 1
+  fi
+
+  info "container started successfully"
+  info "$up_output"
+
+  # Re-discover to get the current port (may have shifted)
+  info "re-discovering projects..."
+  local port=""
+  local attempts=0
+  local max_attempts=10
+
+  while [[ $attempts -lt $max_attempts ]]; do
+    while IFS=: read -r name p user path; do
+      if [[ "$name" == "$project" ]]; then
+        port="$p"
+        break
+      fi
+    done < <(discover)
+
+    if [[ -n "$port" ]]; then
+      break
+    fi
+
+    attempts=$((attempts + 1))
+    if [[ $attempts -lt $max_attempts ]]; then
+      info "waiting for container to be discoverable (attempt $((attempts + 1))/$max_attempts)..."
+      sleep 2
+    fi
+  done
+
+  if [[ -z "$port" ]]; then
+    err "container started but not discoverable after $max_attempts attempts"
+    err "the container may need more time to start SSH"
+    err "try: wez-into $project"
+    exit 1
+  fi
+
+  do_connect "$project" "$port"
 }
 
 # --- Argument parsing ---
 PROJECT=""
 ACTION=""
 DRY_RUN=false
+START=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --start)
+      START=true
+      shift
+      ;;
     --list)
       ACTION="list"
       shift
@@ -75,7 +195,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       err "unknown option: $1"
-      echo "Usage: wez-into [PROJECT] [--list] [--status] [--dry-run] [--help]" >&2
+      echo "Usage: wez-into [PROJECT] [--start] [--list] [--status] [--dry-run] [--help]" >&2
       exit 1
       ;;
     *)
@@ -165,6 +285,8 @@ wez-into -- Connect to a lace devcontainer via WezTerm
 Usage:
   wez-into                    Interactive picker (fzf or bash select)
   wez-into <project>          Connect to named project
+  wez-into --start <project>  Start a stopped container, then connect
+  wez-into --start            Pick from stopped containers to start
   wez-into --list             List running project names
   wez-into --status           Show running projects with ports and paths
   wez-into --dry-run <proj>   Print the connect command without executing
@@ -177,16 +299,26 @@ lace-discover.
 Connection uses WezTerm SSH domains pre-registered by the lace.wezterm plugin:
   wezterm connect lace:<port> --workspace <project>
 
-The --dry-run flag prints the wezterm connect command that would be executed,
-without actually running it. Useful for debugging.
+The --start flag starts a stopped devcontainer before connecting. It uses
+`lace up --workspace-folder <path>` for the full startup pipeline (config
+generation, port allocation, lifecycle hooks). After startup, it re-discovers
+the container and connects. If the project is already running, --start has
+no effect (it just connects).
+
+The --dry-run flag prints the command(s) that would be executed without
+actually running them. When combined with --start, it prints both the
+lace up command and the wezterm connect command.
 
 Examples:
-  wez-into lace               Connect to the lace devcontainer
+  wez-into lace                Connect to the lace devcontainer
   wez-into dotfiles            Connect to the dotfiles devcontainer
-  wez-into                    Pick from running projects interactively
-  wez-into --list             Show names of running projects
-  wez-into --status           Show a table of running projects
-  wez-into --dry-run lace     Print the connect command for lace
+  wez-into                     Pick from running projects interactively
+  wez-into --start lace        Start lace if stopped, then connect
+  wez-into --start             Pick from stopped containers to start
+  wez-into --start --dry-run lace  Show what --start would do
+  wez-into --list              Show names of running projects
+  wez-into --status            Show a table of running projects
+  wez-into --dry-run lace      Print the connect command for lace
 EOF
     exit 0
     ;;
@@ -194,6 +326,7 @@ esac
 
 # --- Connect to a specific project ---
 if [[ -n "$PROJECT" ]]; then
+  # Step 1: Check if already running
   port=""
 
   while IFS=: read -r name p user path; do
@@ -203,29 +336,175 @@ if [[ -n "$PROJECT" ]]; then
     fi
   done < <(discover)
 
-  if [[ -z "$port" ]]; then
-    err "project '$PROJECT' not found in running containers"
-    running=$(discover | cut -d: -f1)
-    if [[ -n "$running" ]]; then
-      err ""
-      err "running projects:"
-      echo "$running" | sed 's/^/  /' >&2
-    else
-      err "no running devcontainers found"
-      err "start a container with: devcontainer up --workspace-folder <path>"
+  if [[ -n "$port" ]]; then
+    # Project is running -- connect directly (even if --start was given)
+    if [[ "$START" == "true" ]]; then
+      info "$PROJECT is already running"
     fi
-    exit 1
+    do_connect "$PROJECT" "$port"
   fi
 
-  do_connect "$PROJECT" "$port"
+  # Step 2: If --start, look for stopped containers
+  if [[ "$START" == "true" ]]; then
+    workspace_path=""
+
+    while IFS=$'\t' read -r sname spath; do
+      if [[ "$sname" == "$PROJECT" ]]; then
+        workspace_path="$spath"
+        break
+      fi
+    done < <(discover_stopped)
+
+    if [[ -n "$workspace_path" ]]; then
+      start_and_connect "$PROJECT" "$workspace_path"
+    else
+      # Not found in stopped containers either
+      err "project '$PROJECT' not found in running or stopped containers"
+      stopped_output=$(discover_stopped)
+      if [[ -n "$stopped_output" ]]; then
+        err ""
+        err "stopped containers:"
+        echo "$stopped_output" | while IFS=$'\t' read -r sname spath; do
+          echo "  $sname  ($spath)" >&2
+        done
+      else
+        err "no stopped devcontainers found"
+      fi
+      err ""
+      err "to create a new container: lace up --workspace-folder <path>"
+      exit 1
+    fi
+  fi
+
+  # Not running and --start not given
+  err "project '$PROJECT' not found in running containers"
+  running=$(discover | cut -d: -f1)
+  if [[ -n "$running" ]]; then
+    err ""
+    err "running projects:"
+    echo "$running" | sed 's/^/  /' >&2
+  else
+    err "no running devcontainers found"
+  fi
+
+  # Hint about --start if there are stopped containers
+  stopped_output=$(discover_stopped)
+  if [[ -n "$stopped_output" ]]; then
+    found_in_stopped=false
+    while IFS=$'\t' read -r sname spath; do
+      if [[ "$sname" == "$PROJECT" ]]; then
+        found_in_stopped=true
+        break
+      fi
+    done <<< "$stopped_output"
+    if [[ "$found_in_stopped" == "true" ]]; then
+      err ""
+      err "hint: '$PROJECT' is stopped. Use --start to start it:"
+      err "  wez-into --start $PROJECT"
+    fi
+  fi
+  exit 1
 fi
 
 # --- Interactive picker ---
+
+if [[ "$START" == "true" ]]; then
+  # --start without a project name: show picker of stopped containers
+  # Include running containers too (they just get connected directly)
+  mapfile -t RUNNING < <(discover)
+  mapfile -t STOPPED < <(discover_stopped)
+
+  # Build combined list: running projects marked as [running], stopped as [stopped]
+  PICKER_ITEMS=()
+  PICKER_DATA=()  # parallel array: "running:name:port" or "stopped:name:path"
+
+  for proj in "${RUNNING[@]}"; do
+    IFS=: read -r name port user path <<< "$proj"
+    PICKER_ITEMS+=("$name  [running]  :$port  $path")
+    PICKER_DATA+=("running:$name:$port")
+  done
+
+  for line in "${STOPPED[@]}"; do
+    IFS=$'\t' read -r name path <<< "$line"
+    # Skip if already in running list
+    already_running=false
+    for proj in "${RUNNING[@]}"; do
+      rname="${proj%%:*}"
+      if [[ "$rname" == "$name" ]]; then
+        already_running=true
+        break
+      fi
+    done
+    if [[ "$already_running" == "false" ]]; then
+      PICKER_ITEMS+=("$name  [stopped]  $path")
+      PICKER_DATA+=("stopped:$name:$path")
+    fi
+  done
+
+  if [[ ${#PICKER_ITEMS[@]} -eq 0 ]]; then
+    err "no running or stopped devcontainers found"
+    err "to create a new container: lace up --workspace-folder <path>"
+    exit 1
+  fi
+
+  if [[ ${#PICKER_ITEMS[@]} -eq 1 ]]; then
+    IFS=: read -r kind name extra <<< "${PICKER_DATA[0]}"
+    if [[ "$kind" == "running" ]]; then
+      do_connect "$name" "$extra"
+    else
+      start_and_connect "$name" "$extra"
+    fi
+  fi
+
+  # Multiple items -- show picker
+  if command -v fzf &>/dev/null; then
+    SELECTED=$(printf '%s\n' "${PICKER_ITEMS[@]}" | \
+      fzf --prompt="wez-into --start> " --height=10 --reverse)
+    [[ -z "$SELECTED" ]] && exit 0
+    # Extract project name (first field)
+    PICK_NAME=$(echo "$SELECTED" | awk '{print $1}')
+  else
+    PS3="wez-into --start> "
+    mapfile -t DISPLAY_NAMES < <(printf '%s\n' "${PICKER_ITEMS[@]}")
+    select PICK in "${DISPLAY_NAMES[@]}"; do
+      [[ -n "$PICK" ]] && break
+    done
+    PICK_NAME=$(echo "$PICK" | awk '{print $1}')
+  fi
+
+  # Find matching entry in PICKER_DATA
+  for i in "${!PICKER_ITEMS[@]}"; do
+    item_name=$(echo "${PICKER_ITEMS[$i]}" | awk '{print $1}')
+    if [[ "$item_name" == "$PICK_NAME" ]]; then
+      IFS=: read -r kind name extra <<< "${PICKER_DATA[$i]}"
+      if [[ "$kind" == "running" ]]; then
+        do_connect "$name" "$extra"
+      else
+        start_and_connect "$name" "$extra"
+      fi
+    fi
+  done
+
+  err "internal error: selected project not found"
+  exit 1
+fi
+
+# Normal interactive picker (no --start): running containers only
 mapfile -t PROJECTS < <(discover)
 
 if [[ ${#PROJECTS[@]} -eq 0 ]]; then
   err "no running devcontainers found"
-  err "start a container with: devcontainer up --workspace-folder <path>"
+  # Check if there are stopped containers and hint about --start
+  stopped_output=$(discover_stopped)
+  if [[ -n "$stopped_output" ]]; then
+    err ""
+    err "stopped containers available (use --start to start one):"
+    echo "$stopped_output" | while IFS=$'\t' read -r sname spath; do
+      echo "  $sname  ($spath)" >&2
+    done
+  else
+    err "start a container with: lace up --workspace-folder <path>"
+  fi
   exit 1
 fi
 

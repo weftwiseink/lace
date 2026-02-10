@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-08T10:15:00-08:00
 task_list: lace/wezterm-plugin
 type: review
-state: live
+state: archived
 status: done
 tags: [self, status, completeness, accuracy]
 ---

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-08T10:00:00-08:00
 task_list: lace/wezterm-plugin
 type: report
-state: live
+state: archived
 status: done
 tags: [status, wezterm, cli, devcontainer, wez-lace-into, open-lace-workspace, discovery]
 last_reviewed:

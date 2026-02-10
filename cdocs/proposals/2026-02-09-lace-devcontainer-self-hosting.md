@@ -4,7 +4,7 @@ first_authored:
   at: "2026-02-09T12:00:00-08:00"
 task_list: devcontainer/self-hosting
 type: proposal
-state: live
+state: archived
 status: accepted
 tags: [devcontainer, lace, self-hosting, port-allocation, dogfooding, prebuild]
 last_reviewed:

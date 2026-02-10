@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-10T11:30:00-08:00
 task_list: lace/wezterm-plugin
 type: report
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [devcontainer, metadata, docker, labels, registry, ports, wez-into, discovery]
 related_to:
   - cdocs/proposals/2026-02-08-wez-into-devcontainer-cli.md

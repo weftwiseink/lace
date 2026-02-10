@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-10T00:25:00-08:00
 task_list: lace/dogfooding
 type: devlog
-state: active
+state: archived
 status: done
 tags: [rename, refactor, wezterm-server, ports, devcontainer]
 ---

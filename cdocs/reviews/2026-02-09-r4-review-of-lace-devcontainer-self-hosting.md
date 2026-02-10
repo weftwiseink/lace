@@ -5,7 +5,7 @@ first_authored:
   at: "2026-02-09T10:00:00-08:00"
 task_list: devcontainer/self-hosting
 type: review
-state: live
+state: archived
 status: done
 tags: [self, rereview_agent, prebuild_split, port-allocation, implementation_verification]
 ---

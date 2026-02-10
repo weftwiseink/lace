@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-09T14:00:00-08:00
 task_list: lace/wezterm-plugin
 type: devlog
-state: live
+state: archived
 status: done
 tags: [proposal-amendment, scope-change, wez-into, cdocs]
 ---

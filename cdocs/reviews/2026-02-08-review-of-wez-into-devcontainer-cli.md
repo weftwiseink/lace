@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-08T10:45:00-08:00
 task_list: lace/wezterm-plugin
 type: review
-state: live
+state: archived
 status: done
 tags: [self, architecture, nushell, chezmoi, deployment, implementation_feasibility]
 ---

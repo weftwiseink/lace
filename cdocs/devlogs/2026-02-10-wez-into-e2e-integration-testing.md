@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-10T11:00:00-08:00
 task_list: lace/dogfooding
 type: devlog
-state: live
+state: archived
 status: done
 tags: [integration-testing, wez-into, devcontainer, discovery, ports, dogfooding, end-to-end]
 ---

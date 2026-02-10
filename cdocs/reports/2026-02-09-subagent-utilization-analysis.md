@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-09T11:00:00-08:00
 task_list: lace/meta
 type: report
-state: live
-status: final
+state: archived
+status: done
 tags: [meta, overseer, subagent, process, retrospective, cdocs]
 ---
 

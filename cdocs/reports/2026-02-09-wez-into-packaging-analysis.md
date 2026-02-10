@@ -3,7 +3,7 @@ first_authored:
   by: "@claude-opus-4-6"
   at: 2026-02-09T12:00:00-08:00
 type: report
-state: live
+state: archived
 status: done
 tags: [analysis, wez-into, packaging, nushell, chezmoi, distribution, cli, dotfiles]
 related_to:

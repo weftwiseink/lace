@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-09T12:00:00-08:00
 task_list: lace/wezterm-plugin
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, chezmoi, nushell, module_semantics, r2_confirmation]
 ---

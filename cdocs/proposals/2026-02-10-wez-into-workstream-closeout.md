@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-10T18:00:00-08:00
 task_list: lace/wezterm-plugin
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: accepted
 tags: [wez-into, closeout, nushell, cli, devcontainer, workstream-tracking]
 related_to:
   - cdocs/proposals/2026-02-08-wez-into-devcontainer-cli.md

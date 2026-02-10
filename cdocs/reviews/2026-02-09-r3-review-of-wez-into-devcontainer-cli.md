@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-09T14:00:00-08:00
 task_list: lace/wezterm-plugin
 type: review
-state: live
+state: archived
 status: done
 tags: [self, r3_scope_change, architecture, implementation_status, test_plan, consistency]
 ---

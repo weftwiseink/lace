@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-08T10:30:00-08:00
 task_list: lace/wezterm-plugin
 type: proposal
-state: live
-status: implementation_accepted
+state: archived
+status: accepted
 tags: [wezterm, cli, devcontainer, nushell, bash, discovery, developer-experience]
 last_reviewed:
   status: accepted
@@ -41,6 +41,8 @@ related_to:
 > BLUF: Add a `wez-into` command that lets the user type `wez-into lace` or `wez-into dotfiles` from any terminal to open a WezTerm window connected to that project's devcontainer. The command delegates to `lace-discover` for Docker-based container discovery and `wezterm connect lace:PORT` for the connection. It provides an interactive picker when invoked without arguments, supports `--start` for launching stopped containers, and ships as both a bash script (primary) and a nushell custom command with tab completions. This supersedes the `wez-lace-into` script in the lace repo, which serves the same purpose but is not on PATH and is coupled to the lace project namespace. The key prerequisite is migrating the lace devcontainer from port 2222 to port 22425 (tracked separately).
 >
 > NOTE (R3): The script now lives in the lace repo at `bin/wez-into` rather than in dotfiles deployed via chezmoi. The dotfiles nushell `env.nu` adds `lace/bin` to PATH directly. This is intentional -- `wez-into` will eventually grow into a larger tool within the lace project itself. Chezmoi packaging has been removed from scope.
+>
+> NOTE (Archive): Phase 2 (nushell module) was cancelled -- bash-only approach was sufficient. Phase 3 (--start flag) was implemented using `lace up` with Docker label-based workspace path detection. Phases 4-5 (picker integration and deployment) are complete. All work verified end-to-end on 2026-02-10.
 
 ## Objective
 

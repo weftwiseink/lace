@@ -93,7 +93,7 @@ discover_projects() {
 
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
       # Output JSON object (without trailing comma - handled by caller)
-      printf '{"name":"%s","port":%d,"user":"%s","path":"%s","container_id":"%s"}' \
+      printf '{"name":"%s","port":%d,"user":"%s","path":"%s","container_id":"%s"}\n' \
         "$name" "$ssh_port" "$user" "$local_folder" "$container_id"
     else
       # Output text format

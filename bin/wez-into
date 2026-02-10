@@ -116,21 +116,29 @@ start_and_connect() {
     exit 0
   fi
 
-  # Run lace up and capture output
+  # Run lace up and capture output.
+  # --skip-metadata-validation: some third-party features (e.g., nushell) lack
+  # OCI metadata annotations. Since we are restarting an existing container (not
+  # creating a new one), metadata validation is not critical.
+  #
+  # Note: lace up may exit non-zero even when the container starts successfully,
+  # e.g. if postStartCommand fails (CWD mismatch, transient error). In that case
+  # the container is running but lace up reports failure. We log the warning and
+  # proceed to discovery -- if the container is actually running and discoverable,
+  # we connect anyway.
   local up_output up_exit
-  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" 2>&1) || up_exit=$?
+  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" --skip-metadata-validation 2>&1) || up_exit=$?
   up_exit=${up_exit:-0}
 
   if [[ $up_exit -ne 0 ]]; then
-    err "lace up failed (exit $up_exit):"
-    echo "$up_output" >&2
-    exit 1
+    info "warning: lace up exited with code $up_exit (container may still have started)"
+    info "lace up output:"
+    echo "$up_output" | head -20 >&2
+  else
+    info "container started successfully"
   fi
 
-  info "container started successfully"
-  info "$up_output"
-
-  # Re-discover to get the current port (may have shifted)
+  # Re-discover to get the current port (may have shifted after restart)
   info "re-discovering projects..."
   local port=""
   local attempts=0
@@ -156,8 +164,14 @@ start_and_connect() {
   done
 
   if [[ -z "$port" ]]; then
-    err "container started but not discoverable after $max_attempts attempts"
-    err "the container may need more time to start SSH"
+    if [[ $up_exit -ne 0 ]]; then
+      err "lace up failed and container is not discoverable"
+      err "full lace up output:"
+      echo "$up_output" >&2
+    else
+      err "container started but not discoverable after $max_attempts attempts"
+      err "the container may need more time to start SSH"
+    fi
     err "try: wez-into $project"
     exit 1
   fi

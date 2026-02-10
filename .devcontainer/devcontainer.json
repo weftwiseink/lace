@@ -57,18 +57,31 @@
         },
         "git.repositoryScanMaxDepth": 2
       }
+    },
+    // Lace self-hosting: prebuild stable features into the base image layer.
+    // git and sshd are baked in via prebuild; port-declaring features (wezterm-server)
+    // stay in the features block for lace up auto-injection to work.
+    "lace": {
+      "prebuildFeatures": {
+        "ghcr.io/devcontainers/features/git:1": {},
+        "ghcr.io/devcontainers/features/sshd:1": {}
+      }
     }
   },
-  // Expose sshd port for WezTerm SSH domain multiplexing
-  // See docs/proposals/wezterm_devcontainer_multiplexing.md
-  "appPort": ["2222:2222"],
+  // Port mapping for SSH domain multiplexing. lace up resolves the template
+  // to a port in 22425-22499 range, mapping it to container port 2222 (where sshd listens).
+  // Asymmetric: host port is in lace range, container port stays at sshd default.
+  "appPort": ["${lace.port(wezterm-server/sshPort)}:2222"],
   "mounts": [
     // TODO: Generalize
     "source=${localEnv:HOME}/code/dev_records/weft/bash/history,target=/commandhistory,type=bind",
     "source=${localEnv:HOME}/code/dev_records/weft/claude,target=/home/node/.claude,type=bind",
-    // SSH public key for WezTerm SSH domain access (host → container)
+    // SSH public key for WezTerm SSH domain access (host -> container)
     // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""
-    "source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
+    "source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
+    // Container-side wezterm config for mux server (sets default_cwd)
+    // Bind mount instead of Dockerfile COPY so changes take effect without rebuild
+    "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
@@ -79,9 +92,10 @@
   "postCreateCommand": "git config --global --add safe.directory '*'",
   // Start wezterm mux daemon for SSH domain multiplexing (sshd is started by the sshd feature)
   "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true",
+  // Project-specific features installed at container build time.
+  // wezterm-server MUST be here (not in prebuildFeatures) because
+  // lace up auto-injection reads port metadata only from the features block.
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/sshd:1": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
     "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
     "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},

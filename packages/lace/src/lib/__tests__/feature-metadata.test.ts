@@ -47,12 +47,12 @@ const weztermMetadata: FeatureMetadata = {
   id: "wezterm-server",
   version: "1.0.0",
   options: {
-    sshPort: { type: "string", default: "2222" },
+    hostSshPort: { type: "string", default: "2222" },
   },
   customizations: {
     lace: {
       ports: {
-        sshPort: { label: "wezterm ssh", onAutoForward: "silent" },
+        hostSshPort: { label: "wezterm ssh", onAutoForward: "silent" },
       },
     },
   },
@@ -301,7 +301,7 @@ describe("extractLaceCustomizations", () => {
 
     expect(result).toEqual({
       ports: {
-        sshPort: {
+        hostSshPort: {
           label: "wezterm ssh",
           onAutoForward: "silent",
           requireLocalPort: undefined,
@@ -435,12 +435,12 @@ describe("validateFeatureOptions", () => {
     const metadata: FeatureMetadata = {
       id: "wezterm-server",
       version: "1.0.0",
-      options: { sshPort: { type: "string" } },
+      options: { hostSshPort: { type: "string" } },
     };
 
     const result = validateFeatureOptions(
       "wezterm-server",
-      { sshPort: "22430" },
+      { hostSshPort: "22430" },
       metadata,
     );
 
@@ -452,12 +452,12 @@ describe("validateFeatureOptions", () => {
     const metadata: FeatureMetadata = {
       id: "wezterm-server",
       version: "1.0.0",
-      options: { sshPort: { type: "string" } },
+      options: { hostSshPort: { type: "string" } },
     };
 
     const result = validateFeatureOptions(
       "wezterm-server",
-      { sshPort: "22430", bogusOpt: "true" },
+      { hostSshPort: "22430", bogusOpt: "true" },
       metadata,
     );
 
@@ -467,7 +467,7 @@ describe("validateFeatureOptions", () => {
     expect(result.errors[0].optionName).toBe("bogusOpt");
     expect(result.errors[0].featureId).toBe("wezterm-server");
     expect(result.errors[0].message).toContain("bogusOpt");
-    expect(result.errors[0].message).toContain("sshPort");
+    expect(result.errors[0].message).toContain("hostSshPort");
   });
 
   // Scenario 16: Empty provided options
@@ -475,7 +475,7 @@ describe("validateFeatureOptions", () => {
     const metadata: FeatureMetadata = {
       id: "wezterm-server",
       version: "1.0.0",
-      options: { sshPort: { type: "string" } },
+      options: { hostSshPort: { type: "string" } },
     };
 
     const result = validateFeatureOptions("wezterm-server", {}, metadata);
@@ -510,9 +510,9 @@ describe("validatePortDeclarations", () => {
     const metadata: FeatureMetadata = {
       id: "wezterm-server",
       version: "1.0.0",
-      options: { sshPort: { type: "string" } },
+      options: { hostSshPort: { type: "string" } },
       customizations: {
-        lace: { ports: { sshPort: { label: "wezterm ssh" } } },
+        lace: { ports: { hostSshPort: { label: "wezterm ssh" } } },
       },
     };
 
@@ -526,7 +526,7 @@ describe("validatePortDeclarations", () => {
     const metadata: FeatureMetadata = {
       id: "wezterm-server",
       version: "1.0.0",
-      options: { sshPort: { type: "string" } },
+      options: { hostSshPort: { type: "string" } },
       customizations: {
         lace: { ports: { ssh: { label: "wezterm ssh" } } },
       },
@@ -543,7 +543,7 @@ describe("validatePortDeclarations", () => {
     expect(result.errors[0].message).toContain(
       "does not match any option",
     );
-    expect(result.errors[0].message).toContain("sshPort");
+    expect(result.errors[0].message).toContain("hostSshPort");
   });
 
   // Scenario 20: No port declarations

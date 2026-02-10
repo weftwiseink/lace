@@ -40,12 +40,12 @@ const weztermMetadata: FeatureMetadata = {
   id: "wezterm-server",
   version: "1.0.0",
   options: {
-    sshPort: { type: "string", default: "2222" },
+    hostSshPort: { type: "string", default: "2222" },
   },
   customizations: {
     lace: {
       ports: {
-        sshPort: { label: "wezterm ssh" },
+        hostSshPort: { label: "wezterm ssh" },
       },
     },
   },
@@ -228,7 +228,7 @@ describe("autoInjectPortTemplates", () => {
 
     const injected = autoInjectPortTemplates(config, metadataMap);
 
-    expect(injected).toEqual(["wezterm-server/sshPort"]);
+    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
     const features = config.features as Record<
       string,
       Record<string, unknown>
@@ -236,8 +236,8 @@ describe("autoInjectPortTemplates", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
-    ).toBe("${lace.port(wezterm-server/sshPort)}");
+      ].hostSshPort,
+    ).toBe("${lace.port(wezterm-server/hostSshPort)}");
   });
 
   // Scenario 1a: User-provided static value prevents auto-injection
@@ -245,7 +245,7 @@ describe("autoInjectPortTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "3333",
+          hostSshPort: "3333",
         },
       },
     };
@@ -266,7 +266,7 @@ describe("autoInjectPortTemplates", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe("3333");
   });
 
@@ -275,7 +275,7 @@ describe("autoInjectPortTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
     };
@@ -344,7 +344,7 @@ describe("autoInjectPortTemplates", () => {
     const injected = autoInjectPortTemplates(config, metadataMap);
 
     expect(injected).toHaveLength(2);
-    expect(injected).toContain("wezterm-server/sshPort");
+    expect(injected).toContain("wezterm-server/hostSshPort");
     expect(injected).toContain("debug-proxy/debugPort");
   });
 
@@ -375,7 +375,7 @@ describe("autoInjectPortTemplates", () => {
 
     const injected = autoInjectPortTemplates(config, metadataMap);
 
-    expect(injected).toEqual(["wezterm-server/sshPort"]);
+    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
     const features = config.features as Record<
       string,
       Record<string, unknown>
@@ -386,7 +386,7 @@ describe("autoInjectPortTemplates", () => {
       ];
     expect(opts.enableTls).toBe(true);
     expect(opts.maxConnections).toBe(10);
-    expect(opts.sshPort).toBe("${lace.port(wezterm-server/sshPort)}");
+    expect(opts.hostSshPort).toBe("${lace.port(wezterm-server/hostSshPort)}");
   });
 
   // T1: autoInjectPortTemplates with prebuild feature (asymmetric)
@@ -417,15 +417,15 @@ describe("autoInjectPortTemplates", () => {
       prebuildFeatures[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
       ],
-    ).toEqual({}); // no sshPort injected into feature options
+    ).toEqual({}); // no hostSshPort injected into feature options
 
     // Asymmetric appPort entry should be injected
     const appPort = config.appPort as string[];
     expect(appPort).toHaveLength(1);
-    expect(appPort[0]).toBe("${lace.port(wezterm-server/sshPort)}:2222");
+    expect(appPort[0]).toBe("${lace.port(wezterm-server/hostSshPort)}:2222");
 
     // Return value includes the label
-    expect(injected).toEqual(["wezterm-server/sshPort"]);
+    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
   });
 
   // T2: autoInjectPortTemplates with prebuild feature, user-provided value
@@ -435,7 +435,7 @@ describe("autoInjectPortTemplates", () => {
         lace: {
           prebuildFeatures: {
             "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              sshPort: "3333",
+              hostSshPort: "3333",
             },
           },
         },
@@ -488,7 +488,7 @@ describe("autoInjectPortTemplates", () => {
     const injected = autoInjectPortTemplates(config, metadataMap);
 
     // Only wezterm-server (in features block) gets symmetric injection
-    expect(injected).toEqual(["wezterm-server/sshPort"]);
+    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
     const features = config.features as Record<
       string,
       Record<string, unknown>
@@ -496,8 +496,8 @@ describe("autoInjectPortTemplates", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
-    ).toBe("${lace.port(wezterm-server/sshPort)}");
+      ].hostSshPort,
+    ).toBe("${lace.port(wezterm-server/hostSshPort)}");
 
     // No appPort injection (prebuild features have no port metadata)
     expect(config.appPort).toBeUndefined();
@@ -512,7 +512,7 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
     };
@@ -524,17 +524,17 @@ describe("resolveTemplates", () => {
       string,
       Record<string, unknown>
     >;
-    const sshPort =
+    const hostSshPort =
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort;
+      ].hostSshPort;
 
     // Type coercion: entire string is a single template -> integer
-    expect(typeof sshPort).toBe("number");
-    expect(sshPort).toBeGreaterThanOrEqual(22425);
-    expect(sshPort).toBeLessThanOrEqual(22499);
+    expect(typeof hostSshPort).toBe("number");
+    expect(hostSshPort).toBeGreaterThanOrEqual(22425);
+    expect(hostSshPort).toBeLessThanOrEqual(22499);
     expect(result.allocations).toHaveLength(1);
-    expect(result.allocations[0].label).toBe("wezterm-server/sshPort");
+    expect(result.allocations[0].label).toBe("wezterm-server/hostSshPort");
   });
 
   // Scenario 2: Embedded template (asymmetric mapping)
@@ -542,10 +542,10 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "2222",
+          hostSshPort: "2222",
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
@@ -556,7 +556,7 @@ describe("resolveTemplates", () => {
     expect(typeof appPort[0]).toBe("string");
     expect(result.allocations).toHaveLength(1);
 
-    // sshPort stays literal
+    // hostSshPort stays literal
     const features = result.resolvedConfig.features as Record<
       string,
       Record<string, unknown>
@@ -564,7 +564,7 @@ describe("resolveTemplates", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe("2222");
   });
 
@@ -573,10 +573,10 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
@@ -589,7 +589,7 @@ describe("resolveTemplates", () => {
     const resolvedSshPort =
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort as number;
+      ].hostSshPort as number;
     const appPort = result.resolvedConfig.appPort as string[];
     const resolvedAppPort = parseInt(appPort[0].split(":")[0], 10);
 
@@ -603,7 +603,7 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
         "ghcr.io/weftwiseink/devcontainer-features/debug-proxy:1": {
           debugPort: "${lace.port(debug-proxy/debugPort)}",
@@ -624,7 +624,7 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
       remoteEnv: {
@@ -716,7 +716,7 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
           enableTls: true,
           maxConnections: 10,
         },
@@ -736,7 +736,7 @@ describe("resolveTemplates", () => {
       ];
     expect(opts.enableTls).toBe(true);
     expect(opts.maxConnections).toBe(10);
-    expect(typeof opts.sshPort).toBe("number");
+    expect(typeof opts.hostSshPort).toBe("number");
   });
 
   // Scenario 11: Nested objects and arrays are walked
@@ -744,13 +744,13 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
       customizations: {
         vscode: {
           settings: {
-            "myExtension.port": "${lace.port(wezterm-server/sshPort)}",
+            "myExtension.port": "${lace.port(wezterm-server/hostSshPort)}",
           },
         },
       },
@@ -763,10 +763,10 @@ describe("resolveTemplates", () => {
       string,
       Record<string, unknown>
     >;
-    const sshPort =
+    const hostSshPort =
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort as number;
+      ].hostSshPort as number;
 
     const customizations = result.resolvedConfig.customizations as Record<
       string,
@@ -776,7 +776,7 @@ describe("resolveTemplates", () => {
       "myExtension.port"
     ] as number;
 
-    expect(sshPort).toBe(extPort);
+    expect(hostSshPort).toBe(extPort);
     // Only one allocation despite two locations
     expect(result.allocations).toHaveLength(1);
   });
@@ -786,14 +786,14 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(sshPort)}",
+          hostSshPort: "${lace.port(hostSshPort)}",
         },
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
     await expect(resolveTemplates(config, allocator)).rejects.toThrow(
-      /Invalid port label "sshPort"\. Expected format: featureId\/optionName/,
+      /Invalid port label "hostSshPort"\. Expected format: featureId\/optionName/,
     );
   });
 
@@ -838,12 +838,12 @@ describe("resolveTemplates", () => {
         lace: {
           prebuildFeatures: {
             "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              sshPort: "2222",
+              hostSshPort: "2222",
             },
           },
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
@@ -853,7 +853,7 @@ describe("resolveTemplates", () => {
     const appPort = result.resolvedConfig.appPort as string[];
     expect(appPort[0]).toMatch(/^224\d{2}:2222$/);
     expect(result.allocations).toHaveLength(1);
-    expect(result.allocations[0].label).toBe("wezterm-server/sshPort");
+    expect(result.allocations[0].label).toBe("wezterm-server/hostSshPort");
     expect(result.allocations[0].port).toBeGreaterThanOrEqual(22425);
     expect(result.allocations[0].port).toBeLessThanOrEqual(22499);
   });
@@ -878,13 +878,13 @@ describe("resolveTemplates", () => {
 
     // Step 1: auto-inject
     const injected = autoInjectPortTemplates(config, metadataMap);
-    expect(injected).toEqual(["wezterm-server/sshPort"]);
+    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
 
     // Verify injection produced asymmetric appPort template
     const appPortAfterInjection = config.appPort as string[];
     expect(appPortAfterInjection).toHaveLength(1);
     expect(appPortAfterInjection[0]).toBe(
-      "${lace.port(wezterm-server/sshPort)}:2222",
+      "${lace.port(wezterm-server/hostSshPort)}:2222",
     );
 
     // Step 2: resolve
@@ -897,7 +897,7 @@ describe("resolveTemplates", () => {
 
     // Allocation produced
     expect(result.allocations).toHaveLength(1);
-    expect(result.allocations[0].label).toBe("wezterm-server/sshPort");
+    expect(result.allocations[0].label).toBe("wezterm-server/hostSshPort");
   });
 
   // T6: buildFeatureIdMap collision across blocks
@@ -905,7 +905,7 @@ describe("resolveTemplates", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/org-a/devcontainer-features/wezterm-server:1": {
-          sshPort: "${lace.port(wezterm-server/sshPort)}",
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
       customizations: {
@@ -931,7 +931,7 @@ describe("generatePortEntries", () => {
   it("generates all entries when user has none", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
@@ -944,7 +944,7 @@ describe("generatePortEntries", () => {
     expect(result.forwardPorts).toEqual([22430]);
     expect(result.portsAttributes).toEqual({
       "22430": {
-        label: "wezterm-server/sshPort (lace)",
+        label: "wezterm-server/hostSshPort (lace)",
         requireLocalPort: true,
       },
     });
@@ -954,7 +954,7 @@ describe("generatePortEntries", () => {
   it("suppresses appPort when user already has one for that port", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
@@ -974,7 +974,7 @@ describe("generatePortEntries", () => {
   it("suppresses portsAttributes when user provides them", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
@@ -994,13 +994,13 @@ describe("generatePortEntries", () => {
   it("uses feature metadata label in portsAttributes", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
     ];
     const featurePortMetadata = new Map([
-      ["wezterm-server/sshPort", { label: "wezterm ssh" }],
+      ["wezterm-server/hostSshPort", { label: "wezterm ssh" }],
     ]);
 
     const result = generatePortEntries(
@@ -1019,7 +1019,7 @@ describe("generatePortEntries", () => {
   it("suppresses forwardPorts when user provides them", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
@@ -1036,7 +1036,7 @@ describe("generatePortEntries", () => {
   it("generates entries for multiple allocations", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
@@ -1067,14 +1067,14 @@ describe("generatePortEntries", () => {
   it("uses requireLocalPort from feature metadata", () => {
     const allocations: PortAllocation[] = [
       {
-        label: "wezterm-server/sshPort",
+        label: "wezterm-server/hostSshPort",
         port: 22430,
         assignedAt: "2026-02-06T00:00:00.000Z",
       },
     ];
     const featurePortMetadata = new Map([
       [
-        "wezterm-server/sshPort",
+        "wezterm-server/hostSshPort",
         { label: "wezterm ssh", requireLocalPort: false },
       ],
     ]);
@@ -1167,7 +1167,7 @@ describe("buildFeaturePortMetadata", () => {
     const result = buildFeaturePortMetadata(metadataMap);
 
     expect(result.size).toBe(1);
-    expect(result.get("wezterm-server/sshPort")).toEqual({
+    expect(result.get("wezterm-server/hostSshPort")).toEqual({
       label: "wezterm ssh",
       requireLocalPort: undefined,
     });
@@ -1251,7 +1251,7 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
         lace: {
           prebuildFeatures: {
             "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              sshPort: "2222",
+              hostSshPort: "2222",
             },
           },
         },
@@ -1272,7 +1272,7 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("wezterm-server");
-    expect(warnings[0]).toContain("sshPort");
+    expect(warnings[0]).toContain("hostSshPort");
     expect(warnings[0]).toContain("no appPort entry");
     expect(warnings[0]).toContain("static value");
   });
@@ -1286,7 +1286,7 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
           },
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
     const metadataMap = new Map<string, FeatureMetadata | null>([
       [
@@ -1298,7 +1298,7 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
     const warnings = warnPrebuildPortFeaturesStaticPort(
       config,
       metadataMap,
-      ["wezterm-server/sshPort"], // auto-injection happened
+      ["wezterm-server/hostSshPort"], // auto-injection happened
     );
 
     expect(warnings).toEqual([]);
@@ -1310,12 +1310,12 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
         lace: {
           prebuildFeatures: {
             "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              sshPort: "2222",
+              hostSshPort: "2222",
             },
           },
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
     const metadataMap = new Map<string, FeatureMetadata | null>([
       [

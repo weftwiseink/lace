@@ -581,13 +581,13 @@ const weztermMetadata: FeatureMetadata = {
   version: "1.1.0",
   options: {
     version: { type: "string", default: "20240203-110809-5046fc22" },
-    sshPort: { type: "string", default: "2222" },
+    hostSshPort: { type: "string", default: "2222" },
     createRuntimeDir: { type: "boolean", default: true },
   },
   customizations: {
     lace: {
       ports: {
-        sshPort: {
+        hostSshPort: {
           label: "wezterm ssh",
           onAutoForward: "silent",
           requireLocalPort: true,
@@ -678,7 +678,7 @@ const FEATURES_CONFIG_JSON = JSON.stringify(
     build: { dockerfile: "Dockerfile" },
     features: {
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-        sshPort: "22430",
+        hostSshPort: "22430",
       },
     },
   },
@@ -691,7 +691,7 @@ const FEATURES_WITH_UNKNOWN_OPTION_JSON = JSON.stringify(
     build: { dockerfile: "Dockerfile" },
     features: {
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-        sshPort: "22430",
+        hostSshPort: "22430",
         bogusOpt: "true",
       },
     },
@@ -803,12 +803,12 @@ describe("lace up: metadata validation -- port key mismatch", () => {
       id: "wezterm-server",
       version: "1.0.0",
       options: {
-        sshPort: { type: "string", default: "2222" },
+        hostSshPort: { type: "string", default: "2222" },
       },
       customizations: {
         lace: {
           ports: {
-            ssh: { label: "wezterm ssh" }, // WRONG: key should be "sshPort"
+            ssh: { label: "wezterm ssh" }, // WRONG: key should be "hostSshPort"
           },
         },
       },
@@ -869,7 +869,7 @@ const EXPLICIT_STATIC_CONFIG_JSON = JSON.stringify(
     image: "mcr.microsoft.com/devcontainers/base:ubuntu",
     features: {
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-        sshPort: "3333",
+        hostSshPort: "3333",
       },
     },
   },
@@ -882,7 +882,7 @@ const EXPLICIT_TEMPLATE_CONFIG_JSON = JSON.stringify(
     image: "mcr.microsoft.com/devcontainers/base:ubuntu",
     features: {
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-        sshPort: "${lace.port(wezterm-server/sshPort)}",
+        hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
       },
     },
   },
@@ -895,10 +895,10 @@ const ASYMMETRIC_APPPORT_CONFIG_JSON = JSON.stringify(
     image: "mcr.microsoft.com/devcontainers/base:ubuntu",
     features: {
       "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-        sshPort: "2222",
+        hostSshPort: "2222",
       },
     },
-    appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+    appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
   },
   null,
   2,
@@ -954,7 +954,7 @@ describe("lace up: auto-inject port templates from metadata", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe(port);
 
     // Symmetric appPort
@@ -975,7 +975,7 @@ describe("lace up: auto-inject port templates from metadata", () => {
     expect(existsSync(assignmentsPath)).toBe(true);
     const assignments = JSON.parse(readFileSync(assignmentsPath, "utf-8"));
     expect(
-      assignments.assignments["wezterm-server/sshPort"].port,
+      assignments.assignments["wezterm-server/hostSshPort"].port,
     ).toBe(port);
   });
 });
@@ -1010,7 +1010,7 @@ describe("lace up: user static value prevents auto-injection", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe("3333");
 
     // No auto-generated appPort
@@ -1048,7 +1048,7 @@ describe("lace up: explicit template same as auto-injection", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe(port);
 
     // Symmetric entries generated
@@ -1077,7 +1077,7 @@ describe("lace up: asymmetric appPort suppresses auto-generated entry", () => {
       readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
     );
 
-    // sshPort stays literal "2222" (user provided static value)
+    // hostSshPort stays literal "2222" (user provided static value)
     const features = extended.features as Record<
       string,
       Record<string, unknown>
@@ -1085,7 +1085,7 @@ describe("lace up: asymmetric appPort suppresses auto-generated entry", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe("2222");
 
     // appPort has user's asymmetric mapping (resolved)
@@ -1160,12 +1160,12 @@ describe("lace up: metadata unavailable with skip-metadata-validation", () => {
     expect(
       features[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].sshPort,
+      ].hostSshPort,
     ).toBe(port);
 
     // portsAttributes uses label fallback (no metadata to enrich)
     expect(extended.portsAttributes?.[String(port)]?.label).toBe(
-      "wezterm-server/sshPort (lace)",
+      "wezterm-server/hostSshPort (lace)",
     );
 
     warnSpy.mockRestore();
@@ -1196,12 +1196,12 @@ const PREBUILD_WEZTERM_EXPLICIT_APPPORT_JSON = JSON.stringify(
       lace: {
         prebuildFeatures: {
           "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-            sshPort: "2222",
+            hostSshPort: "2222",
           },
         },
       },
     },
-    appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+    appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
   },
   null,
   2,
@@ -1310,10 +1310,10 @@ describe("lace up: T9 -- prebuild feature with ports, full pipeline (asymmetric)
     expect(existsSync(assignmentsPath)).toBe(true);
     const assignments = JSON.parse(readFileSync(assignmentsPath, "utf-8"));
     expect(
-      assignments.assignments["wezterm-server/sshPort"].port,
+      assignments.assignments["wezterm-server/hostSshPort"].port,
     ).toBe(port);
 
-    // Prebuild feature option sshPort should NOT be in the generated config's prebuild block
+    // Prebuild feature option hostSshPort should NOT be in the generated config's prebuild block
     const prebuildFeatures = (
       extended.customizations as Record<string, Record<string, unknown>>
     )?.lace?.prebuildFeatures as Record<string, Record<string, unknown>> | undefined;
@@ -1321,7 +1321,7 @@ describe("lace up: T9 -- prebuild feature with ports, full pipeline (asymmetric)
       const weztermOpts = prebuildFeatures[
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
       ];
-      expect(weztermOpts?.sshPort).toBeUndefined();
+      expect(weztermOpts?.hostSshPort).toBeUndefined();
     }
   });
 });

@@ -71,7 +71,7 @@
   // Port mapping for SSH domain multiplexing. lace up resolves the template
   // to a port in 22425-22499 range, mapping it to container port 2222 (where sshd listens).
   // Asymmetric: host port is in lace range, container port stays at sshd default.
-  "appPort": ["${lace.port(wezterm-server/sshPort)}:2222"],
+  "appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"],
   "mounts": [
     // TODO: Generalize
     "source=${localEnv:HOME}/code/dev_records/weft/bash/history,target=/commandhistory,type=bind",

@@ -51,16 +51,16 @@ describe("Scenario S1: explicit port template in appPort", () => {
     const featurePath = symlinkLocalFeature(ctx, "wezterm-server");
 
     // Setup: devcontainer.json with explicit ${lace.port()} in appPort
-    // User provides sshPort: "2222" statically (auto-injection suppressed)
+    // User provides hostSshPort: "2222" statically (auto-injection suppressed)
     // and an explicit appPort with the template for asymmetric mapping
     const config = {
       image: "mcr.microsoft.com/devcontainers/base:ubuntu",
       features: {
         [featurePath]: {
-          sshPort: "2222",
+          hostSshPort: "2222",
         },
       },
-      appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
     };
 
     writeDevcontainerJson(ctx, config);
@@ -87,12 +87,12 @@ describe("Scenario S1: explicit port template in appPort", () => {
     // Assert: no symmetric appPort entry (suppressed by user's asymmetric entry)
     expect(extended.appPort).not.toContain(`${port}:${port}`);
 
-    // Assert: sshPort option stays "2222" (user set it, not overwritten)
+    // Assert: hostSshPort option stays "2222" (user set it, not overwritten)
     const features = extended.features as Record<
       string,
       Record<string, unknown>
     >;
-    expect(features[featurePath].sshPort).toBe("2222");
+    expect(features[featurePath].hostSshPort).toBe("2222");
 
     // Assert: forwardPorts and portsAttributes are auto-generated
     expect(extended.forwardPorts).toContain(port);
@@ -106,17 +106,17 @@ describe("Scenario S1: explicit port template in appPort", () => {
 
     // Assert: port-assignments.json persisted
     const assignments = readPortAssignments(ctx);
-    expect(assignments["wezterm-server/sshPort"].port).toBe(port);
+    expect(assignments["wezterm-server/hostSshPort"].port).toBe(port);
   });
 });
 
 // ── S2: Auto-injection mode -- zero-config port allocation ──
 
 describe("Scenario S2: auto-injection from feature metadata", () => {
-  it("auto-injects sshPort template, allocates port, generates symmetric config", async () => {
+  it("auto-injects hostSshPort template, allocates port, generates symmetric config", async () => {
     const featurePath = symlinkLocalFeature(ctx, "wezterm-server");
 
-    // Setup: devcontainer.json with NO explicit sshPort or appPort
+    // Setup: devcontainer.json with NO explicit hostSshPort or appPort
     const config = {
       image: "mcr.microsoft.com/devcontainers/base:ubuntu",
       features: {
@@ -159,11 +159,11 @@ describe("Scenario S2: auto-injection from feature metadata", () => {
       string,
       Record<string, unknown>
     >;
-    expect(features[featurePath].sshPort).toBe(port);
+    expect(features[featurePath].hostSshPort).toBe(port);
 
     // Assert: port-assignments.json persisted
     const assignments = readPortAssignments(ctx);
-    expect(assignments["wezterm-server/sshPort"].port).toBe(port);
+    expect(assignments["wezterm-server/hostSshPort"].port).toBe(port);
   });
 });
 
@@ -206,10 +206,10 @@ describe.skipIf(!isDockerAvailable())(
         features: {
           "ghcr.io/devcontainers/features/sshd:1": {},
           [featurePath]: {
-            sshPort: "2222",
+            hostSshPort: "2222",
           },
         },
-        appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+        appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
       };
 
       writeDevcontainerJson(ctx, config);
@@ -313,17 +313,17 @@ describe("Scenario S4: port stability across lace up invocations", () => {
   });
 });
 
-// ── S5: Explicit sshPort value suppresses auto-injection ──
+// ── S5: Explicit hostSshPort value suppresses auto-injection ──
 
-describe("Scenario S5: user sshPort value prevents auto-injection", () => {
-  it("user-set sshPort is not overwritten, no port allocation occurs", async () => {
+describe("Scenario S5: user hostSshPort value prevents auto-injection", () => {
+  it("user-set hostSshPort is not overwritten, no port allocation occurs", async () => {
     const featurePath = symlinkLocalFeature(ctx, "wezterm-server");
 
     const config = {
       image: "mcr.microsoft.com/devcontainers/base:ubuntu",
       features: {
         [featurePath]: {
-          sshPort: "3333",
+          hostSshPort: "3333",
         },
       },
     };
@@ -346,7 +346,7 @@ describe("Scenario S5: user sshPort value prevents auto-injection", () => {
       string,
       Record<string, unknown>
     >;
-    expect(features[featurePath].sshPort).toBe("3333");
+    expect(features[featurePath].hostSshPort).toBe("3333");
 
     // No auto-generated appPort
     expect(extended.appPort).toBeUndefined();
@@ -358,7 +358,7 @@ describe("Scenario S5: user sshPort value prevents auto-injection", () => {
 // ── S6: Version option unchanged by port system ──
 
 describe("Scenario S6: non-port options unaffected", () => {
-  it("version option passes through untouched while sshPort is auto-injected", async () => {
+  it("version option passes through untouched while hostSshPort is auto-injected", async () => {
     const featurePath = symlinkLocalFeature(ctx, "wezterm-server");
 
     const config = {
@@ -391,11 +391,11 @@ describe("Scenario S6: non-port options unaffected", () => {
       "20240203-110809-5046fc22",
     );
 
-    // sshPort auto-injected (user did not set it) and resolved to integer
-    expect(typeof features[featurePath].sshPort).toBe("number");
+    // hostSshPort auto-injected (user did not set it) and resolved to integer
+    expect(typeof features[featurePath].hostSshPort).toBe("number");
 
     // Port should be in the lace range
-    const port = features[featurePath].sshPort as number;
+    const port = features[featurePath].hostSshPort as number;
     expect(port).toBeGreaterThanOrEqual(22425);
     expect(port).toBeLessThanOrEqual(22499);
   });

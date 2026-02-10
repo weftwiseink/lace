@@ -47,7 +47,7 @@ export function isPortAvailable(
 
 /** A single port allocation tracked by lace. */
 export interface PortAllocation {
-  /** The label that identifies this allocation (e.g., "wezterm-server/sshPort"). */
+  /** The label that identifies this allocation (e.g., "wezterm-server/hostSshPort"). */
   label: string;
   /** The allocated port number, used symmetrically on host and container. */
   port: number;

@@ -115,7 +115,7 @@ export function buildFeatureIdMap(
  * For prebuild features: asymmetric injection into appPort (host:defaultContainerPort).
  *
  * Modifies the config in-place before template resolution.
- * Returns the list of labels that were auto-injected (e.g., "wezterm-server/sshPort").
+ * Returns the list of labels that were auto-injected (e.g., "wezterm-server/hostSshPort").
  */
 export function autoInjectPortTemplates(
   config: Record<string, unknown>,

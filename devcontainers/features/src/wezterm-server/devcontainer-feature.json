@@ -9,10 +9,10 @@
             "default": "20240203-110809-5046fc22",
             "description": "Wezterm release version string (e.g., 20240203-110809-5046fc22)"
         },
-        "sshPort": {
+        "hostSshPort": {
             "type": "string",
             "default": "2222",
-            "description": "SSH port for wezterm-mux-server access. When used with lace, this is auto-assigned from the 22425-22499 range."
+            "description": "Host-side SSH port for lace port allocation. Not used by install.sh -- the actual SSH listener port is determined by the sshd feature (default 2222). When used with lace, this is auto-assigned from the 22425-22499 range. TODO: Decouple SSH port handling into a thin sshd wrapper feature. The wezterm-server feature should not own SSH port metadata -- it should depend on an sshd feature that declares its own port."
         },
         "createRuntimeDir": {
             "type": "boolean",
@@ -23,7 +23,7 @@
     "customizations": {
         "lace": {
             "ports": {
-                "sshPort": {
+                "hostSshPort": {
                     "label": "wezterm ssh",
                     "onAutoForward": "silent",
                     "requireLocalPort": true

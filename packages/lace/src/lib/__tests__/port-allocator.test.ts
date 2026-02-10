@@ -30,9 +30,9 @@ describe("PortAllocator", () => {
   // Scenario 1: Fresh allocation
   it("allocates the first available port for a new label", async () => {
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc = await allocator.allocate("wezterm-server/sshPort");
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
-    expect(alloc.label).toBe("wezterm-server/sshPort");
+    expect(alloc.label).toBe("wezterm-server/hostSshPort");
     expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
     expect(alloc.port).toBeLessThanOrEqual(LACE_PORT_MAX);
     expect(alloc.assignedAt).toBeTruthy();
@@ -46,8 +46,8 @@ describe("PortAllocator", () => {
       join(laceDir, "port-assignments.json"),
       JSON.stringify({
         assignments: {
-          "wezterm-server/sshPort": {
-            label: "wezterm-server/sshPort",
+          "wezterm-server/hostSshPort": {
+            label: "wezterm-server/hostSshPort",
             port: 22430,
             assignedAt: "2026-02-06T00:00:00.000Z",
           },
@@ -57,7 +57,7 @@ describe("PortAllocator", () => {
     );
 
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc = await allocator.allocate("wezterm-server/sshPort");
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
     expect(alloc.port).toBe(22430);
     expect(alloc.assignedAt).toBe("2026-02-06T00:00:00.000Z");
@@ -73,8 +73,8 @@ describe("PortAllocator", () => {
       join(laceDir, "port-assignments.json"),
       JSON.stringify({
         assignments: {
-          "wezterm-server/sshPort": {
-            label: "wezterm-server/sshPort",
+          "wezterm-server/hostSshPort": {
+            label: "wezterm-server/hostSshPort",
             port: blockedPort,
             assignedAt: "2026-02-06T00:00:00.000Z",
           },
@@ -91,7 +91,7 @@ describe("PortAllocator", () => {
 
     try {
       const allocator = new PortAllocator(workspaceRoot);
-      const alloc = await allocator.allocate("wezterm-server/sshPort");
+      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
       expect(alloc.port).not.toBe(blockedPort);
       expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
@@ -104,19 +104,19 @@ describe("PortAllocator", () => {
   // Scenario 4: Multiple labels get distinct ports
   it("allocates distinct ports for different labels", async () => {
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc1 = await allocator.allocate("wezterm-server/sshPort");
+    const alloc1 = await allocator.allocate("wezterm-server/hostSshPort");
     const alloc2 = await allocator.allocate("debug-proxy/debugPort");
 
     expect(alloc1.port).not.toBe(alloc2.port);
-    expect(alloc1.label).toBe("wezterm-server/sshPort");
+    expect(alloc1.label).toBe("wezterm-server/hostSshPort");
     expect(alloc2.label).toBe("debug-proxy/debugPort");
   });
 
   // Scenario 5: Same label always returns same port
   it("returns the same port for the same label on repeated calls", async () => {
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc1 = await allocator.allocate("wezterm-server/sshPort");
-    const alloc2 = await allocator.allocate("wezterm-server/sshPort");
+    const alloc1 = await allocator.allocate("wezterm-server/hostSshPort");
+    const alloc2 = await allocator.allocate("wezterm-server/hostSshPort");
 
     expect(alloc1.port).toBe(alloc2.port);
   });
@@ -124,7 +124,7 @@ describe("PortAllocator", () => {
   // Scenario 6: Save and reload
   it("persists assignments and reloads them", async () => {
     const allocator1 = new PortAllocator(workspaceRoot);
-    const alloc = await allocator1.allocate("wezterm-server/sshPort");
+    const alloc = await allocator1.allocate("wezterm-server/hostSshPort");
     allocator1.save();
 
     // Verify file exists
@@ -133,7 +133,7 @@ describe("PortAllocator", () => {
 
     // Create a new allocator and verify it loads the saved assignment
     const allocator2 = new PortAllocator(workspaceRoot);
-    const alloc2 = await allocator2.allocate("wezterm-server/sshPort");
+    const alloc2 = await allocator2.allocate("wezterm-server/hostSshPort");
 
     expect(alloc2.port).toBe(alloc.port);
     expect(alloc2.assignedAt).toBe(alloc.assignedAt);
@@ -162,7 +162,7 @@ describe("PortAllocator", () => {
     );
 
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc = await allocator.allocate("wezterm-server/sshPort");
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
     expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
     expect(alloc.port).toBeLessThanOrEqual(LACE_PORT_MAX);
@@ -171,27 +171,27 @@ describe("PortAllocator", () => {
   // Scenario: getAllocations returns all tracked allocations
   it("getAllocations returns all allocations", async () => {
     const allocator = new PortAllocator(workspaceRoot);
-    await allocator.allocate("wezterm-server/sshPort");
+    await allocator.allocate("wezterm-server/hostSshPort");
     await allocator.allocate("debug-proxy/debugPort");
 
     const all = allocator.getAllocations();
     expect(all).toHaveLength(2);
-    expect(all.map((a) => a.label)).toContain("wezterm-server/sshPort");
+    expect(all.map((a) => a.label)).toContain("wezterm-server/hostSshPort");
     expect(all.map((a) => a.label)).toContain("debug-proxy/debugPort");
   });
 
   // Scenario: Saved file has expected structure
   it("saves assignments in the expected JSON structure", async () => {
     const allocator = new PortAllocator(workspaceRoot);
-    const alloc = await allocator.allocate("wezterm-server/sshPort");
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
     allocator.save();
 
     const filePath = join(workspaceRoot, ".lace", "port-assignments.json");
     const saved = JSON.parse(readFileSync(filePath, "utf-8"));
 
     expect(saved).toHaveProperty("assignments");
-    expect(saved.assignments["wezterm-server/sshPort"]).toEqual({
-      label: "wezterm-server/sshPort",
+    expect(saved.assignments["wezterm-server/hostSshPort"]).toEqual({
+      label: "wezterm-server/hostSshPort",
       port: alloc.port,
       assignedAt: alloc.assignedAt,
     });

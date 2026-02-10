@@ -16,7 +16,7 @@ last_reviewed:
 
 # Migrate Lace Devcontainer to Lace Idioms (Self-Hosting)
 
-> BLUF: The lace monorepo's own devcontainer predates lace's port provisioning and feature awareness systems. It uses a hardcoded `appPort: "2222:2222"` outside the lace discovery range (22425-22499), meaning `lace-discover`, `wez-lace-into`, and the wezterm plugin picker cannot find it. This proposal migrates to lace idioms: stable infrastructure features (git, sshd) move to `customizations.lace.prebuildFeatures` for baking into the base image, while port-declaring features (wezterm-server) and project-specific features (claude-code, neovim, nushell) stay in the standard `features` block. The hardcoded `appPort` is replaced with an explicit `${lace.port(wezterm-server/sshPort)}:2222` template using asymmetric mapping. The Dockerfile wezterm.lua COPY is replaced by a bind mount, `default_cwd` is fixed from `/workspace/lace` to `/workspace/main`, and `bin/open-lace-workspace` is deleted (superseded by Gen 2 tooling: `wez-lace-into`, `lace-discover`, plugin picker).
+> BLUF: The lace monorepo's own devcontainer predates lace's port provisioning and feature awareness systems. It uses a hardcoded `appPort: "2222:2222"` outside the lace discovery range (22425-22499), meaning `lace-discover`, `wez-lace-into`, and the wezterm plugin picker cannot find it. This proposal migrates to lace idioms: stable infrastructure features (git, sshd) move to `customizations.lace.prebuildFeatures` for baking into the base image, while port-declaring features (wezterm-server) and project-specific features (claude-code, neovim, nushell) stay in the standard `features` block. The hardcoded `appPort` is replaced with an explicit `${lace.port(wezterm-server/hostSshPort)}:2222` template using asymmetric mapping. The Dockerfile wezterm.lua COPY is replaced by a bind mount, `default_cwd` is fixed from `/workspace/lace` to `/workspace/main`, and `bin/open-lace-workspace` is deleted (superseded by Gen 2 tooling: `wez-lace-into`, `lace-discover`, plugin picker).
 >
 > NOTE: R1/R2 review identified that `up.ts` auto-injection only reads from the `features` block, not `prebuildFeatures`. This means port-declaring features like wezterm-server MUST stay in `features`. Non-port features (git, sshd) can safely move to `prebuildFeatures`. R3 feedback requested the prebuildFeatures split and open-lace-workspace removal.
 
@@ -51,12 +51,12 @@ The dotfiles devcontainer (`.devcontainer/devcontainer.json`, 39 lines) demonstr
 
 When `lace up` processes a devcontainer.json:
 1. It extracts feature IDs from the standard `features` block (NOT from `prebuildFeatures`).
-2. For features with `customizations.lace.ports` in their `devcontainer-feature.json` (like wezterm-server's `sshPort`), it auto-injects `${lace.port(wezterm-server/sshPort)}` templates into the feature options.
+2. For features with `customizations.lace.ports` in their `devcontainer-feature.json` (like wezterm-server's `hostSshPort`), it auto-injects `${lace.port(wezterm-server/hostSshPort)}` templates into the feature options.
 3. Template resolution allocates a port in 22425-22499 via `PortAllocator`.
 4. The resolved config is written to `.lace/devcontainer.json` with concrete `appPort`, `forwardPorts`, and `portsAttributes` entries.
 5. `devcontainer up` is invoked with `--config .lace/devcontainer.json`.
 
-> NOTE: Auto-injection only reads from `features`, not `prebuildFeatures`. This means features with `customizations.lace.ports` metadata (like wezterm-server's `sshPort`) MUST remain in the `features` block for auto-injection to work. Features without port declarations (git, sshd) can safely live in either block. The `prebuildFeatures` block feeds the prebuild image pipeline, which is separate from port provisioning.
+> NOTE: Auto-injection only reads from `features`, not `prebuildFeatures`. This means features with `customizations.lace.ports` metadata (like wezterm-server's `hostSshPort`) MUST remain in the `features` block for auto-injection to work. Features without port declarations (git, sshd) can safely live in either block. The `prebuildFeatures` block feeds the prebuild image pipeline, which is separate from port provisioning.
 
 ### Scripts that reference port 2222
 
@@ -87,7 +87,7 @@ Replace the hardcoded `appPort` with a `${lace.port()}` template using asymmetri
 
   // Asymmetric mapping: host port in lace range -> container port 2222 (sshd default)
   // lace up resolves the template to e.g. "22425:2222"
-  "appPort": ["${lace.port(wezterm-server/sshPort)}:2222"],
+  "appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"],
 
   // Project-specific features installed at container build time.
   // wezterm-server MUST be here (not in prebuildFeatures) because
@@ -107,7 +107,7 @@ Replace the hardcoded `appPort` with a `${lace.port()}` template using asymmetri
 
 The feature split rationale:
 - **`prebuildFeatures`** (git, sshd): Stable infrastructure features with no port metadata. Baked into the prebuild image via `lace prebuild`, which rewrites the Dockerfile FROM to `lace.local/node:24-bookworm-...`. These change rarely and benefit from image layer caching.
-- **`features`** (wezterm-server, claude-code, neovim, nushell): Port-declaring features (wezterm-server has `customizations.lace.ports.sshPort`) MUST be here for `lace up` auto-injection to work. Project-specific features (claude-code, neovim, nushell) are here because they are development tooling that may change more frequently.
+- **`features`** (wezterm-server, claude-code, neovim, nushell): Port-declaring features (wezterm-server has `customizations.lace.ports.hostSshPort`) MUST be here for `lace up` auto-injection to work. Project-specific features (claude-code, neovim, nushell) are here because they are development tooling that may change more frequently.
 
 The asymmetric `appPort` mapping is critical: sshd inside the container listens on port 2222 (its default), while the host port is allocated from the lace range (22425-22499). `lace-discover` looks for Docker port patterns matching `<lace_port>->2222/tcp`, which this mapping satisfies. This matches the S1 "explicit mode" pattern from the wezterm-server scenario tests.
 
@@ -174,9 +174,9 @@ This approach matches the dotfiles devcontainer pattern (git, sshd in `prebuildF
 
 ### Use asymmetric appPort mapping, not symmetric
 
-**Decision:** Use `appPort: ["${lace.port(wezterm-server/sshPort)}:2222"]` (asymmetric) instead of letting lace auto-generate symmetric `port:port` mapping.
+**Decision:** Use `appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"]` (asymmetric) instead of letting lace auto-generate symmetric `port:port` mapping.
 
-**Why:** The sshd feature always configures sshd to listen on port 2222 inside the container (its hardcoded default). The `wezterm-server` feature's `sshPort` option is lace-level metadata only -- it does not configure sshd. A symmetric mapping like `22425:22425` would map to a port nothing is listening on. The asymmetric pattern maps the allocated host port to container port 2222 where sshd actually listens. This also aligns with `lace-discover`'s `->2222/tcp` search pattern.
+**Why:** The sshd feature always configures sshd to listen on port 2222 inside the container (its hardcoded default). The `wezterm-server` feature's `hostSshPort` option is lace-level metadata only -- it does not configure sshd. A symmetric mapping like `22425:22425` would map to a port nothing is listening on. The asymmetric pattern maps the allocated host port to container port 2222 where sshd actually listens. This also aligns with `lace-discover`'s `->2222/tcp` search pattern.
 
 ### Deliver wezterm.lua via bind mount, not COPY
 
@@ -201,7 +201,7 @@ This approach matches the dotfiles devcontainer pattern (git, sshd in `prebuildF
 ### First lace up after migration
 
 The first `lace up` after this change will:
-1. Allocate a new port in 22425-22499 for `wezterm-server/sshPort`.
+1. Allocate a new port in 22425-22499 for `wezterm-server/hostSshPort`.
 2. Write it to `.lace/port-assignments.json` (gitignored).
 3. Generate `.lace/devcontainer.json` with the concrete port.
 4. Invoke `devcontainer up --config .lace/devcontainer.json`.
@@ -222,7 +222,7 @@ Unlike the dotfiles devcontainer (which is image-based and has ALL features in `
 
 ### Phase 1: Update devcontainer.json
 
-1. Replace `"appPort": ["2222:2222"]` with `"appPort": ["${lace.port(wezterm-server/sshPort)}:2222"]`.
+1. Replace `"appPort": ["2222:2222"]` with `"appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"]`.
 2. Add `customizations.lace.prebuildFeatures` with git and sshd.
 3. Move git and sshd from `features` to `prebuildFeatures`.
 4. Keep wezterm-server, claude-code, neovim, nushell in `features`.

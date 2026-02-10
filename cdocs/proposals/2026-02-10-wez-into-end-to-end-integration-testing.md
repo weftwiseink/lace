@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/dogfooding
 type: proposal
 state: live
-status: review_ready
+status: accepted
 tags: [integration-testing, wez-into, devcontainer, discovery, ports, dogfooding, end-to-end]
 related_to:
   - cdocs/proposals/2026-02-08-wez-into-devcontainer-cli.md

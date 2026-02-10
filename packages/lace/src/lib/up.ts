@@ -29,6 +29,8 @@ import {
   mergePortEntries,
   buildFeaturePortMetadata,
   warnPrebuildPortTemplates,
+  warnPrebuildPortFeaturesStaticPort,
+  extractPrebuildFeaturesRaw,
   type TemplateResolutionResult,
 } from "./template-resolver";
 
@@ -122,7 +124,13 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     string,
     Record<string, unknown>
   >;
-  const featureIds = Object.keys(rawFeatures);
+
+  // Also collect prebuild features for port pipeline processing
+  const rawPrebuildFeatures = extractPrebuildFeaturesRaw(configMinimal.raw);
+
+  // Unified feature set for the port pipeline (metadata + auto-injection + resolution)
+  const allRawFeatures = { ...rawFeatures, ...rawPrebuildFeatures };
+  const allFeatureIds = Object.keys(allRawFeatures);
 
   // ── Phase: Metadata fetch + validation + auto-injection + template resolution ──
   // This replaces the old hardcoded port assignment phase.
@@ -130,11 +138,11 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   let templateResult: TemplateResolutionResult | null = null;
   let featurePortMetadata: Map<string, FeaturePortDeclaration> | null = null;
 
-  if (featureIds.length > 0) {
+  if (allFeatureIds.length > 0) {
     // Step 1: Fetch feature metadata
     console.log("Fetching feature metadata...");
     try {
-      metadataMap = await fetchAllFeatureMetadata(featureIds, {
+      metadataMap = await fetchAllFeatureMetadata(allFeatureIds, {
         noCache,
         skipValidation: skipMetadataValidation,
         subprocess,
@@ -148,7 +156,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         // Validate user-provided options exist in schema
         const optionResult = validateFeatureOptions(
           featureId,
-          rawFeatures[featureId] ?? {},
+          allRawFeatures[featureId] ?? {},
           metadata,
         );
         if (!optionResult.valid) {
@@ -176,10 +184,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
       result.phases.metadataValidation = {
         exitCode: 0,
-        message: `Validated metadata for ${featureIds.length} feature(s)`,
+        message: `Validated metadata for ${allFeatureIds.length} feature(s)`,
       };
       console.log(
-        `Validated metadata for ${featureIds.length} feature(s)`,
+        `Validated metadata for ${allFeatureIds.length} feature(s)`,
       );
     } catch (err) {
       if (err instanceof MetadataFetchError) {
@@ -206,6 +214,16 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const injected = autoInjectPortTemplates(configForResolution, metadataMap);
   if (injected.length > 0) {
     console.log(`Auto-injected port templates for: ${injected.join(", ")}`);
+  }
+
+  // Step 3b: Warn about prebuild features with static port values and no appPort
+  const staticPortWarnings = warnPrebuildPortFeaturesStaticPort(
+    configForResolution,
+    metadataMap,
+    injected,
+  );
+  for (const warning of staticPortWarnings) {
+    console.warn(`Warning: ${warning}`);
   }
 
   // Step 4: Resolve all templates (auto-injected + user-written)

@@ -34,6 +34,39 @@ const LACE_PORT_PATTERN = /\$\{lace\.port\(([^)]+)\)\}/g;
 const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\()([^}]+)\}/;
 const LACE_PORT_FULL_MATCH = /^\$\{lace\.port\(([^)]+)\)\}$/;
 
+// ── Prebuild features raw access ──
+
+/**
+ * Extract a direct reference to the prebuildFeatures object from a config.
+ * Returns the live object for in-place mutation, or an empty object if absent/null/empty.
+ * This is a lightweight accessor -- use extractPrebuildFeatures() from devcontainer.ts
+ * for discriminated-union handling in the prebuild pipeline.
+ */
+export function extractPrebuildFeaturesRaw(
+  config: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  const customizations = config.customizations as
+    | Record<string, unknown>
+    | undefined;
+  if (!customizations) return {};
+
+  const lace = customizations.lace as Record<string, unknown> | undefined;
+  if (!lace) return {};
+
+  if (!("prebuildFeatures" in lace)) return {};
+
+  const prebuildFeatures = lace.prebuildFeatures;
+  if (prebuildFeatures === null) return {};
+  if (
+    typeof prebuildFeatures !== "object" ||
+    Object.keys(prebuildFeatures as object).length === 0
+  ) {
+    return {};
+  }
+
+  return prebuildFeatures as Record<string, Record<string, unknown>>;
+}
+
 // ── Feature ID utilities ──
 
 /**
@@ -78,6 +111,9 @@ export function buildFeatureIdMap(
  * customizations.lace.ports metadata. Only injects for options the user
  * has NOT explicitly set.
  *
+ * For top-level features: symmetric injection into the feature option value.
+ * For prebuild features: asymmetric injection into appPort (host:defaultContainerPort).
+ *
  * Modifies the config in-place before template resolution.
  * Returns the list of labels that were auto-injected (e.g., "wezterm-server/sshPort").
  */
@@ -89,13 +125,33 @@ export function autoInjectPortTemplates(
     string,
     Record<string, unknown>
   >;
+  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
 
-  // Only build if there are features
-  if (Object.keys(features).length === 0) return [];
+  if (
+    Object.keys(features).length === 0 &&
+    Object.keys(prebuildFeatures).length === 0
+  ) {
+    return [];
+  }
 
   const injected: string[] = [];
 
-  for (const [fullRef, featureOptions] of Object.entries(features)) {
+  // Process top-level features: symmetric injection into feature options (existing behavior)
+  injectForBlock(features, metadataMap, injected);
+
+  // Process prebuild features: asymmetric injection into appPort
+  injectForPrebuildBlock(config, prebuildFeatures, metadataMap, injected);
+
+  return injected;
+}
+
+/** Symmetric injection for top-level features. Mutates the block in-place. */
+function injectForBlock(
+  block: Record<string, Record<string, unknown>>,
+  metadataMap: Map<string, FeatureMetadata | null>,
+  injected: string[],
+): void {
+  for (const [fullRef, featureOptions] of Object.entries(block)) {
     const shortId = extractFeatureShortId(fullRef);
     const metadata = metadataMap.get(fullRef);
     if (!metadata) continue;
@@ -114,19 +170,54 @@ export function autoInjectPortTemplates(
       }
 
       // Ensure feature options object exists and is mutable
-      if (
-        !features[fullRef] ||
-        typeof features[fullRef] !== "object"
-      ) {
-        features[fullRef] = {};
+      if (!block[fullRef] || typeof block[fullRef] !== "object") {
+        block[fullRef] = {};
       }
-      (features[fullRef] as Record<string, unknown>)[optionName] =
+      (block[fullRef] as Record<string, unknown>)[optionName] =
         `\${lace.port(${shortId}/${optionName})}`;
       injected.push(`${shortId}/${optionName}`);
     }
   }
+}
 
-  return injected;
+/** Asymmetric injection for prebuild features. Injects appPort entries, not feature options. */
+function injectForPrebuildBlock(
+  config: Record<string, unknown>,
+  block: Record<string, Record<string, unknown>>,
+  metadataMap: Map<string, FeatureMetadata | null>,
+  injected: string[],
+): void {
+  for (const [fullRef, featureOptions] of Object.entries(block)) {
+    const shortId = extractFeatureShortId(fullRef);
+    const metadata = metadataMap.get(fullRef);
+    if (!metadata) continue;
+
+    const laceCustom = extractLaceCustomizations(metadata);
+    if (!laceCustom?.ports) continue;
+
+    for (const optionName of Object.keys(laceCustom.ports)) {
+      // Skip if user has provided an explicit value for this option
+      if (
+        featureOptions &&
+        typeof featureOptions === "object" &&
+        optionName in featureOptions
+      ) {
+        continue;
+      }
+
+      // Get the feature's default port value from metadata
+      const defaultPort = metadata.options?.[optionName]?.default;
+      if (!defaultPort) continue; // Cannot generate asymmetric mapping without default
+
+      // Inject asymmetric appPort entry: ${lace.port(...)}:DEFAULT_PORT
+      const appPort = (config.appPort ?? []) as (string | number)[];
+      const template = `\${lace.port(${shortId}/${optionName})}:${defaultPort}`;
+      appPort.push(template);
+      config.appPort = appPort;
+
+      injected.push(`${shortId}/${optionName}`);
+    }
+  }
 }
 
 // ── Template resolution ──
@@ -141,7 +232,9 @@ export async function resolveTemplates(
   portAllocator: PortAllocator,
 ): Promise<TemplateResolutionResult> {
   const features = (config.features ?? {}) as Record<string, unknown>;
-  const featureIdMap = buildFeatureIdMap(features);
+  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
+  const allFeatures = { ...features, ...prebuildFeatures };
+  const featureIdMap = buildFeatureIdMap(allFeatures);
   const allocations: PortAllocation[] = [];
   const warnings: string[] = [];
 
@@ -442,6 +535,68 @@ export function warnPrebuildPortTemplates(
             `will not be resolved. Prebuild features use their default values.`,
         );
       }
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Warn about port-declaring features in prebuildFeatures that have an explicit
+ * static port value (opting out of auto-injection) but no appPort entry
+ * referencing them. In that case, the feature listens on its static port inside
+ * the container but has no host port mapping -- the container is invisible.
+ *
+ * This does NOT warn when:
+ * - Auto-injection is active (no explicit value, so the label appears in `injected`)
+ * - The user provides both a static value and an explicit appPort with ${lace.port()}
+ */
+export function warnPrebuildPortFeaturesStaticPort(
+  config: Record<string, unknown>,
+  metadataMap: Map<string, FeatureMetadata | null>,
+  injected: string[],
+): string[] {
+  const warnings: string[] = [];
+  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
+  if (Object.keys(prebuildFeatures).length === 0) return warnings;
+
+  const appPort = (config.appPort ?? []) as (string | number)[];
+
+  for (const [fullRef, featureOptions] of Object.entries(prebuildFeatures)) {
+    const shortId = extractFeatureShortId(fullRef);
+    const metadata = metadataMap.get(fullRef);
+    if (!metadata) continue;
+
+    const laceCustom = extractLaceCustomizations(metadata);
+    if (!laceCustom?.ports) continue;
+
+    for (const optionName of Object.keys(laceCustom.ports)) {
+      const label = `${shortId}/${optionName}`;
+
+      // Skip if auto-injection was active for this label (no explicit value was set)
+      if (injected.includes(label)) continue;
+
+      // The user has set an explicit value -- check if they also have an appPort entry
+      const hasAppPortRef = appPort.some(
+        (entry) =>
+          typeof entry === "string" &&
+          entry.includes(`\${lace.port(${label})}`),
+      );
+      if (hasAppPortRef) continue;
+
+      const staticValue =
+        featureOptions &&
+        typeof featureOptions === "object" &&
+        optionName in featureOptions
+          ? featureOptions[optionName]
+          : undefined;
+
+      warnings.push(
+        `Feature "${shortId}" in prebuildFeatures declares port "${optionName}" ` +
+          `but has a static value (${JSON.stringify(staticValue ?? "default")}) and no appPort entry. ` +
+          `The container will have no host port mapping for this port. ` +
+          `Either remove the static value to enable auto-injection, or add an appPort entry.`,
+      );
     }
   }
 

@@ -19,10 +19,45 @@ let laceDir: string;
 let metadataCacheDir: string;
 let mockCalls: Array<{ command: string; args: string[]; cwd?: string }>;
 
-/** Mock subprocess that handles devcontainer build and up commands. */
+/** Metadata for features that appear in prebuildFeatures but have no lace port declarations. */
+const claudeCodeMetadata: FeatureMetadata = {
+  id: "claude-code",
+  version: "1.0.5",
+  options: {},
+};
+
+/** Mock subprocess that handles devcontainer build, up, and metadata fetch commands. */
 function createMock(): RunSubprocess {
   return (command, args, opts) => {
     mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    // Handle metadata fetch: devcontainer features info manifest <featureId> --output-format json
+    if (
+      command === "devcontainer" &&
+      args[0] === "features" &&
+      args[1] === "info" &&
+      args[2] === "manifest"
+    ) {
+      const featureId = args[3];
+      // Return basic metadata for claude-code (no lace ports)
+      if (featureId === "ghcr.io/anthropics/devcontainer-features/claude-code:1") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            annotations: {
+              "dev.containers.metadata": JSON.stringify(claudeCodeMetadata),
+            },
+          }),
+          stderr: "",
+        };
+      }
+      // Unknown feature
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Error: feature not found: ${featureId}`,
+      };
+    }
 
     // Simulate devcontainer build writing a lock file in the prebuild dir
     if (command === "devcontainer" && args[0] === "build") {
@@ -57,6 +92,28 @@ function createMock(): RunSubprocess {
 function createFailingDevcontainerUpMock(): RunSubprocess {
   return (command, args, opts) => {
     mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    // Handle metadata fetch
+    if (
+      command === "devcontainer" &&
+      args[0] === "features" &&
+      args[1] === "info" &&
+      args[2] === "manifest"
+    ) {
+      const featureId = args[3];
+      if (featureId === "ghcr.io/anthropics/devcontainer-features/claude-code:1") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            annotations: {
+              "dev.containers.metadata": JSON.stringify(claudeCodeMetadata),
+            },
+          }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 1, stdout: "", stderr: `Error: feature not found: ${featureId}` };
+    }
 
     // Simulate devcontainer build writing a lock file in the prebuild dir
     if (command === "devcontainer" && args[0] === "build") {
@@ -1112,5 +1169,268 @@ describe("lace up: metadata unavailable with skip-metadata-validation", () => {
     );
 
     warnSpy.mockRestore();
+  });
+});
+
+// ── Prebuild features port support integration tests (T9-T12) ──
+
+const PREBUILD_WEZTERM_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    customizations: {
+      lace: {
+        prebuildFeatures: {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+        },
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const PREBUILD_WEZTERM_EXPLICIT_APPPORT_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    customizations: {
+      lace: {
+        prebuildFeatures: {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+            sshPort: "2222",
+          },
+        },
+      },
+    },
+    appPort: ["${lace.port(wezterm-server/sshPort)}:2222"],
+  },
+  null,
+  2,
+);
+
+const PREBUILD_NO_PORTS_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    customizations: {
+      lace: {
+        prebuildFeatures: {
+          "ghcr.io/devcontainers/features/git:1": {},
+          "ghcr.io/devcontainers/features/sshd:1": {},
+        },
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const sshdMetadataNoLace: FeatureMetadata = {
+  id: "sshd",
+  version: "1.0.0",
+  options: { version: { type: "string", default: "latest" } },
+};
+
+const MIXED_BLOCKS_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+    },
+    customizations: {
+      lace: {
+        prebuildFeatures: {
+          "ghcr.io/weftwiseink/devcontainer-features/debug-proxy:1": {},
+        },
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const debugProxyMetadataFull: FeatureMetadata = {
+  id: "debug-proxy",
+  version: "1.0.0",
+  options: {
+    debugPort: { type: "string", default: "9229" },
+  },
+  customizations: {
+    lace: {
+      ports: {
+        debugPort: {
+          label: "debug",
+          onAutoForward: "silent",
+          requireLocalPort: true,
+        },
+      },
+    },
+  },
+};
+
+describe("lace up: T9 -- prebuild feature with ports, full pipeline (asymmetric)", () => {
+  it("auto-injects and resolves asymmetric appPort for prebuild-only wezterm-server", async () => {
+    setupWorkspace(PREBUILD_WEZTERM_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.exitCode).toBe(0);
+    const port = result.phases.portAssignment!.port!;
+    expect(port).toBeGreaterThanOrEqual(22425);
+    expect(port).toBeLessThanOrEqual(22499);
+
+    // Verify generated config
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+
+    // Asymmetric appPort mapping (lace host port -> feature default container port 2222)
+    expect(extended.appPort).toContain(`${port}:2222`);
+
+    // No symmetric entry
+    expect(extended.appPort).not.toContain(`${port}:${port}`);
+
+    // forwardPorts and portsAttributes generated
+    expect(extended.forwardPorts).toContain(port);
+    expect(extended.portsAttributes?.[String(port)]).toEqual({
+      label: "wezterm ssh (lace)",
+      requireLocalPort: true,
+      onAutoForward: "silent",
+    });
+
+    // Port assignments file persisted
+    const assignmentsPath = join(laceDir, "port-assignments.json");
+    expect(existsSync(assignmentsPath)).toBe(true);
+    const assignments = JSON.parse(readFileSync(assignmentsPath, "utf-8"));
+    expect(
+      assignments.assignments["wezterm-server/sshPort"].port,
+    ).toBe(port);
+
+    // Prebuild feature option sshPort should NOT be in the generated config's prebuild block
+    const prebuildFeatures = (
+      extended.customizations as Record<string, Record<string, unknown>>
+    )?.lace?.prebuildFeatures as Record<string, Record<string, unknown>> | undefined;
+    if (prebuildFeatures) {
+      const weztermOpts = prebuildFeatures[
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
+      ];
+      expect(weztermOpts?.sshPort).toBeUndefined();
+    }
+  });
+});
+
+describe("lace up: T10 -- prebuild feature with ports + explicit asymmetric appPort", () => {
+  it("resolves user-provided appPort template for prebuild feature", async () => {
+    setupWorkspace(PREBUILD_WEZTERM_EXPLICIT_APPPORT_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const port = result.phases.portAssignment!.port!;
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+
+    // Asymmetric mapping resolved
+    expect(extended.appPort).toContain(`${port}:2222`);
+
+    // No duplicate symmetric entry
+    expect(extended.appPort).not.toContain(`${port}:${port}`);
+
+    // forwardPorts and portsAttributes generated
+    expect(extended.forwardPorts).toContain(port);
+    expect(extended.portsAttributes?.[String(port)]).toBeDefined();
+  });
+});
+
+describe("lace up: T11 -- prebuild features without ports, no allocation", () => {
+  it("produces no port allocation when prebuild features have no port metadata", async () => {
+    setupWorkspace(PREBUILD_NO_PORTS_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/devcontainers/features/git:1": gitMetadataNoLace,
+        "ghcr.io/devcontainers/features/sshd:1": sshdMetadataNoLace,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.portAssignment?.message).toContain(
+      "No port templates found",
+    );
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(extended.appPort).toBeUndefined();
+  });
+});
+
+describe("lace up: T12 -- mixed blocks, ports from both", () => {
+  it("allocates ports for features in both blocks with distinct ports", async () => {
+    setupWorkspace(MIXED_BLOCKS_CONFIG_JSON);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          weztermMetadata,
+        "ghcr.io/weftwiseink/devcontainer-features/debug-proxy:1":
+          debugProxyMetadataFull,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+
+    // Both features should have appPort entries
+    expect(extended.appPort).toBeDefined();
+    expect(extended.appPort.length).toBeGreaterThanOrEqual(2);
+
+    // wezterm-server in features block: symmetric injection -> symmetric appPort
+    // debug-proxy in prebuildFeatures: asymmetric injection -> asymmetric appPort
+    const appPorts = extended.appPort as string[];
+
+    // Find the two distinct ports
+    const portNumbers = appPorts.map((entry: string) =>
+      parseInt(entry.split(":")[0], 10),
+    );
+    expect(new Set(portNumbers).size).toBe(2); // distinct ports
+
+    // debug-proxy has asymmetric mapping (host:9229)
+    const debugEntry = appPorts.find((entry: string) =>
+      entry.endsWith(":9229"),
+    );
+    expect(debugEntry).toBeDefined();
+
+    // forwardPorts has both
+    expect(extended.forwardPorts).toHaveLength(2);
+
+    // portsAttributes has both
+    expect(Object.keys(extended.portsAttributes)).toHaveLength(2);
   });
 });

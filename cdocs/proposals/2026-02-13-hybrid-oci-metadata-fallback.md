@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/feature-metadata
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_accepted
 revisions:
   - at: 2026-02-14T00:00:00-08:00
     by: "@claude-opus-4-6"

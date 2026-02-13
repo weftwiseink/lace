@@ -10,6 +10,11 @@ tags: [feature-metadata, oci, tarball-fallback, hybrid, implementation]
 references:
   - cdocs/proposals/2026-02-13-hybrid-oci-metadata-fallback.md
   - cdocs/reports/2026-02-13-oci-metadata-annotation-missing-incident.md
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-02-13T23:30:00-08:00
+  round: 1
 ---
 
 # Hybrid OCI Metadata Fallback Implementation: Devlog
@@ -40,7 +45,7 @@ Commits after each phase. Using `/review` subagents for periodic feedback.
 ## Implementation Notes
 
 ### Phase 1: Core Infrastructure
-- Created `oci-blob-fallback.ts` (~200 lines): `parseFeatureOciRef`, `acquireAnonymousToken`, `downloadBlob`, `extractFromTar`, `fetchFromBlob`
+- Created `oci-blob-fallback.ts` (~270 lines): `parseFeatureOciRef`, `acquireAnonymousToken`, `downloadBlob`, `extractFromTar`, `fetchFromBlob`
 - The tar parser handles pax extended headers (0x78 per-file, 0x67 global), `./` prefix normalization, and gzip detection (early error with clear message)
 - `AnnotationMissingError` is an internal sentinel (not exported) that bridges the sync `fetchFromRegistry()` to the async `fetchFeatureMetadata()` for blob fallback dispatch
 - Added `MetadataFetchKind` type with 4 variants for structured error discrimination

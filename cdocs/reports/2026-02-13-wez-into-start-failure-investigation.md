@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wez-into
 type: report
 state: archived
-status: done
+status: result_accepted
 tags: [investigation, wez-into, nushell, path, node, error-handling, distribution]
 related_to:
   - cdocs/proposals/2026-02-08-wez-into-devcontainer-cli.md

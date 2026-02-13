@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wez-into
 type: report
 state: archived
-status: done
+status: result_accepted
 tags: [investigation, wez-into, wezterm, logging, detach, xkbcommon]
 related_to:
   - cdocs/reports/2026-02-13-wez-into-start-failure-investigation.md

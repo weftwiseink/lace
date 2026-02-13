@@ -335,20 +335,18 @@ do_connect() {
 
   info "connecting to $project on port $port..."
 
-  # Prefer `wezterm cli spawn` when a running WezTerm instance exists.
-  # This returns immediately (non-blocking) and avoids inheriting
-  # stdout/stderr noise (xkbcommon errors, lua logs, SSH messages).
-  # WezTerm writes its own logs to $XDG_RUNTIME_DIR/wezterm/.
-  if wezterm cli list &>/dev/null; then
-    wezterm cli spawn --domain-name "lace:$port" --new-window --workspace "$project"
-    return 0
-  fi
-
-  # No running instance -- fall back to exec wezterm connect.
   # Suppress xkbcommon errors from WezTerm's older bundled libxkbcommon
   # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
   export XKB_LOG_LEVEL=10  # critical only
-  exec wezterm connect "lace:$port" --workspace "$project"
+
+  # `wezterm connect` handles both cases:
+  #   - No running GUI: starts a new instance
+  #   - Running GUI: hands off to the existing instance (new window)
+  # Background + disown so the calling terminal returns immediately.
+  # All output (xkb noise, lua logs, SSH messages) goes to /dev/null;
+  # WezTerm writes its own structured logs to $XDG_RUNTIME_DIR/wezterm/.
+  wezterm connect "lace:$port" --workspace "$project" &>/dev/null &
+  disown
 }
 
 # --- Execute action ---

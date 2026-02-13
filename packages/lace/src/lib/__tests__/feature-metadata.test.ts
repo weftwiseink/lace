@@ -22,6 +22,7 @@ import {
   getTtlMs,
   MetadataFetchError,
   type FeatureMetadata,
+  type MetadataFetchKind,
 } from "../feature-metadata";
 
 // Helper: create a mock subprocess that returns the given result
@@ -40,6 +41,81 @@ function mockOciSuccess(metadata: FeatureMetadata): RunSubprocess {
     }),
     stderr: "",
   });
+}
+
+// ── Helper: build a minimal tar buffer for blob fallback tests ──
+
+function tarEntry(
+  name: string,
+  content: string,
+  typeflag: number = 0x30,
+): Buffer {
+  const contentBuf = Buffer.from(content, "utf-8");
+  const header = Buffer.alloc(512);
+  header.write(name, 0, Math.min(name.length, 100), "ascii");
+  const sizeOctal = contentBuf.length.toString(8).padStart(11, "0");
+  header.write(sizeOctal, 124, 12, "ascii");
+  header[156] = typeflag;
+  const paddedSize = Math.ceil(contentBuf.length / 512) * 512;
+  const data = Buffer.alloc(paddedSize);
+  contentBuf.copy(data);
+  return Buffer.concat([header, data]);
+}
+
+function buildTar(...entries: Buffer[]): Buffer {
+  const endOfArchive = Buffer.alloc(1024);
+  return Buffer.concat([...entries, endOfArchive]);
+}
+
+/** Create a mock subprocess that returns a manifest WITHOUT the dev.containers.metadata annotation
+ *  but WITH layers (so blob fallback can attempt to work). */
+function mockOciNoAnnotation(layerDigest: string = "sha256:abc123"): RunSubprocess {
+  return mockSubprocess({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      manifest: {
+        schemaVersion: 2,
+        layers: [
+          {
+            digest: layerDigest,
+            mediaType: "application/vnd.devcontainers.layer.v1+tar",
+            size: 10240,
+          },
+        ],
+        annotations: { "com.github.package.type": "devcontainer_feature" },
+      },
+    }),
+    stderr: "",
+  });
+}
+
+/** Mock global fetch for blob fallback: handles token + blob download.
+ *  Returns the provided tarBuffer for blob requests. */
+function mockFetchForBlob(tarBuffer: Buffer): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/token")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ token: "test-token" }),
+        });
+      }
+      if (url.includes("/blobs/")) {
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: () =>
+            Promise.resolve(
+              tarBuffer.buffer.slice(
+                tarBuffer.byteOffset,
+                tarBuffer.byteOffset + tarBuffer.byteLength,
+              ),
+            ),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    }),
+  );
 }
 
 // Standard test metadata
@@ -197,8 +273,33 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
     expect(result).toEqual(weztermMetadata);
   });
 
-  // Scenario 5: Missing dev.containers.metadata annotation
-  it("throws MetadataFetchError when annotation is missing", async () => {
+  // Scenario 5a: Missing annotation -- blob fallback succeeds
+  it("returns metadata via blob fallback when annotation is missing", async () => {
+    const nushellMetadata: FeatureMetadata = {
+      id: "nushell",
+      version: "0.1.1",
+      options: {},
+    };
+    const featureTar = buildTar(
+      tarEntry(
+        "devcontainer-feature.json",
+        JSON.stringify(nushellMetadata),
+      ),
+    );
+    const subprocess = mockOciNoAnnotation();
+    mockFetchForBlob(featureTar);
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(result).toEqual(nushellMetadata);
+    vi.unstubAllGlobals();
+  });
+
+  // Scenario 5b: Missing annotation -- blob fallback fails
+  it("throws MetadataFetchError with blob_fallback_failed when annotation is missing and blob fails", async () => {
     const subprocess = mockSubprocess({
       exitCode: 0,
       stdout: JSON.stringify({ schemaVersion: 2 }),
@@ -207,7 +308,17 @@ describe("fetchFeatureMetadata -- OCI fetch", () => {
 
     await expect(
       fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
-    ).rejects.toThrow(/missing dev.containers.metadata annotation/);
+    ).rejects.toThrow(/blob fallback failed/);
+
+    try {
+      await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+        subprocess,
+        cacheDir,
+      });
+    } catch (e) {
+      expect(e).toBeInstanceOf(MetadataFetchError);
+      expect((e as MetadataFetchError).kind).toBe("blob_fallback_failed");
+    }
   });
 
   // Scenario 6: Malformed metadata annotation JSON
@@ -668,6 +779,219 @@ describe("in-memory cache", () => {
     expect(result.get("ghcr.io/org/feat:1")).toEqual(weztermMetadata);
     expect(result.get("ghcr.io/org/other:2")).toEqual(otherMetadata);
     expect(subprocess).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("MetadataFetchError kind discrimination", () => {
+  it("fetch_failed includes 'build environment' in message", () => {
+    const err = new MetadataFetchError("feat:1", "CLI exited 1", "fetch_failed");
+    expect(err.message).toContain("build environment");
+    expect(err.kind).toBe("fetch_failed");
+  });
+
+  it("invalid_response includes 'unexpected output' in message", () => {
+    const err = new MetadataFetchError("feat:1", "bad json", "invalid_response");
+    expect(err.message).toContain("unexpected output");
+    expect(err.kind).toBe("invalid_response");
+  });
+
+  it("annotation_invalid includes 'malformed' in message", () => {
+    const err = new MetadataFetchError("feat:1", "bad annotation", "annotation_invalid");
+    expect(err.message).toContain("malformed");
+    expect(err.kind).toBe("annotation_invalid");
+  });
+
+  it("blob_fallback_failed includes 'tarball fallback' in message", () => {
+    const err = new MetadataFetchError("feat:1", "download failed", "blob_fallback_failed");
+    expect(err.message).toContain("tarball fallback");
+    expect(err.kind).toBe("blob_fallback_failed");
+  });
+
+  it("all kinds include --skip-metadata-validation hint", () => {
+    const kinds: MetadataFetchKind[] = [
+      "fetch_failed",
+      "invalid_response",
+      "annotation_invalid",
+      "blob_fallback_failed",
+    ];
+    for (const kind of kinds) {
+      const err = new MetadataFetchError("feat:1", "reason", kind);
+      expect(err.message).toContain("--skip-metadata-validation");
+    }
+  });
+});
+
+describe("fetchFeatureMetadata -- blob fallback integration", () => {
+  let cacheDir: string;
+
+  beforeEach(() => {
+    cacheDir = join(
+      tmpdir(),
+      `lace-test-cache-blob-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    clearMetadataCache(cacheDir);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it("annotation missing + blob fallback succeeds → returns metadata and caches it", async () => {
+    const nushellMetadata: FeatureMetadata = {
+      id: "nushell",
+      version: "0.1.1",
+      options: {},
+    };
+    const featureTar = buildTar(
+      tarEntry("devcontainer-feature.json", JSON.stringify(nushellMetadata)),
+    );
+    const subprocess = mockOciNoAnnotation();
+    mockFetchForBlob(featureTar);
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/nushell:0", {
+      subprocess,
+      cacheDir,
+    });
+
+    expect(result).toEqual(nushellMetadata);
+
+    // Verify it's in memory cache (second call should not invoke subprocess)
+    const result2 = await fetchFeatureMetadata("ghcr.io/org/nushell:0", {
+      subprocess,
+      cacheDir,
+    });
+    expect(result2).toEqual(nushellMetadata);
+    expect(subprocess).toHaveBeenCalledTimes(1); // Only called once (memory cache hit)
+  });
+
+  it("annotation missing + blob fallback fails + skipValidation:false → throws blob_fallback_failed", async () => {
+    const subprocess = mockOciNoAnnotation();
+    // Don't mock fetch -- blob download will fail
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
+
+    await expect(
+      fetchFeatureMetadata("ghcr.io/org/feat:1", { subprocess, cacheDir }),
+    ).rejects.toThrow(MetadataFetchError);
+
+    try {
+      clearMetadataCache(cacheDir);
+      await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+        subprocess,
+        cacheDir,
+      });
+    } catch (e) {
+      expect((e as MetadataFetchError).kind).toBe("blob_fallback_failed");
+    }
+  });
+
+  it("annotation missing + blob fallback fails + skipValidation:true → returns null and warns", async () => {
+    const subprocess = mockOciNoAnnotation();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+      subprocess,
+      cacheDir,
+      skipValidation: true,
+    });
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("--skip-metadata-validation"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("CLI failure → throws fetch_failed (blob fallback not attempted)", async () => {
+    const subprocess = mockSubprocess({
+      exitCode: 1,
+      stdout: "",
+      stderr: "auth error",
+    });
+
+    try {
+      await fetchFeatureMetadata("ghcr.io/org/feat:1", {
+        subprocess,
+        cacheDir,
+      });
+    } catch (e) {
+      expect(e).toBeInstanceOf(MetadataFetchError);
+      expect((e as MetadataFetchError).kind).toBe("fetch_failed");
+    }
+  });
+});
+
+describe("fetchAllFeatureMetadata -- mixed batch with blob fallback", () => {
+  let cacheDir: string;
+
+  beforeEach(() => {
+    cacheDir = join(
+      tmpdir(),
+      `lace-test-cache-mixed-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    clearMetadataCache(cacheDir);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it("Feature A has annotation, Feature B lacks annotation but blob fallback succeeds → both return metadata", async () => {
+    const nushellMetadata: FeatureMetadata = {
+      id: "nushell",
+      version: "0.1.1",
+      options: {},
+    };
+    const featureTar = buildTar(
+      tarEntry("devcontainer-feature.json", JSON.stringify(nushellMetadata)),
+    );
+    mockFetchForBlob(featureTar);
+
+    const subprocess: RunSubprocess = vi.fn((_cmd, args) => {
+      const featureId = args[3];
+      if (featureId === "ghcr.io/org/wezterm:1") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            annotations: {
+              "dev.containers.metadata": JSON.stringify(weztermMetadata),
+            },
+          }),
+          stderr: "",
+        };
+      }
+      // nushell: no annotation, has layers
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          manifest: {
+            schemaVersion: 2,
+            layers: [
+              { digest: "sha256:abc123", mediaType: "application/vnd.devcontainers.layer.v1+tar" },
+            ],
+            annotations: {},
+          },
+        }),
+        stderr: "",
+      };
+    });
+
+    const result = await fetchAllFeatureMetadata(
+      ["ghcr.io/org/wezterm:1", "ghcr.io/org/nushell:0"],
+      { subprocess, cacheDir },
+    );
+
+    expect(result.size).toBe(2);
+    expect(result.get("ghcr.io/org/wezterm:1")).toEqual(weztermMetadata);
+    expect(result.get("ghcr.io/org/nushell:0")).toEqual(nushellMetadata);
   });
 });
 

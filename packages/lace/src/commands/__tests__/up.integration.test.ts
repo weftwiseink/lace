@@ -1434,3 +1434,233 @@ describe("lace up: T12 -- mixed blocks, ports from both", () => {
     expect(Object.keys(extended.portsAttributes)).toHaveLength(2);
   });
 });
+
+// ── Blob fallback integration tests ──
+
+/** Build a minimal tar entry. */
+function tarEntry(
+  name: string,
+  content: string,
+  typeflag: number = 0x30,
+): Buffer {
+  const contentBuf = Buffer.from(content, "utf-8");
+  const header = Buffer.alloc(512);
+  header.write(name, 0, Math.min(name.length, 100), "ascii");
+  const sizeOctal = contentBuf.length.toString(8).padStart(11, "0");
+  header.write(sizeOctal, 124, 12, "ascii");
+  header[156] = typeflag;
+  const paddedSize = Math.ceil(contentBuf.length / 512) * 512;
+  const data = Buffer.alloc(paddedSize);
+  contentBuf.copy(data);
+  return Buffer.concat([header, data]);
+}
+
+function buildTar(...entries: Buffer[]): Buffer {
+  return Buffer.concat([...entries, Buffer.alloc(1024)]);
+}
+
+const nushellMetadata: FeatureMetadata = {
+  id: "nushell",
+  version: "0.1.1",
+  options: {},
+};
+
+/** Mock subprocess that returns annotation for wezterm-server but no annotation for nushell. */
+function createMixedAnnotationMock(
+  metadataByFeature: Record<string, FeatureMetadata>,
+  noAnnotationFeatures: string[],
+): RunSubprocess {
+  return (command, args, opts) => {
+    mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    if (
+      command === "devcontainer" &&
+      args[0] === "features" &&
+      args[1] === "info" &&
+      args[2] === "manifest"
+    ) {
+      const featureId = args[3];
+
+      if (noAnnotationFeatures.includes(featureId)) {
+        // Return manifest without dev.containers.metadata but with layers
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            manifest: {
+              schemaVersion: 2,
+              layers: [
+                {
+                  digest: "sha256:abc123",
+                  mediaType: "application/vnd.devcontainers.layer.v1+tar",
+                  size: 10240,
+                },
+              ],
+              annotations: { "com.github.package.type": "devcontainer_feature" },
+            },
+          }),
+          stderr: "",
+        };
+      }
+
+      const metadata = metadataByFeature[featureId];
+      if (!metadata) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Error: feature not found: ${featureId}`,
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          annotations: {
+            "dev.containers.metadata": JSON.stringify(metadata),
+          },
+        }),
+        stderr: "",
+      };
+    }
+
+    if (command === "devcontainer" && args[0] === "build") {
+      const wsFolder = args[args.indexOf("--workspace-folder") + 1];
+      if (wsFolder) {
+        writeFileSync(
+          join(wsFolder, "devcontainer-lock.json"),
+          JSON.stringify({ features: {} }) + "\n",
+          "utf-8",
+        );
+      }
+    }
+
+    return {
+      exitCode: 0,
+      stdout: '{"imageName":["test"]}',
+      stderr: "",
+    };
+  };
+}
+
+const MIXED_ANNOTATION_CONFIG_JSON = JSON.stringify(
+  {
+    image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+    features: {
+      "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
+    },
+  },
+  null,
+  2,
+);
+
+describe("lace up: mixed features with blob fallback", () => {
+  it("succeeds when one feature has annotation and one uses blob fallback", async () => {
+    setupWorkspace(MIXED_ANNOTATION_CONFIG_JSON);
+
+    const featureTar = buildTar(
+      tarEntry("devcontainer-feature.json", JSON.stringify(nushellMetadata)),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/token")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ token: "test-token" }),
+          });
+        }
+        if (url.includes("/blobs/")) {
+          return Promise.resolve({
+            ok: true,
+            arrayBuffer: () =>
+              Promise.resolve(
+                featureTar.buffer.slice(
+                  featureTar.byteOffset,
+                  featureTar.byteOffset + featureTar.byteLength,
+                ),
+              ),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMixedAnnotationMock(
+        {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+            weztermMetadata,
+        },
+        ["ghcr.io/eitsupi/devcontainer-features/nushell:0"],
+      ),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.metadataValidation?.exitCode).toBe(0);
+    // wezterm-server should have port allocation, nushell should not
+    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("fails with blob_fallback_failed when blob download fails and skipValidation is false", async () => {
+    setupWorkspace(MIXED_ANNOTATION_CONFIG_JSON);
+
+    // Mock fetch that always fails for blob download
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMixedAnnotationMock(
+        {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+            weztermMetadata,
+        },
+        ["ghcr.io/eitsupi/devcontainer-features/nushell:0"],
+      ),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("blob fallback");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("succeeds with skipMetadataValidation when blob fallback fails", async () => {
+    setupWorkspace(MIXED_ANNOTATION_CONFIG_JSON);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMixedAnnotationMock(
+        {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+            weztermMetadata,
+        },
+        ["ghcr.io/eitsupi/devcontainer-features/nushell:0"],
+      ),
+      skipDevcontainerUp: true,
+      skipMetadataValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("--skip-metadata-validation"),
+    );
+
+    warnSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+});

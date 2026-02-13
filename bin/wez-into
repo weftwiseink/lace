@@ -52,6 +52,10 @@ fi
 # Used by --start to run `lace up --workspace-folder <path>`.
 # Check co-located path first (bin/wez-into -> packages/lace/bin/lace),
 # then known locations, then PATH.
+#
+# Validates that the runtime interpreter (node) is available on PATH.
+# The lace CLI is a node script (#!/usr/bin/env node), so finding the
+# binary isn't enough — node must also be reachable.
 locate_lace_cli() {
   local candidate
   for candidate in \
@@ -71,6 +75,35 @@ locate_lace_cli() {
     return 0
   fi
   return 1
+}
+
+# Verify that the lace CLI's runtime interpreter is available.
+# The lace CLI uses #!/usr/bin/env node — if node isn't on PATH,
+# execution fails with exit 127 and an opaque "No such file" error.
+verify_lace_cli() {
+  local lace_cli="$1"
+
+  # Resolve symlinks to get the actual file and check its shebang
+  local resolved
+  resolved="$(readlink -f "$lace_cli" 2>/dev/null || echo "$lace_cli")"
+
+  local shebang
+  shebang="$(head -c 256 "$resolved" 2>/dev/null | head -1)"
+
+  if [[ "$shebang" == "#!/usr/bin/env node"* ]] || [[ "$shebang" == "#!/usr/bin/node"* ]]; then
+    if ! command -v node &>/dev/null; then
+      err "lace CLI requires node, but node is not on PATH"
+      err "found lace at: $lace_cli"
+      err ""
+      err "node is typically installed via linuxbrew:"
+      err "  /home/linuxbrew/.linuxbrew/bin/node"
+      err ""
+      err "ensure your shell's PATH includes linuxbrew:"
+      err "  export PATH=\"/home/linuxbrew/.linuxbrew/bin:\$PATH\""
+      return 1
+    fi
+  fi
+  return 0
 }
 
 # --- Discovery helper ---
@@ -108,6 +141,11 @@ start_and_connect() {
     exit 1
   }
 
+  # Verify the runtime interpreter is available before attempting to run lace.
+  # This catches the common case of node not being on PATH and gives a clear
+  # diagnostic instead of a confusing "No such file or directory" + 20s of retries.
+  verify_lace_cli "$lace_cli" || exit 1
+
   info "starting $project via lace up --workspace-folder $workspace_path ..."
 
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -130,16 +168,32 @@ start_and_connect() {
   up_output=$("$lace_cli" up --workspace-folder "$workspace_path" --skip-metadata-validation 2>&1) || up_exit=$?
   up_exit=${up_exit:-0}
 
-  if [[ $up_exit -ne 0 ]]; then
-    info "warning: lace up exited with code $up_exit (container may still have started)"
-    info "lace up output:"
-    echo "$up_output" | head -20 >&2
+  if [[ $up_exit -eq 127 ]]; then
+    # Exit 127 = command/interpreter not found. The container definitely did not start.
+    err "lace CLI failed to execute (exit 127: command not found)"
+    err "this usually means the node runtime is not on PATH"
+    err ""
+    err "lace CLI: $lace_cli"
+    if [[ -n "$up_output" ]]; then
+      err "output: $up_output"
+    fi
+    exit 1
+  elif [[ $up_exit -eq 126 ]]; then
+    # Exit 126 = permission denied or not executable
+    err "lace CLI is not executable (exit 126: permission denied)"
+    err "lace CLI: $lace_cli"
+    exit 1
+  elif [[ $up_exit -ne 0 ]]; then
+    # Non-zero but not 126/127: lace ran but reported failure.
+    # The container may still have started (e.g. postStartCommand failure).
+    # Don't dump the stack trace yet -- wait to see if the container is discoverable.
+    # If discovery succeeds, it was just a lifecycle hook failure (common, harmless).
+    info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
   else
     info "container started successfully"
   fi
 
   # Re-discover to get the current port (may have shifted after restart)
-  info "re-discovering projects..."
   local port=""
   local attempts=0
   local max_attempts=10
@@ -165,15 +219,21 @@ start_and_connect() {
 
   if [[ -z "$port" ]]; then
     if [[ $up_exit -ne 0 ]]; then
-      err "lace up failed and container is not discoverable"
-      err "full lace up output:"
-      echo "$up_output" >&2
+      err "lace up failed (exit $up_exit) and container is not discoverable"
+      err "lace up output (last 15 lines):"
+      echo "$up_output" | tail -15 >&2
     else
       err "container started but not discoverable after $max_attempts attempts"
       err "the container may need more time to start SSH"
     fi
     err "try: wez-into $project"
     exit 1
+  fi
+
+  # If lace up failed but the container IS discoverable, just note it briefly.
+  # The stack trace is noise -- the container is running and we can connect.
+  if [[ $up_exit -ne 0 ]]; then
+    info "container is running despite lace up exit $up_exit (likely a lifecycle hook failure)"
   fi
 
   do_connect "$project" "$port"
@@ -235,13 +295,17 @@ refresh_host_key() {
   mkdir -p "$(dirname "$LACE_KNOWN_HOSTS")"
   touch "$LACE_KNOWN_HOSTS"
 
-  # Remove stale entry for this port (ignores errors if no entry exists)
-  ssh-keygen -f "$LACE_KNOWN_HOSTS" -R "[localhost]:$port" 2>/dev/null || true
+  # Remove stale entry for this port (ignores errors if no entry exists).
+  # ssh-keygen -R writes informational messages to stdout (not stderr),
+  # so we must suppress both streams.
+  ssh-keygen -f "$LACE_KNOWN_HOSTS" -R "[localhost]:$port" &>/dev/null || true
 
   # Pre-populate with the container's current host key.
   # ssh-keyscan is lightweight and fast for localhost connections.
+  # Filter to key lines only (skip comments starting with #) to prevent
+  # accumulating dead comment lines across repeated invocations.
   local keys
-  keys=$(ssh-keyscan -p "$port" localhost 2>/dev/null) || true
+  keys=$(ssh-keyscan -p "$port" localhost 2>/dev/null | grep -v '^#') || true
   if [[ -n "$keys" ]]; then
     echo "$keys" >> "$LACE_KNOWN_HOSTS"
   else
@@ -270,6 +334,20 @@ do_connect() {
   refresh_host_key "$port"
 
   info "connecting to $project on port $port..."
+
+  # Prefer `wezterm cli spawn` when a running WezTerm instance exists.
+  # This returns immediately (non-blocking) and avoids inheriting
+  # stdout/stderr noise (xkbcommon errors, lua logs, SSH messages).
+  # WezTerm writes its own logs to $XDG_RUNTIME_DIR/wezterm/.
+  if wezterm cli list &>/dev/null; then
+    wezterm cli spawn --domain-name "lace:$port" --new-window --workspace "$project"
+    return 0
+  fi
+
+  # No running instance -- fall back to exec wezterm connect.
+  # Suppress xkbcommon errors from WezTerm's older bundled libxkbcommon
+  # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
+  export XKB_LOG_LEVEL=10  # critical only
   exec wezterm connect "lace:$port" --workspace "$project"
 }
 
@@ -356,6 +434,7 @@ if [[ -n "$PROJECT" ]]; then
       info "$PROJECT is already running"
     fi
     do_connect "$PROJECT" "$port"
+    exit 0  # reached only if exec in do_connect fails (e.g. dry-run already exits)
   fi
 
   # Step 2: If --start, look for stopped containers
@@ -371,6 +450,7 @@ if [[ -n "$PROJECT" ]]; then
 
     if [[ -n "$workspace_path" ]]; then
       start_and_connect "$PROJECT" "$workspace_path"
+      exit 0
     else
       # Not found in stopped containers either
       err "project '$PROJECT' not found in running or stopped containers"
@@ -468,6 +548,7 @@ if [[ "$START" == "true" ]]; then
     else
       start_and_connect "$name" "$extra"
     fi
+    exit 0
   fi
 
   # Multiple items -- show picker
@@ -496,6 +577,7 @@ if [[ "$START" == "true" ]]; then
       else
         start_and_connect "$name" "$extra"
       fi
+      exit 0
     fi
   done
 
@@ -526,6 +608,7 @@ if [[ ${#PROJECTS[@]} -eq 1 ]]; then
   IFS=: read -r name port user path <<< "${PROJECTS[0]}"
   info "one project found: $name"
   do_connect "$name" "$port"
+  exit 0
 fi
 
 # Multiple projects -- show picker
@@ -548,6 +631,7 @@ for proj in "${PROJECTS[@]}"; do
   if [[ "${proj%%:*}" == "$PROJECT" ]]; then
     IFS=: read -r _ port _ _ <<< "$proj"
     do_connect "$PROJECT" "$port"
+    exit 0
   fi
 done
 

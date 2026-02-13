@@ -151,7 +151,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
       // Validate each feature's options and port declarations
       for (const [featureId, metadata] of metadataMap) {
-        if (!metadata) continue; // null only when skipValidation=true
+        if (!metadata) continue; // null when skipValidation=true and both annotation + blob fallback fail
 
         // Validate user-provided options exist in schema
         const optionResult = validateFeatureOptions(

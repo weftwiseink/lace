@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { RunSubprocess } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
+import { fetchFromBlob } from "./oci-blob-fallback";
 
 // ── Types ──
 
@@ -70,19 +71,40 @@ export interface FetchOptions {
   cacheDir?: string;
 }
 
+export type MetadataFetchKind =
+  | "fetch_failed" // CLI non-zero exit (network, auth, registry)
+  | "invalid_response" // CLI returned unparseable output
+  | "annotation_invalid" // Annotation present but malformed JSON
+  | "blob_fallback_failed"; // Blob download/extraction failed after annotation missing
+
 /** Error thrown when metadata cannot be fetched and skipValidation is false. */
 export class MetadataFetchError extends Error {
   constructor(
     public readonly featureId: string,
     public readonly reason: string,
+    public readonly kind: MetadataFetchKind,
     public readonly cause?: Error,
   ) {
-    super(
-      `Failed to fetch metadata for feature "${featureId}": ${reason}. ` +
-        `This indicates a problem with your build environment (network, auth, or registry). ` +
-        `Use --skip-metadata-validation to bypass this check.`,
-    );
+    super(MetadataFetchError.formatMessage(featureId, reason, kind));
     this.name = "MetadataFetchError";
+  }
+
+  private static formatMessage(
+    featureId: string,
+    reason: string,
+    kind: MetadataFetchKind,
+  ): string {
+    const base = `Failed to fetch metadata for feature "${featureId}": ${reason}.`;
+    switch (kind) {
+      case "fetch_failed":
+        return `${base} This indicates a problem with your build environment (network, auth, or registry). Use --skip-metadata-validation to bypass this check.`;
+      case "invalid_response":
+        return `${base} The devcontainer CLI returned unexpected output. Use --skip-metadata-validation to bypass this check.`;
+      case "annotation_invalid":
+        return `${base} The feature's metadata annotation is malformed. Contact the feature maintainer. Use --skip-metadata-validation to bypass this check.`;
+      case "blob_fallback_failed":
+        return `${base} The feature lacks an OCI annotation and the tarball fallback also failed. Use --skip-metadata-validation to bypass this check.`;
+    }
   }
 }
 
@@ -115,8 +137,10 @@ interface ReadFsCacheOptions {
 /** Shape of the OCI manifest JSON returned by the devcontainer CLI. */
 interface OciManifest {
   annotations?: Record<string, string>;
+  layers?: Array<{ digest?: string; mediaType?: string; size?: number }>;
   manifest?: {
     annotations?: Record<string, string>;
+    layers?: Array<{ digest?: string; mediaType?: string; size?: number }>;
   };
 }
 
@@ -230,6 +254,23 @@ export function isLocalPath(featureId: string): boolean {
   );
 }
 
+// ── Internal: Sentinel for annotation-missing fallback ──
+
+/**
+ * Internal sentinel error thrown by fetchFromRegistry() when the OCI manifest
+ * is fetched successfully but lacks the dev.containers.metadata annotation.
+ * Caught by fetchFeatureMetadata() to trigger async blob fallback.
+ * Not exported -- external callers see MetadataFetchError or success.
+ */
+class AnnotationMissingError extends Error {
+  constructor(
+    public readonly featureId: string,
+    public readonly manifest: OciManifest,
+  ) {
+    super(`Annotation missing for ${featureId}`);
+  }
+}
+
 // ── Internal: OCI fetch ──
 
 function fetchFromRegistry(
@@ -249,6 +290,7 @@ function fetchFromRegistry(
     throw new MetadataFetchError(
       featureId,
       `devcontainer CLI exited with code ${result.exitCode}: ${result.stderr.trim()}`,
+      "fetch_failed",
     );
   }
 
@@ -259,6 +301,7 @@ function fetchFromRegistry(
     throw new MetadataFetchError(
       featureId,
       `CLI returned invalid JSON: ${(e as Error).message}`,
+      "invalid_response",
     );
   }
 
@@ -268,10 +311,9 @@ function fetchFromRegistry(
     manifest.manifest?.annotations?.["dev.containers.metadata"] ??
     manifest.annotations?.["dev.containers.metadata"];
   if (!metadataStr) {
-    throw new MetadataFetchError(
-      featureId,
-      "OCI manifest missing dev.containers.metadata annotation",
-    );
+    // Annotation missing -- signal the async caller to attempt blob fallback.
+    // This is a normal condition for features published before CLI v0.39.0.
+    throw new AnnotationMissingError(featureId, manifest);
   }
 
   let metadata: FeatureMetadata;
@@ -281,6 +323,7 @@ function fetchFromRegistry(
     throw new MetadataFetchError(
       featureId,
       `dev.containers.metadata annotation is not valid JSON: ${(e as Error).message}`,
+      "annotation_invalid",
     );
   }
 
@@ -296,6 +339,7 @@ function fetchFromLocalPath(featureId: string): FeatureMetadata {
     throw new MetadataFetchError(
       featureId,
       `devcontainer-feature.json not found at ${metadataPath}`,
+      "fetch_failed",
     );
   }
 
@@ -306,6 +350,7 @@ function fetchFromLocalPath(featureId: string): FeatureMetadata {
     throw new MetadataFetchError(
       featureId,
       `Failed to read ${metadataPath}: ${(e as Error).message}`,
+      "fetch_failed",
       e as Error,
     );
   }
@@ -316,6 +361,7 @@ function fetchFromLocalPath(featureId: string): FeatureMetadata {
     throw new MetadataFetchError(
       featureId,
       `${metadataPath} contains invalid JSON: ${(e as Error).message}`,
+      "fetch_failed",
       e as Error,
     );
   }
@@ -370,6 +416,38 @@ export async function fetchFeatureMetadata(
 
     return metadata;
   } catch (e) {
+    // Annotation missing: attempt blob fallback (async)
+    if (e instanceof AnnotationMissingError) {
+      // Separate blob-fetch errors from cache-write errors:
+      // Only blob-fetch failures should be wrapped as blob_fallback_failed.
+      // Cache-write errors (EACCES, ENOSPC, etc.) propagate naturally.
+      let metadata: FeatureMetadata;
+      try {
+        metadata = await fetchFromBlob(e.featureId, e.manifest);
+      } catch (blobErr) {
+        const fallbackError = new MetadataFetchError(
+          featureId,
+          `OCI annotation missing and blob fallback failed: ${(blobErr as Error).message}`,
+          "blob_fallback_failed",
+          blobErr as Error,
+        );
+        if (skipValidation) {
+          console.warn(
+            `[lace] WARNING: ${fallbackError.message} (continuing due to --skip-metadata-validation)`,
+          );
+          return null;
+        }
+        throw fallbackError;
+      }
+
+      // Cache population outside the blob-error try/catch
+      memoryCache.set(featureId, metadata);
+      if (!isLocalPath(featureId)) {
+        writeFsCache(featureId, metadata, cacheDir);
+      }
+      return metadata;
+    }
+
     if (e instanceof MetadataFetchError) {
       if (skipValidation) {
         console.warn(

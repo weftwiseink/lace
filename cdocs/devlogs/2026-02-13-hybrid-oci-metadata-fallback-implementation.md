@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/feature-metadata
 type: devlog
 state: live
-status: review_ready
+status: done
 tags: [feature-metadata, oci, tarball-fallback, hybrid, implementation]
 references:
   - cdocs/proposals/2026-02-13-hybrid-oci-metadata-fallback.md

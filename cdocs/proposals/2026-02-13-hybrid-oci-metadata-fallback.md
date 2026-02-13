@@ -30,10 +30,10 @@ supersedes:
   - cdocs/proposals/2026-02-13-native-oci-metadata-client.md
   - cdocs/proposals/2026-02-13-robust-metadata-fetching.md
 last_reviewed:
-  status: revision_requested
+  status: accepted
   by: "@claude-opus-4-6"
   at: 2026-02-14T00:00:00-08:00
-  round: 1
+  round: 2
 ---
 
 # Hybrid OCI Metadata Fallback: Blob Download for Missing Annotations

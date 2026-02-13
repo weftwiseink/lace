@@ -155,9 +155,6 @@ start_and_connect() {
   fi
 
   # Run lace up and capture output.
-  # --skip-metadata-validation: some third-party features (e.g., nushell) lack
-  # OCI metadata annotations. Since we are restarting an existing container (not
-  # creating a new one), metadata validation is not critical.
   #
   # Note: lace up may exit non-zero even when the container starts successfully,
   # e.g. if postStartCommand fails (CWD mismatch, transient error). In that case
@@ -165,7 +162,7 @@ start_and_connect() {
   # proceed to discovery -- if the container is actually running and discoverable,
   # we connect anyway.
   local up_output up_exit
-  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" --skip-metadata-validation 2>&1) || up_exit=$?
+  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" 2>&1) || up_exit=$?
   up_exit=${up_exit:-0}
 
   if [[ $up_exit -eq 127 ]]; then

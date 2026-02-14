@@ -56,8 +56,18 @@ export interface LacePortDeclaration {
   protocol?: "http" | "https";
 }
 
+export interface LaceMountDeclaration {
+  /** Container target path for this mount */
+  target: string;
+  /** Human-readable description */
+  description?: string;
+  /** Whether the mount should be read-only */
+  readonly?: boolean;
+}
+
 export interface LaceCustomizations {
   ports?: Record<string, LacePortDeclaration>;
+  mounts?: Record<string, LaceMountDeclaration>;
 }
 
 export interface FetchOptions {
@@ -572,32 +582,50 @@ export function extractLaceCustomizations(
   const laceObj = lace as Record<string, unknown>;
   const ports = laceObj.ports;
 
-  if (!ports || typeof ports !== "object") {
-    // No ports declared -- valid, just no enrichment
-    return { ports: undefined };
-  }
-
-  // Validate each port entry shape
-  const validatedPorts: Record<string, LacePortDeclaration> = {};
-  for (const [key, value] of Object.entries(
-    ports as Record<string, unknown>,
-  )) {
-    if (!value || typeof value !== "object") continue;
-    const entry = value as Record<string, unknown>;
-    validatedPorts[key] = {
-      label: typeof entry.label === "string" ? entry.label : undefined,
-      onAutoForward: isValidAutoForward(entry.onAutoForward)
-        ? entry.onAutoForward
-        : undefined,
-      requireLocalPort:
-        typeof entry.requireLocalPort === "boolean"
-          ? entry.requireLocalPort
+  let validatedPorts: Record<string, LacePortDeclaration> | undefined;
+  if (ports && typeof ports === "object") {
+    // Validate each port entry shape
+    validatedPorts = {};
+    for (const [key, value] of Object.entries(
+      ports as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as Record<string, unknown>;
+      validatedPorts[key] = {
+        label: typeof entry.label === "string" ? entry.label : undefined,
+        onAutoForward: isValidAutoForward(entry.onAutoForward)
+          ? entry.onAutoForward
           : undefined,
-      protocol: isValidProtocol(entry.protocol) ? entry.protocol : undefined,
-    };
+        requireLocalPort:
+          typeof entry.requireLocalPort === "boolean"
+            ? entry.requireLocalPort
+            : undefined,
+        protocol: isValidProtocol(entry.protocol) ? entry.protocol : undefined,
+      };
+    }
   }
 
-  return { ports: validatedPorts };
+  const mounts = laceObj.mounts;
+  let validatedMounts: Record<string, LaceMountDeclaration> | undefined;
+  if (mounts && typeof mounts === "object") {
+    validatedMounts = {};
+    for (const [key, value] of Object.entries(
+      mounts as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const entry = value as Record<string, unknown>;
+      if (typeof entry.target !== "string") continue; // target is required
+      validatedMounts[key] = {
+        target: entry.target,
+        description:
+          typeof entry.description === "string" ? entry.description : undefined,
+        readonly:
+          typeof entry.readonly === "boolean" ? entry.readonly : undefined,
+      };
+    }
+  }
+
+  return { ports: validatedPorts, mounts: validatedMounts };
 }
 
 // ── Internal: Type guards ──

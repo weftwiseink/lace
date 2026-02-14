@@ -224,6 +224,58 @@ function injectForPrebuildBlock(
   }
 }
 
+/**
+ * Auto-inject mount entries for features declaring customizations.lace.mounts.
+ * For each feature mount declaration, inject a string mount entry into the
+ * config's mounts array:
+ *   "source=${lace.mount.source(featureId/mountName)},target=<target>,type=bind[,readonly]"
+ *
+ * Modifies the config in-place before template resolution.
+ * Returns the list of labels that were auto-injected.
+ */
+export function autoInjectMountTemplates(
+  config: Record<string, unknown>,
+  metadataMap: Map<string, FeatureMetadata | null>,
+): string[] {
+  const features = (config.features ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  if (Object.keys(features).length === 0) return [];
+
+  const injected: string[] = [];
+
+  for (const [fullRef] of Object.entries(features)) {
+    const shortId = extractFeatureShortId(fullRef);
+    const metadata = metadataMap.get(fullRef);
+    if (!metadata) continue;
+
+    const laceCustom = extractLaceCustomizations(metadata);
+    if (!laceCustom?.mounts) continue;
+
+    for (const [mountName, decl] of Object.entries(laceCustom.mounts)) {
+      const label = `${shortId}/${mountName}`;
+      const parts = [
+        `source=\${lace.mount.source(${label})}`,
+        `target=${decl.target}`,
+        `type=bind`,
+      ];
+      if (decl.readonly) {
+        parts.push("readonly");
+      }
+
+      // Add to mounts array
+      const mounts = (config.mounts ?? []) as string[];
+      mounts.push(parts.join(","));
+      config.mounts = mounts;
+
+      injected.push(label);
+    }
+  }
+
+  return injected;
+}
+
 // ── Template resolution ──
 
 /**

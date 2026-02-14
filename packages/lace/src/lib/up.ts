@@ -24,6 +24,7 @@ import { PortAllocator } from "./port-allocator";
 import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
 import {
   autoInjectPortTemplates,
+  autoInjectMountTemplates,
   resolveTemplates,
   generatePortEntries,
   mergePortEntries,
@@ -216,6 +217,12 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const injected = autoInjectPortTemplates(configForResolution, metadataMap);
   if (injected.length > 0) {
     console.log(`Auto-injected port templates for: ${injected.join(", ")}`);
+  }
+
+  // Step 3d: Auto-inject mount templates from feature metadata
+  const mountInjected = autoInjectMountTemplates(configForResolution, metadataMap);
+  if (mountInjected.length > 0) {
+    console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
   }
 
   // Step 3b: Warn about prebuild features with static port values and no appPort

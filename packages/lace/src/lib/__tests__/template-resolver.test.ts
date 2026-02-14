@@ -8,6 +8,7 @@ import {
   buildFeatureIdMap,
   extractPrebuildFeaturesRaw,
   autoInjectPortTemplates,
+  autoInjectMountTemplates,
   resolveTemplates,
   generatePortEntries,
   mergePortEntries,
@@ -521,6 +522,203 @@ describe("autoInjectPortTemplates", () => {
 
     // No appPort injection (prebuild features have no port metadata)
     expect(config.appPort).toBeUndefined();
+  });
+});
+
+// ── autoInjectMountTemplates ──
+
+describe("autoInjectMountTemplates", () => {
+  // Metadata with a single mount declaration
+  const featureWithMountMetadata: FeatureMetadata = {
+    id: "wezterm-server",
+    version: "1.0.0",
+    options: {
+      hostSshPort: { type: "string", default: "2222" },
+    },
+    customizations: {
+      lace: {
+        mounts: {
+          config: {
+            target: "/home/user/.config/wezterm",
+            description: "WezTerm config",
+          },
+        },
+      },
+    },
+  };
+
+  // Metadata with multiple mount declarations
+  const featureWithMultipleMountsMetadata: FeatureMetadata = {
+    id: "data-feature",
+    version: "1.0.0",
+    options: {},
+    customizations: {
+      lace: {
+        mounts: {
+          data: {
+            target: "/mnt/data",
+            description: "Persistent data store",
+          },
+          cache: {
+            target: "/mnt/cache",
+            description: "Cache directory",
+          },
+        },
+      },
+    },
+  };
+
+  // Metadata with readonly mount
+  const featureWithReadonlyMountMetadata: FeatureMetadata = {
+    id: "config-feature",
+    version: "1.0.0",
+    options: {},
+    customizations: {
+      lace: {
+        mounts: {
+          settings: {
+            target: "/etc/app/settings",
+            readonly: true,
+          },
+        },
+      },
+    },
+  };
+
+  it("injects mount entry for feature with mount declaration", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual(["wezterm-server/config"]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toBe(
+      "source=${lace.mount.source(wezterm-server/config)},target=/home/user/.config/wezterm,type=bind",
+    );
+  });
+
+  it("injects multiple mounts for feature with multiple declarations", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/org/data-feature:1": {},
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/org/data-feature:1",
+        featureWithMultipleMountsMetadata,
+      ],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toHaveLength(2);
+    expect(injected).toContain("data-feature/data");
+    expect(injected).toContain("data-feature/cache");
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(2);
+    expect(mounts.some((m: string) => m.includes("target=/mnt/data"))).toBe(true);
+    expect(mounts.some((m: string) => m.includes("target=/mnt/cache"))).toBe(true);
+  });
+
+  it("injects readonly mount when declared", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/org/config-feature:1": {},
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/org/config-feature:1",
+        featureWithReadonlyMountMetadata,
+      ],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual(["config-feature/settings"]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toBe(
+      "source=${lace.mount.source(config-feature/settings)},target=/etc/app/settings,type=bind,readonly",
+    );
+  });
+
+  it("skips features without mount metadata", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      ["ghcr.io/devcontainers/features/git:1", gitMetadata],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual([]);
+    expect(config.mounts).toBeUndefined();
+  });
+
+  it("returns empty when no features in config", () => {
+    const config: Record<string, unknown> = {};
+    const metadataMap = new Map<string, FeatureMetadata | null>();
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual([]);
+  });
+
+  it("skips features with null metadata", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        null,
+      ],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual([]);
+  });
+
+  it("appends to existing mounts array", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      },
+      mounts: ["source=/existing,target=/existing,type=bind"],
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const injected = autoInjectMountTemplates(config, metadataMap);
+
+    expect(injected).toEqual(["wezterm-server/config"]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(2);
+    expect(mounts[0]).toBe("source=/existing,target=/existing,type=bind");
+    expect(mounts[1]).toContain("wezterm-server/config");
   });
 });
 

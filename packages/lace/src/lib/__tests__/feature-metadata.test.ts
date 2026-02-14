@@ -515,6 +515,132 @@ describe("extractLaceCustomizations", () => {
     ).toBeUndefined();
   });
 
+  // Scenario: Feature with mounts declaration returns parsed mounts
+  it("extracts mounts from well-formed metadata", () => {
+    const metadata: FeatureMetadata = {
+      id: "wezterm-server",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          mounts: {
+            config: {
+              target: "/home/user/.config/wezterm",
+              description: "WezTerm config directory",
+              readonly: true,
+            },
+          },
+        },
+      },
+    };
+
+    const result = extractLaceCustomizations(metadata);
+
+    expect(result).not.toBeNull();
+    expect(result?.mounts).toBeDefined();
+    expect(result?.mounts?.config).toEqual({
+      target: "/home/user/.config/wezterm",
+      description: "WezTerm config directory",
+      readonly: true,
+    });
+  });
+
+  // Scenario: Mount declaration missing target is skipped
+  it("skips mount declarations missing required target field", () => {
+    const metadata: FeatureMetadata = {
+      id: "foo",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          mounts: {
+            noTarget: { description: "missing target" },
+            hasTarget: { target: "/data" },
+          },
+        },
+      },
+    };
+
+    const result = extractLaceCustomizations(metadata);
+
+    expect(result?.mounts).toBeDefined();
+    expect(result?.mounts?.noTarget).toBeUndefined();
+    expect(result?.mounts?.hasTarget).toEqual({
+      target: "/data",
+      description: undefined,
+      readonly: undefined,
+    });
+  });
+
+  // Scenario: Mount declaration with all fields parses correctly
+  it("parses all fields of a mount declaration", () => {
+    const metadata: FeatureMetadata = {
+      id: "data-feature",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          mounts: {
+            data: {
+              target: "/mnt/data",
+              description: "Persistent data store",
+              readonly: false,
+            },
+          },
+        },
+      },
+    };
+
+    const result = extractLaceCustomizations(metadata);
+
+    expect(result?.mounts?.data).toEqual({
+      target: "/mnt/data",
+      description: "Persistent data store",
+      readonly: false,
+    });
+  });
+
+  // Scenario: Feature with both ports and mounts returns both
+  it("returns both ports and mounts when both are declared", () => {
+    const metadata: FeatureMetadata = {
+      id: "full-feature",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          ports: {
+            httpPort: { label: "HTTP" },
+          },
+          mounts: {
+            data: { target: "/data" },
+          },
+        },
+      },
+    };
+
+    const result = extractLaceCustomizations(metadata);
+
+    expect(result?.ports).toBeDefined();
+    expect(result?.ports?.httpPort?.label).toBe("HTTP");
+    expect(result?.mounts).toBeDefined();
+    expect(result?.mounts?.data?.target).toBe("/data");
+  });
+
+  // Scenario: Non-boolean readonly is filtered out
+  it("filters out non-boolean readonly values in mount declarations", () => {
+    const metadata: FeatureMetadata = {
+      id: "foo",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          mounts: {
+            data: { target: "/data", readonly: "yes" as unknown as boolean },
+          },
+        },
+      },
+    };
+
+    const result = extractLaceCustomizations(metadata);
+
+    expect(result?.mounts?.data?.readonly).toBeUndefined();
+  });
+
   // Additional: requireLocalPort boolean
   it("accepts boolean requireLocalPort and rejects non-boolean", () => {
     const makeMetadata = (requireLocalPort: unknown): FeatureMetadata => ({

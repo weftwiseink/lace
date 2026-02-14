@@ -58,7 +58,6 @@ export function resolveSettingsPath(path: string): string {
  * Find the settings.json file following the discovery order:
  * 1. LACE_SETTINGS environment variable (file path)
  * 2. ~/.config/lace/settings.json (XDG-compliant primary location)
- * 3. ~/.lace/settings.json (legacy/simple location)
  *
  * Returns the path if found, null otherwise.
  */
@@ -80,12 +79,6 @@ export function findSettingsConfig(): string | null {
   const xdgPath = join(homedir(), ".config", "lace", "settings.json");
   if (existsSync(xdgPath)) {
     return xdgPath;
-  }
-
-  // 3. Legacy location
-  const legacyPath = join(homedir(), ".lace", "settings.json");
-  if (existsSync(legacyPath)) {
-    return legacyPath;
   }
 
   return null;

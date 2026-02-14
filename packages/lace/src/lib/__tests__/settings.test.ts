@@ -210,12 +210,6 @@ describe("findSettingsConfig", () => {
   });
 
   it("returns null when no settings file exists and no env var", () => {
-    // Create a mock home dir structure without settings
-    const mockHome = join(testDir, "home");
-    mkdirSync(join(mockHome, ".config", "lace"), { recursive: true });
-    mkdirSync(join(mockHome, ".lace"), { recursive: true });
-    // No settings.json in either location
-
     // We can't easily mock homedir(), so just verify the function
     // returns null when the real locations don't exist
     // This test is limited but verifies the null return path

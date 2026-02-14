@@ -197,7 +197,7 @@ The `alias` option provides an explicit name when multiple repos would derive th
 
 ### Settings overrides
 
-User-level settings at `~/.config/lace/settings.json` (or `~/.lace/settings.json`, or `$LACE_SETTINGS`) can override repo mounts to point at local paths instead of cloning:
+User-level settings at `~/.config/lace/settings.json` (or `$LACE_SETTINGS`) can override repo mounts to point at local paths instead of cloning:
 
 ```jsonc
 {
@@ -254,8 +254,6 @@ Lace stores data in three locations: a per-project `.lace/` directory, a user-le
   cache/features/<encoded-id>.json       # OCI feature metadata cache
   <project-id>/repos/<name-or-alias>/    # Shallow git clones for repo mounts
 
-~/.lace/settings.json                    # Legacy settings fallback
-
 <workspace>/.lace/                       # Per-project, gitignored
   devcontainer.json                      # Generated extended config
   port-assignments.json                  # Persisted port allocations
@@ -277,7 +275,7 @@ Lace also modifies `.devcontainer/Dockerfile` (the FROM line) and `.devcontainer
 
 ### Configuration
 
-**Settings file** (`~/.config/lace/settings.json`, JSONC format): discovered via `$LACE_SETTINGS` env var, then `~/.config/lace/settings.json`, then `~/.lace/settings.json`. Currently supports only `repoMounts` overrides (see [Settings overrides](#settings-overrides)).
+**Settings file** (`~/.config/lace/settings.json`, JSONC format): discovered via `$LACE_SETTINGS` env var, then `~/.config/lace/settings.json`. Currently supports only `repoMounts` overrides (see [Settings overrides](#settings-overrides)).
 
 **Environment variables**: `LACE_SETTINGS` — override path to settings file (must exist if set).
 

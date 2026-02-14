@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/template-variables
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [mount-resolver, template-variables, settings, extensibility]
 related_to:
   - cdocs/proposals/2026-02-14-structured-devcontainer-output.md

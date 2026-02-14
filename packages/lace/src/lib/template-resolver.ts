@@ -35,6 +35,7 @@ export interface ParsedFeatureRef {
 
 const LACE_PORT_PATTERN = /\$\{lace\.port\(([^)]+)\)\}/g;
 const LACE_MOUNT_SOURCE_PATTERN = /\$\{lace\.mount\.source\(([^)]+)\)\}/g;
+const LACE_MOUNT_TARGET_PATTERN = /\$\{lace\.mount\.target\(([^)]+)\)\}/g;
 const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\(|mount\.source\(|mount\.target\()([^}]+)\}/;
 const LACE_PORT_FULL_MATCH = /^\$\{lace\.port\(([^)]+)\)\}$/;
 
@@ -287,6 +288,7 @@ export async function resolveTemplates(
   config: Record<string, unknown>,
   portAllocator: PortAllocator,
   mountResolver?: MountPathResolver,
+  mountTargetMap?: Map<string, string>,
 ): Promise<TemplateResolutionResult> {
   const features = (config.features ?? {}) as Record<string, unknown>;
   const prebuildFeatures = extractPrebuildFeaturesRaw(config);
@@ -302,6 +304,7 @@ export async function resolveTemplates(
     allocations,
     warnings,
     mountResolver,
+    mountTargetMap,
   )) as Record<string, unknown>;
 
   const mountAssignments = mountResolver?.getAssignments() ?? [];
@@ -318,14 +321,15 @@ async function walkAndResolve(
   allocations: PortAllocation[],
   warnings: string[],
   mountResolver?: MountPathResolver,
+  mountTargetMap?: Map<string, string>,
 ): Promise<unknown> {
   if (typeof value === "string") {
-    return resolveStringValue(value, featureIdMap, portAllocator, allocations, mountResolver);
+    return resolveStringValue(value, featureIdMap, portAllocator, allocations, mountResolver, mountTargetMap);
   }
   if (Array.isArray(value)) {
     return Promise.all(
       value.map((item) =>
-        walkAndResolve(item, featureIdMap, portAllocator, allocations, warnings, mountResolver),
+        walkAndResolve(item, featureIdMap, portAllocator, allocations, warnings, mountResolver, mountTargetMap),
       ),
     );
   }
@@ -339,6 +343,7 @@ async function walkAndResolve(
         allocations,
         warnings,
         mountResolver,
+        mountTargetMap,
       );
     }
     return obj;
@@ -358,6 +363,7 @@ async function resolveStringValue(
   portAllocator: PortAllocator,
   allocations: PortAllocation[],
   mountResolver?: MountPathResolver,
+  mountTargetMap?: Map<string, string>,
 ): Promise<string | number> {
   // Check for unknown ${lace.*} expressions (anything that isn't lace.port(...), lace.mount.source(...), lace.mount.target(...))
   const unknownMatch = value.match(LACE_UNKNOWN_PATTERN);
@@ -371,13 +377,16 @@ async function resolveStringValue(
   // Skip strings with no lace templates
   LACE_PORT_PATTERN.lastIndex = 0;
   LACE_MOUNT_SOURCE_PATTERN.lastIndex = 0;
+  LACE_MOUNT_TARGET_PATTERN.lastIndex = 0;
   const hasPortTemplates = LACE_PORT_PATTERN.test(value);
   const hasMountTemplates = LACE_MOUNT_SOURCE_PATTERN.test(value);
-  if (!hasPortTemplates && !hasMountTemplates) {
+  const hasMountTargetTemplates = LACE_MOUNT_TARGET_PATTERN.test(value);
+  if (!hasPortTemplates && !hasMountTemplates && !hasMountTargetTemplates) {
     return value;
   }
   LACE_PORT_PATTERN.lastIndex = 0; // Reset regex state
   LACE_MOUNT_SOURCE_PATTERN.lastIndex = 0;
+  LACE_MOUNT_TARGET_PATTERN.lastIndex = 0;
 
   // Type coercion: if the entire string is one ${lace.port()} expression, return integer
   const fullMatch = value.match(LACE_PORT_FULL_MATCH);
@@ -423,6 +432,27 @@ async function resolveStringValue(
     for (const m of mountMatches) {
       const resolvedPath = mountResolver.resolve(m.label);
       result = result.replace(m.fullMatch, resolvedPath);
+    }
+  }
+
+  // Mount target resolution (always returns string, no type coercion)
+  if (mountTargetMap) {
+    LACE_MOUNT_TARGET_PATTERN.lastIndex = 0;
+    const targetMatches: Array<{ fullMatch: string; label: string }> = [];
+    let targetMatch: RegExpExecArray | null;
+    while ((targetMatch = LACE_MOUNT_TARGET_PATTERN.exec(result)) !== null) {
+      targetMatches.push({ fullMatch: targetMatch[0], label: targetMatch[1] });
+    }
+    for (const m of targetMatches) {
+      const targetPath = mountTargetMap.get(m.label);
+      if (!targetPath) {
+        const available = Array.from(mountTargetMap.keys()).join(", ");
+        throw new Error(
+          `Mount target label "${m.label}" not found in feature metadata. ` +
+            `Available mount labels: ${available || "(none)"}`,
+        );
+      }
+      result = result.replace(m.fullMatch, targetPath);
     }
   }
 
@@ -553,6 +583,31 @@ export function mergePortEntries(
   }
 
   return merged;
+}
+
+/**
+ * Build a map from mount label (shortId/mountName) to container target path
+ * from feature metadata. Used during template resolution to resolve
+ * ${lace.mount.target(namespace/label)} expressions.
+ */
+export function buildMountTargetMap(
+  metadataMap: Map<string, FeatureMetadata | null>,
+): Map<string, string> {
+  const result = new Map<string, string>();
+
+  for (const [fullRef, metadata] of metadataMap) {
+    if (!metadata) continue;
+    const shortId = extractFeatureShortId(fullRef);
+    const laceCustom = extractLaceCustomizations(metadata);
+    if (!laceCustom?.mounts) continue;
+
+    for (const [mountName, decl] of Object.entries(laceCustom.mounts)) {
+      const label = `${shortId}/${mountName}`;
+      result.set(label, decl.target);
+    }
+  }
+
+  return result;
 }
 
 /**

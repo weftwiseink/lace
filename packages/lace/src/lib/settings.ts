@@ -5,11 +5,22 @@ import { homedir } from "node:os";
 import * as jsonc from "jsonc-parser";
 
 /**
+ * Per-mount override settings in the user's configuration.
+ */
+export interface MountOverrideSettings {
+  /** Absolute or tilde-prefixed path to mount from the host */
+  source: string;
+}
+
+/**
  * User-level lace settings configuration.
  */
 export interface LaceSettings {
   repoMounts?: {
     [repoId: string]: RepoMountSettings;
+  };
+  mounts?: {
+    [label: string]: MountOverrideSettings;
   };
 }
 
@@ -114,6 +125,15 @@ export function readSettingsConfig(filePath: string): LaceSettings {
         settings.overrideMount.source = resolveSettingsPath(
           settings.overrideMount.source,
         );
+      }
+    }
+  }
+
+  // Expand paths in mount overrides
+  if (raw.mounts) {
+    for (const [label, settings] of Object.entries(raw.mounts)) {
+      if (settings.source) {
+        settings.source = resolveSettingsPath(settings.source);
       }
     }
   }

@@ -1,0 +1,314 @@
+// IMPLEMENTATION_VALIDATION
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import {
+  mkdirSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
+import { join, basename } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { MountPathResolver } from "@/lib/mount-resolver";
+import type { MountAssignmentsFile } from "@/lib/mount-resolver";
+import type { LaceSettings } from "@/lib/settings";
+import { deriveProjectId } from "@/lib/repo-clones";
+
+let testDir: string;
+let workspaceFolder: string;
+/** Auto-created default mount dirs to clean up after tests */
+let createdMountDirs: string[];
+
+beforeEach(() => {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  testDir = join(tmpdir(), `lace-test-mount-resolver-${suffix}`);
+  workspaceFolder = join(testDir, "workspace");
+  mkdirSync(workspaceFolder, { recursive: true });
+  createdMountDirs = [];
+});
+
+afterEach(() => {
+  rmSync(testDir, { recursive: true, force: true });
+  // Clean up any auto-created default mount directories under ~/.config/lace
+  for (const dir of createdMountDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Track a default mount path for cleanup.
+ * Returns the path for the project's mounts directory under ~/.config/lace.
+ */
+function trackProjectMountsDir(wf: string): string {
+  const projectId = deriveProjectId(wf);
+  const mountsDir = join(homedir(), ".config", "lace", projectId, "mounts");
+  createdMountDirs.push(mountsDir);
+  return mountsDir;
+}
+
+// ── Default path derivation ──
+
+describe("MountPathResolver — default path derivation", () => {
+  it("returns ~/.config/lace/<projectId>/mounts/namespace/label for default resolution", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    const result = resolver.resolve("myns/data");
+
+    const projectId = deriveProjectId(workspaceFolder);
+    const expected = join(
+      homedir(),
+      ".config",
+      "lace",
+      projectId,
+      "mounts",
+      "myns",
+      "data",
+    );
+    expect(result).toBe(expected);
+  });
+
+  it("uses workspace folder basename for projectId derivation", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    const result = resolver.resolve("ns/label");
+
+    const projectId = deriveProjectId(workspaceFolder);
+    expect(projectId).toBe(basename(workspaceFolder).toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-"));
+    expect(result).toContain(projectId);
+  });
+});
+
+// ── Settings override ──
+
+describe("MountPathResolver — settings override", () => {
+  it("returns expanded custom path when override exists in settings", () => {
+    const overrideDir = join(testDir, "custom-mount");
+    mkdirSync(overrideDir, { recursive: true });
+
+    const settings: LaceSettings = {
+      mounts: {
+        "myns/data": { source: overrideDir },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    const result = resolver.resolve("myns/data");
+    expect(result).toBe(overrideDir);
+  });
+
+  it("records override assignment as isOverride: true", () => {
+    const overrideDir = join(testDir, "custom-mount");
+    mkdirSync(overrideDir, { recursive: true });
+
+    const settings: LaceSettings = {
+      mounts: {
+        "myns/data": { source: overrideDir },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+    resolver.resolve("myns/data");
+
+    const assignments = resolver.getAssignments();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].isOverride).toBe(true);
+  });
+});
+
+// ── Auto-create default directory ──
+
+describe("MountPathResolver — auto-create default directory", () => {
+  it("creates the default directory on disk when resolving", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    const result = resolver.resolve("myns/data");
+    expect(existsSync(result)).toBe(true);
+  });
+});
+
+// ── No auto-create for overrides ──
+
+describe("MountPathResolver — no auto-create for overrides", () => {
+  it("does not create directories for override paths", () => {
+    const overrideDir = join(testDir, "existing-mount");
+    mkdirSync(overrideDir, { recursive: true });
+
+    // Create a sibling path that doesn't exist
+    const nonExistentSibling = join(testDir, "nonexistent-sibling");
+
+    const settings: LaceSettings = {
+      mounts: {
+        "myns/data": { source: overrideDir },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+    resolver.resolve("myns/data");
+
+    // The override path exists (it was pre-created)
+    expect(existsSync(overrideDir)).toBe(true);
+    // But we didn't create anything new in the test dir other than what was explicitly created
+    expect(existsSync(nonExistentSibling)).toBe(false);
+  });
+});
+
+// ── Override path missing ──
+
+describe("MountPathResolver — override path missing", () => {
+  it("throws hard error when override source path does not exist", () => {
+    const settings: LaceSettings = {
+      mounts: {
+        "myns/data": { source: join(testDir, "nonexistent") },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("myns/data")).toThrow(
+      /Mount override source does not exist/,
+    );
+    expect(() => resolver.resolve("myns/data")).toThrow(
+      /"myns\/data"/,
+    );
+  });
+});
+
+// ── Persistence ──
+
+describe("MountPathResolver — persistence", () => {
+  it("saves to .lace/mount-assignments.json and loads on new instance", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+
+    // Create first resolver, resolve a label, and save
+    const resolver1 = new MountPathResolver(workspaceFolder, settings);
+    const path1 = resolver1.resolve("myns/data");
+    resolver1.save();
+
+    // Verify the file was written
+    const persistPath = join(workspaceFolder, ".lace", "mount-assignments.json");
+    expect(existsSync(persistPath)).toBe(true);
+
+    // Parse and verify the file contents
+    const raw = JSON.parse(
+      readFileSync(persistPath, "utf-8"),
+    ) as MountAssignmentsFile;
+    expect(raw.assignments["myns/data"]).toBeDefined();
+    expect(raw.assignments["myns/data"].resolvedSource).toBe(path1);
+
+    // Create second resolver -- it should load the persisted state
+    const resolver2 = new MountPathResolver(workspaceFolder, settings);
+    const path2 = resolver2.resolve("myns/data");
+    expect(path2).toBe(path1);
+
+    // Assignments should match
+    const assignments = resolver2.getAssignments();
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].label).toBe("myns/data");
+  });
+});
+
+// ── Label validation ──
+
+describe("MountPathResolver — label validation", () => {
+  it("throws on label with spaces", () => {
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("my ns/data")).toThrow(
+      /Invalid mount label/,
+    );
+  });
+
+  it("throws on label with uppercase characters", () => {
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("MyNs/Data")).toThrow(
+      /Invalid mount label/,
+    );
+  });
+
+  it("throws on label missing namespace (no slash)", () => {
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("data")).toThrow(/Invalid mount label/);
+    expect(() => resolver.resolve("data")).toThrow(
+      /exactly one "\/"/,
+    );
+  });
+
+  it("throws on empty label", () => {
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("")).toThrow(/Invalid mount label/);
+  });
+
+  it("throws on label with too many slashes", () => {
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    expect(() => resolver.resolve("a/b/c")).toThrow(/Invalid mount label/);
+  });
+
+  it("accepts valid labels with hyphens and underscores", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    // Should not throw
+    const result = resolver.resolve("my-ns_1/data-file_2");
+    expect(result).toBeDefined();
+  });
+});
+
+// ── Multiple resolves same label ──
+
+describe("MountPathResolver — idempotent resolution", () => {
+  it("returns the same path when resolving the same label twice", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    const path1 = resolver.resolve("myns/data");
+    const path2 = resolver.resolve("myns/data");
+    expect(path1).toBe(path2);
+  });
+
+  it("only creates one assignment for multiple resolves of the same label", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(workspaceFolder, settings);
+
+    resolver.resolve("myns/data");
+    resolver.resolve("myns/data");
+    resolver.resolve("myns/data");
+
+    const assignments = resolver.getAssignments();
+    expect(assignments).toHaveLength(1);
+  });
+});
+
+// ── ProjectId derivation ──
+
+describe("MountPathResolver — projectId derivation", () => {
+  it("derives projectId from workspace folder basename", () => {
+    // Create a workspace with a distinctive name
+    const customWorkspace = join(testDir, "My-Cool_Project");
+    mkdirSync(customWorkspace, { recursive: true });
+    trackProjectMountsDir(customWorkspace);
+
+    const settings: LaceSettings = {};
+    const resolver = new MountPathResolver(customWorkspace, settings);
+    const result = resolver.resolve("ns/label");
+
+    // deriveProjectId lowercases and replaces non-alphanumeric with hyphens
+    const expectedProjectId = "my-cool-project";
+    expect(result).toContain(expectedProjectId);
+    expect(result).toContain(join("mounts", "ns", "label"));
+  });
+});

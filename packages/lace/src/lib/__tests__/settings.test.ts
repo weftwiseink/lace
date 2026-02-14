@@ -253,3 +253,75 @@ describe("loadSettings", () => {
     ).toBe("/test/path");
   });
 });
+
+// --- Mount overrides ---
+
+describe("readSettingsConfig — mount overrides", () => {
+  it("parses settings with mounts key correctly", () => {
+    const settingsPath = join(testDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        mounts: {
+          "myns/data": { source: "/absolute/path/data" },
+          "other/cache": { source: "/tmp/cache" },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = readSettingsConfig(settingsPath);
+    expect(result.mounts).toBeDefined();
+    expect(result.mounts?.["myns/data"]?.source).toBe("/absolute/path/data");
+    expect(result.mounts?.["other/cache"]?.source).toBe("/tmp/cache");
+  });
+
+  it("expands tilde in mount override source paths", () => {
+    const settingsPath = join(testDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        mounts: {
+          "myns/data": { source: "~/custom/data" },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = readSettingsConfig(settingsPath);
+    expect(result.mounts?.["myns/data"]?.source).toBe(
+      join(homedir(), "custom/data"),
+    );
+  });
+
+  it("accepts empty mounts section", () => {
+    const settingsPath = join(testDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ mounts: {} }),
+      "utf-8",
+    );
+
+    const result = readSettingsConfig(settingsPath);
+    expect(result.mounts).toEqual({});
+  });
+
+  it("has mounts as undefined when only repoMounts is present", () => {
+    const settingsPath = join(testDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        repoMounts: {
+          "github.com/user/test": {
+            overrideMount: { source: "/test" },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = readSettingsConfig(settingsPath);
+    expect(result.repoMounts).toBeDefined();
+    expect(result.mounts).toBeUndefined();
+  });
+});

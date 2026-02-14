@@ -242,9 +242,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     settings = loadSettings();
   } catch (err) {
     if (err instanceof SettingsConfigError) {
-      // Settings not available -- mount overrides will not apply, but default
-      // path derivation still works. This avoids breaking existing flows that
-      // don't have a settings file.
+      console.warn(`Warning: ${err.message}. Mount overrides will not apply.`);
     } else {
       throw err;
     }

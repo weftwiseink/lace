@@ -231,6 +231,10 @@ function injectForPrebuildBlock(
  * config's mounts array:
  *   "source=${lace.mount.source(featureId/mountName)},target=<target>,type=bind[,readonly]"
  *
+ * Only processes top-level features, not prebuildFeatures. Prebuild features
+ * are baked into the image at build time and their mounts would need different
+ * lifecycle handling (not yet implemented).
+ *
  * Modifies the config in-place before template resolution.
  * Returns the list of labels that were auto-injected.
  */

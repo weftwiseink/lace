@@ -1,5 +1,5 @@
 # don't upgrade to 25! for some reason corepack doesn't come installed with it.
-FROM node:24-bookworm
+FROM lace.local/node:24-bookworm
 
 ARG ELECTRON_VERSION="39.2.7"
 ARG PLAYWRIGHT_VERSION="1.57.0"

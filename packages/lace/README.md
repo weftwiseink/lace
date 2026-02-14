@@ -240,3 +240,61 @@ lace status
 # Force rebuild after changing prebuild features
 lace prebuild --force
 ```
+
+## User-level data
+> NOTE: Updated 2026-02-14
+
+Lace stores data in three locations: a per-project `.lace/` directory, a user-level `~/.config/lace/` tree, and the local Docker daemon.
+
+### File layout
+
+```
+~/.config/lace/
+  settings.json                          # User settings (JSONC, manually created)
+  cache/features/<encoded-id>.json       # OCI feature metadata cache
+  <project-id>/repos/<name-or-alias>/    # Shallow git clones for repo mounts
+
+~/.lace/settings.json                    # Legacy settings fallback
+
+<workspace>/.lace/                       # Per-project, gitignored
+  devcontainer.json                      # Generated extended config
+  port-assignments.json                  # Persisted port allocations
+  resolved-mounts.json                   # Resolved mount specs
+  prebuild.lock                          # flock(1) exclusion file
+  prebuild/
+    Dockerfile, devcontainer.json        # Temp prebuild context
+    devcontainer-lock.json               # Seeded lock for version pinning
+    metadata.json                        # Prebuild state (original image, tag, timestamp)
+
+Docker images: lace.local/<image>:<tag>  # Local-only prebuild images
+```
+
+Lace also modifies `.devcontainer/Dockerfile` (the FROM line) and `.devcontainer/devcontainer.json` (the `image` field) during prebuild; `lace restore` reverts these.
+
+> NOTE(mjr): original design goal was for lace to be very minimalist/lightweight,
+> thus the efforts to maintain devcontainer spec compliance,
+> but the surface area for preprocessing/prebuilds has grown such that it may no longer be sensible.
+
+### Configuration
+
+**Settings file** (`~/.config/lace/settings.json`, JSONC format): discovered via `$LACE_SETTINGS` env var, then `~/.config/lace/settings.json`, then `~/.lace/settings.json`. Currently supports only `repoMounts` overrides (see [Settings overrides](#settings-overrides)).
+
+**Environment variables**: `LACE_SETTINGS` — override path to settings file (must exist if set).
+
+### Hardcoded defaults
+
+Values that are fixed today but could become user-configurable:
+
+| Value | Location | Current default |
+|-------|----------|-----------------|
+| Port range | `port-allocator.ts` | 22425–22499 |
+| Port-check timeout | `port-allocator.ts` | 100 ms |
+| Metadata cache TTL (floating tags) | `feature-metadata.ts` | 24 hours |
+| Metadata cache dir | `feature-metadata.ts` | `~/.config/lace/cache/features/` |
+| OCI token timeout | `oci-blob-fallback.ts` | 10 s |
+| OCI blob download timeout | `oci-blob-fallback.ts` | 30 s |
+| Git clone depth | `repo-clones.ts` | `--depth 1` |
+| Container mount prefix | `mounts.ts` | `/mnt/lace/repos` |
+| Docker image tag prefix | `dockerfile.ts` | `lace.local/` |
+
+Note: paths under `~/.config/lace/` do not currently honor `$XDG_CONFIG_HOME` or `$XDG_CACHE_HOME`. The cache directory is stored alongside config rather than under `$XDG_CACHE_HOME`.

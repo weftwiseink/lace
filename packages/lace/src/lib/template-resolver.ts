@@ -7,6 +7,7 @@ import type {
   FeaturePortDeclaration,
   PortAttributes,
 } from "./port-allocator";
+import type { MountPathResolver, MountAssignment } from "./mount-resolver";
 
 // ── Types ──
 
@@ -18,6 +19,8 @@ export interface TemplateResolutionResult {
   allocations: PortAllocation[];
   /** Warnings generated during resolution (e.g., metadata unavailable). */
   warnings: string[];
+  /** All mount path assignments made during resolution. */
+  mountAssignments: MountAssignment[];
 }
 
 /** Parsed result of extracting a featureId from a feature reference. */
@@ -31,7 +34,8 @@ export interface ParsedFeatureRef {
 // ── Patterns ──
 
 const LACE_PORT_PATTERN = /\$\{lace\.port\(([^)]+)\)\}/g;
-const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\()([^}]+)\}/;
+const LACE_MOUNT_SOURCE_PATTERN = /\$\{lace\.mount\.source\(([^)]+)\)\}/g;
+const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\(|mount\.source\(|mount\.target\()([^}]+)\}/;
 const LACE_PORT_FULL_MATCH = /^\$\{lace\.port\(([^)]+)\)\}$/;
 
 // ── Prebuild features raw access ──
@@ -230,6 +234,7 @@ function injectForPrebuildBlock(
 export async function resolveTemplates(
   config: Record<string, unknown>,
   portAllocator: PortAllocator,
+  mountResolver?: MountPathResolver,
 ): Promise<TemplateResolutionResult> {
   const features = (config.features ?? {}) as Record<string, unknown>;
   const prebuildFeatures = extractPrebuildFeaturesRaw(config);
@@ -244,9 +249,11 @@ export async function resolveTemplates(
     portAllocator,
     allocations,
     warnings,
+    mountResolver,
   )) as Record<string, unknown>;
 
-  return { resolvedConfig, allocations, warnings };
+  const mountAssignments = mountResolver?.getAssignments() ?? [];
+  return { resolvedConfig, allocations, warnings, mountAssignments };
 }
 
 /**
@@ -258,14 +265,15 @@ async function walkAndResolve(
   portAllocator: PortAllocator,
   allocations: PortAllocation[],
   warnings: string[],
+  mountResolver?: MountPathResolver,
 ): Promise<unknown> {
   if (typeof value === "string") {
-    return resolveStringValue(value, featureIdMap, portAllocator, allocations);
+    return resolveStringValue(value, featureIdMap, portAllocator, allocations, mountResolver);
   }
   if (Array.isArray(value)) {
     return Promise.all(
       value.map((item) =>
-        walkAndResolve(item, featureIdMap, portAllocator, allocations, warnings),
+        walkAndResolve(item, featureIdMap, portAllocator, allocations, warnings, mountResolver),
       ),
     );
   }
@@ -278,6 +286,7 @@ async function walkAndResolve(
         portAllocator,
         allocations,
         warnings,
+        mountResolver,
       );
     }
     return obj;
@@ -296,21 +305,27 @@ async function resolveStringValue(
   featureIdMap: Map<string, string>,
   portAllocator: PortAllocator,
   allocations: PortAllocation[],
+  mountResolver?: MountPathResolver,
 ): Promise<string | number> {
-  // Check for unknown ${lace.*} expressions (anything that isn't lace.port(...))
+  // Check for unknown ${lace.*} expressions (anything that isn't lace.port(...), lace.mount.source(...), lace.mount.target(...))
   const unknownMatch = value.match(LACE_UNKNOWN_PATTERN);
   if (unknownMatch) {
     throw new Error(
       `Unknown template variable: \${lace.${unknownMatch[1]}}. ` +
-        `The only supported template is \${lace.port(featureId/optionName)}.`,
+        `Supported templates: \${lace.port(featureId/optionName)}, \${lace.mount.source(namespace/label)}, \${lace.mount.target(namespace/label)}.`,
     );
   }
 
   // Skip strings with no lace templates
-  if (!LACE_PORT_PATTERN.test(value)) {
+  LACE_PORT_PATTERN.lastIndex = 0;
+  LACE_MOUNT_SOURCE_PATTERN.lastIndex = 0;
+  const hasPortTemplates = LACE_PORT_PATTERN.test(value);
+  const hasMountTemplates = LACE_MOUNT_SOURCE_PATTERN.test(value);
+  if (!hasPortTemplates && !hasMountTemplates) {
     return value;
   }
   LACE_PORT_PATTERN.lastIndex = 0; // Reset regex state
+  LACE_MOUNT_SOURCE_PATTERN.lastIndex = 0;
 
   // Type coercion: if the entire string is one ${lace.port()} expression, return integer
   const fullMatch = value.match(LACE_PORT_FULL_MATCH);
@@ -344,6 +359,21 @@ async function resolveStringValue(
     );
     result = result.replace(m.fullMatch, String(port));
   }
+
+  // Mount source resolution (always returns string, no type coercion)
+  if (mountResolver) {
+    LACE_MOUNT_SOURCE_PATTERN.lastIndex = 0;
+    const mountMatches: Array<{ fullMatch: string; label: string }> = [];
+    let mountMatch: RegExpExecArray | null;
+    while ((mountMatch = LACE_MOUNT_SOURCE_PATTERN.exec(result)) !== null) {
+      mountMatches.push({ fullMatch: mountMatch[0], label: mountMatch[1] });
+    }
+    for (const m of mountMatches) {
+      const resolvedPath = mountResolver.resolve(m.label);
+      result = result.replace(m.fullMatch, resolvedPath);
+    }
+  }
+
   return result;
 }
 

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import {
   extractFeatureShortId,
   buildFeatureIdMap,
@@ -18,10 +18,14 @@ import {
 import { PortAllocator } from "../port-allocator";
 import type { PortAllocation } from "../port-allocator";
 import type { FeatureMetadata } from "../feature-metadata";
+import { MountPathResolver } from "../mount-resolver";
+import { deriveProjectId } from "../repo-clones";
 
 // ── Helpers ──
 
 let workspaceRoot: string;
+/** Auto-created default mount dirs to clean up after tests */
+let createdMountDirs: string[];
 
 beforeEach(() => {
   workspaceRoot = join(
@@ -29,11 +33,27 @@ beforeEach(() => {
     `lace-test-resolver-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   mkdirSync(workspaceRoot, { recursive: true });
+  createdMountDirs = [];
 });
 
 afterEach(() => {
   rmSync(workspaceRoot, { recursive: true, force: true });
+  // Clean up any auto-created default mount directories under ~/.config/lace
+  for (const dir of createdMountDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
+
+/**
+ * Track a default mount path for cleanup.
+ * Returns the path for the project's mounts directory under ~/.config/lace.
+ */
+function trackProjectMountsDir(wf: string): string {
+  const projectId = deriveProjectId(wf);
+  const mountsDir = join(homedir(), ".config", "lace", projectId, "mounts");
+  createdMountDirs.push(mountsDir);
+  return mountsDir;
+}
 
 // Standard test metadata
 const weztermMetadata: FeatureMetadata = {
@@ -657,7 +677,7 @@ describe("resolveTemplates", () => {
       /Unknown template variable: \$\{lace\.home\}/,
     );
     await expect(resolveTemplates(config, allocator)).rejects.toThrow(
-      /The only supported template/,
+      /Supported templates:/,
     );
   });
 
@@ -1367,5 +1387,285 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
     );
 
     expect(warnings).toEqual([]);
+  });
+});
+
+// ── mount template resolution ──
+
+describe("mount template resolution", () => {
+  // Test 1: LACE_UNKNOWN_PATTERN relaxation
+  it("does not reject ${lace.mount.source()} as unknown, but still rejects ${lace.nonsense()}", async () => {
+    // mount.source should pass the guard (no error thrown)
+    const configWithMountSource: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["source=${lace.mount.source(project/history)},target=/history,type=bind"],
+    };
+    trackProjectMountsDir(workspaceRoot);
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+
+    // Should not throw — mount.source passes the guard
+    await expect(
+      resolveTemplates(configWithMountSource, allocator, mountResolver),
+    ).resolves.toBeDefined();
+
+    // Nonsense lace template should still throw
+    const configWithNonsense: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        FOO: "${lace.nonsense(foo)}",
+      },
+    };
+    await expect(
+      resolveTemplates(configWithNonsense, allocator),
+    ).rejects.toThrow(/Unknown template variable/);
+  });
+
+  // Test 2: Mount source resolution in string
+  it("resolves ${lace.mount.source()} embedded in a mount string", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["source=${lace.mount.source(project/history)},target=/history,type=bind"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    // Should contain a concrete path
+    expect(mounts[0]).toMatch(/source=\/.*,target=\/history,type=bind/);
+
+    const projectId = deriveProjectId(workspaceRoot);
+    const expectedPath = join(
+      homedir(),
+      ".config",
+      "lace",
+      projectId,
+      "mounts",
+      "project",
+      "history",
+    );
+    expect(mounts[0]).toBe(`source=${expectedPath},target=/history,type=bind`);
+  });
+
+  // Test 3: Mount source standalone
+  it("resolves standalone ${lace.mount.source()} to a path string (not integer)", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        HISTORY_DIR: "${lace.mount.source(project/history)}",
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
+    expect(typeof containerEnv.HISTORY_DIR).toBe("string");
+    expect(containerEnv.HISTORY_DIR).not.toContain("${lace.mount.source(");
+    // Should be a path, not a number
+    expect(containerEnv.HISTORY_DIR).toMatch(/^\//);
+  });
+
+  // Test 4: Mixed port and mount
+  it("resolves both ${lace.port()} and ${lace.mount.source()} in the same config", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+          hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
+        },
+      },
+      mounts: ["source=${lace.mount.source(project/data)},target=/data,type=bind"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    // Port resolved to integer
+    const features = result.resolvedConfig.features as Record<string, Record<string, unknown>>;
+    const hostSshPort = features["ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"].hostSshPort;
+    expect(typeof hostSshPort).toBe("number");
+    expect(hostSshPort).toBeGreaterThanOrEqual(22425);
+
+    // Mount resolved to path
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).toMatch(/source=\/.*,target=\/data,type=bind/);
+
+    // Both allocations and mount assignments present
+    expect(result.allocations).toHaveLength(1);
+    expect(result.mountAssignments).toHaveLength(1);
+  });
+
+  // Test 5: Mount source in nested config
+  it("resolves mount source template in nested config objects", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      customizations: {
+        vscode: {
+          settings: {
+            "myExtension.historyPath": "${lace.mount.source(project/history)}",
+          },
+        },
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const customizations = result.resolvedConfig.customizations as Record<string, Record<string, Record<string, unknown>>>;
+    const historyPath = customizations.vscode.settings["myExtension.historyPath"];
+    expect(typeof historyPath).toBe("string");
+    expect(historyPath).not.toContain("${lace.mount.source(");
+    expect(historyPath).toMatch(/^\//);
+  });
+
+  // Test 6: Mount source in mounts array
+  it("resolves mount source template inside a mounts array string", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: [
+        "source=${lace.mount.source(project/cache)},target=/cache,type=bind",
+        "source=/fixed/path,target=/fixed,type=bind",
+      ],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    // First entry resolved
+    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).toMatch(/source=\/.*,target=\/cache,type=bind/);
+    // Second entry unchanged
+    expect(mounts[1]).toBe("source=/fixed/path,target=/fixed,type=bind");
+  });
+
+  // Test 7: No mount templates
+  it("passes config unchanged when no mount templates present", async () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["source=/fixed/path,target=/fixed,type=bind"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).toBe("source=/fixed/path,target=/fixed,type=bind");
+    expect(result.mountAssignments).toHaveLength(0);
+  });
+
+  // Test 8: Invalid mount label format
+  it("throws on invalid mount label format (missing slash)", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        BAD: "${lace.mount.source(noslash)}",
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    await expect(
+      resolveTemplates(config, allocator, mountResolver),
+    ).rejects.toThrow(/Invalid mount label "noslash"/);
+  });
+
+  // Test 9: Unresolved target expression
+  it("passes ${lace.mount.target()} through as literal string when no target resolver exists", async () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        TARGET: "${lace.mount.target(foo/bar)}",
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    // No mount resolver, or a mount resolver that doesn't handle targets
+    const result = await resolveTemplates(config, allocator);
+
+    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
+    // Should pass through as literal string — not rejected by guard, not resolved
+    expect(containerEnv.TARGET).toBe("${lace.mount.target(foo/bar)}");
+  });
+
+  // Test 10: mountAssignments in result
+  it("populates mountAssignments in TemplateResolutionResult", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: [
+        "source=${lace.mount.source(project/data)},target=/data,type=bind",
+        "source=${lace.mount.source(project/cache)},target=/cache,type=bind",
+      ],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    expect(result.mountAssignments).toHaveLength(2);
+    const labels = result.mountAssignments.map((a) => a.label);
+    expect(labels).toContain("project/data");
+    expect(labels).toContain("project/cache");
+    // Each assignment has a resolved source path
+    for (const assignment of result.mountAssignments) {
+      expect(assignment.resolvedSource).toMatch(/^\//);
+      expect(assignment.isOverride).toBe(false);
+    }
+  });
+
+  // Test 11: No resolver supplied
+  it("leaves ${lace.mount.source()} as literal string when no resolver is supplied", async () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        MOUNT_SRC: "${lace.mount.source(foo/bar)}",
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    // No mountResolver passed — expressions should remain as-is
+    const result = await resolveTemplates(config, allocator);
+
+    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
+    expect(containerEnv.MOUNT_SRC).toBe("${lace.mount.source(foo/bar)}");
+    expect(result.mountAssignments).toHaveLength(0);
   });
 });

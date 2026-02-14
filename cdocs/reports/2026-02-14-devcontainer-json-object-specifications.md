@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-14T12:00:00-08:00
 task_list: lace/devcontainer-spec-research
 type: report
-state: live
-status: wip
+state: archived
+status: archived
 tags: [devcontainer, specification, schema, mounts, ports, research, reference]
 ---
 

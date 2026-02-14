@@ -33,6 +33,8 @@ import {
   extractPrebuildFeaturesRaw,
   type TemplateResolutionResult,
 } from "./template-resolver";
+import { MountPathResolver } from "./mount-resolver";
+import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -226,11 +228,27 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.warn(`Warning: ${warning}`);
   }
 
+  // Step 3c: Create mount path resolver for ${lace.mount.source()} resolution
+  let settings: LaceSettings = {};
+  try {
+    settings = loadSettings();
+  } catch (err) {
+    if (err instanceof SettingsConfigError) {
+      // Settings not available -- mount overrides will not apply, but default
+      // path derivation still works. This avoids breaking existing flows that
+      // don't have a settings file.
+    } else {
+      throw err;
+    }
+  }
+  const mountResolver = new MountPathResolver(workspaceFolder, settings);
+
   // Step 4: Resolve all templates (auto-injected + user-written)
   const portAllocator = new PortAllocator(workspaceFolder);
   try {
-    templateResult = await resolveTemplates(configForResolution, portAllocator);
+    templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver);
     portAllocator.save(); // Persist assignments after successful resolution
+    mountResolver.save(); // Persist mount assignments after successful resolution
 
     if (templateResult.allocations.length > 0) {
       const portSummary = templateResult.allocations
@@ -250,11 +268,25 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       };
     }
 
-    if (templateResult.allocations.length > 0) {
+    if (templateResult.allocations.length > 0 || templateResult.mountAssignments.length > 0) {
+      const parts: string[] = [];
+      if (templateResult.allocations.length > 0) {
+        parts.push(`${templateResult.allocations.length} port template(s)`);
+      }
+      if (templateResult.mountAssignments.length > 0) {
+        parts.push(`${templateResult.mountAssignments.length} mount template(s)`);
+      }
       result.phases.templateResolution = {
         exitCode: 0,
-        message: `Resolved ${templateResult.allocations.length} port template(s)`,
+        message: `Resolved ${parts.join(" and ")}`,
       };
+    }
+
+    if (templateResult.mountAssignments.length > 0) {
+      const mountSummary = templateResult.mountAssignments
+        .map((a) => `  ${a.label}: ${a.resolvedSource}${a.isOverride ? ' (override)' : ''}`)
+        .join("\n");
+      console.log(`Resolved mount sources:\n${mountSummary}`);
     }
 
     for (const warning of templateResult.warnings) {

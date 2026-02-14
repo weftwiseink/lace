@@ -73,9 +73,8 @@
   // Asymmetric: host port is in lace range, container port stays at sshd default.
   "appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"],
   "mounts": [
-    // TODO: Generalize
-    "source=${localEnv:HOME}/code/dev_records/weft/bash/history,target=/commandhistory,type=bind",
-    "source=${localEnv:HOME}/code/dev_records/weft/claude,target=/home/node/.claude,type=bind",
+    "source=${lace.mount.source(project/bash-history)},target=/commandhistory,type=bind",
+    "source=${lace.mount.source(project/claude-config)},target=/home/node/.claude,type=bind",
     // SSH public key for WezTerm SSH domain access (host -> container)
     // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""
     "source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",

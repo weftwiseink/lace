@@ -499,6 +499,67 @@ describe("lace up: symlink generation", () => {
     expect(extended.postCreateCommand).toContain("&&");
     expect(extended.postCreateCommand).toContain("ln -s");
   });
+
+  it("preserves array-format postCreateCommand via object format", async () => {
+    const configWithArrayPostCreate = JSON.stringify(
+      {
+        build: { dockerfile: "Dockerfile" },
+        postCreateCommand: ["npm", "install", "--frozen-lockfile"],
+        customizations: {
+          lace: {
+            repoMounts: {
+              "github.com/user/dotfiles": {},
+            },
+          },
+        },
+      },
+      null,
+      2,
+    );
+
+    setupWorkspace(configWithArrayPostCreate, STANDARD_DOCKERFILE);
+
+    const overrideSource = join(workspaceRoot, "local-dotfiles");
+    mkdirSync(overrideSource, { recursive: true });
+
+    setupSettings({
+      repoMounts: {
+        "github.com/user/dotfiles": {
+          overrideMount: {
+            source: overrideSource,
+            target: "/home/user/dotfiles",
+          },
+        },
+      },
+    });
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+
+    // Should be object format, not a string
+    expect(typeof extended.postCreateCommand).toBe("object");
+    expect(Array.isArray(extended.postCreateCommand)).toBe(false);
+
+    // Original array preserved under "lace:user-setup" key
+    expect(extended.postCreateCommand["lace:user-setup"]).toEqual([
+      "npm",
+      "install",
+      "--frozen-lockfile",
+    ]);
+
+    // Symlink command added under "lace:symlinks" key
+    expect(extended.postCreateCommand["lace:symlinks"]).toBeDefined();
+    expect(extended.postCreateCommand["lace:symlinks"]).toContain("ln -s");
+  });
 });
 
 describe("lace up: devcontainer up integration", () => {

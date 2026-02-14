@@ -475,10 +475,13 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
     } else if (typeof existing === "string") {
       extended.postCreateCommand = `${existing} && ${symlinkCommand}`;
     } else if (Array.isArray(existing)) {
-      // Array format: ["command", "arg1", "arg2"]
-      // We need to convert to a compound command
-      const existingCmd = existing.join(" ");
-      extended.postCreateCommand = `${existingCmd} && ${symlinkCommand}`;
+      // Array format: ["command", "arg1", "arg2"] means direct-exec (no shell).
+      // Joining with spaces and chaining via && would change semantics to shell
+      // execution. Instead, use the object format to preserve the array as-is.
+      extended.postCreateCommand = {
+        "lace:user-setup": existing,
+        "lace:symlinks": symlinkCommand,
+      };
     } else if (typeof existing === "object") {
       // Object format: { "name": ["command", "args"] }
       // Add our symlink command as a new entry

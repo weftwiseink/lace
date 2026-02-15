@@ -25,12 +25,14 @@ lace up --workspace-folder .
 The main command. Runs the full orchestration pipeline:
 
 1. Fetch and validate feature metadata from OCI registries
-2. Auto-inject `${lace.port()}` templates for features with port declarations
-3. Resolve all templates (port allocation)
-4. Prebuild features (if `prebuildFeatures` configured)
-5. Resolve repo mounts (if `repoMounts` configured)
-6. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
-7. Invoke `devcontainer up`
+2. Auto-inject `${lace.port()}` and `${lace.mount()}` templates from declarations
+3. Validate mount declarations (namespaces, target conflicts)
+4. Resolve all templates (port allocation, mount path resolution)
+5. Emit guided configuration for unconfigured mounts
+6. Prebuild features (if `prebuildFeatures` configured)
+7. Resolve repo mounts (if `repoMounts` configured)
+8. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
+9. Invoke `devcontainer up`
 
 ```sh
 lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation]
@@ -96,7 +98,11 @@ User-provided entries in any of these fields suppress the corresponding auto-gen
 
 ## Template variables
 
-Lace resolves `${lace.port(<label>)}` expressions anywhere in the devcontainer config. The label format is `featureShortId/optionName`:
+Lace resolves `${lace.port()}` and `${lace.mount()}` expressions anywhere in the devcontainer config. Any other `${lace.*}` expression is a hard error — this catches typos and stale references.
+
+### Port templates
+
+`${lace.port(<label>)}` resolves to a port number. The label format is `featureShortId/optionName`:
 
 ```jsonc
 {
@@ -110,7 +116,7 @@ Lace resolves `${lace.port(<label>)}` expressions anywhere in the devcontainer c
 
 **Type coercion**: When a `${lace.port()}` expression is the entire string value, it resolves to an integer. When embedded in a larger string, it resolves to a string with the port number substituted.
 
-### Auto-injection
+### Port auto-injection
 
 Features can declare port options in their `devcontainer-feature.json` via `customizations.lace.ports`:
 
@@ -135,13 +141,169 @@ Features can declare port options in their `devcontainer-feature.json` via `cust
 
 When a feature declares `customizations.lace.ports`, lace auto-injects `${lace.port()}` templates for any port options the user has **not** explicitly set. This means zero-config port allocation -- just include the feature and lace handles the rest.
 
+## Mount templates
+
+Lace resolves `${lace.mount()}` expressions in the devcontainer config, producing complete Docker mount spec strings from mount declarations and user settings.
+
+### Accessor forms
+
+| Form | Resolves to | Use case |
+|------|-------------|----------|
+| `${lace.mount(ns/label)}` | Full mount spec: `source=X,target=Y,type=bind[,readonly]` | `mounts` array entries |
+| `${lace.mount(ns/label).source}` | Absolute host path | Debugging, manual construction |
+| `${lace.mount(ns/label).target}` | Container target path | `containerEnv`, lifecycle commands |
+
+The label format is `namespace/label`. Project-level mounts use the reserved `project` namespace. Feature-level mounts use the feature's short ID (e.g., `claude-code/config`).
+
+### Declarations
+
+Mounts are declared in `customizations.lace.mounts` — either in the devcontainer config (project-level) or in a feature's `devcontainer-feature.json` (feature-level):
+
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "mounts": {
+        "bash-history": {
+          "target": "/commandhistory",
+          "description": "Bash command history persistence"
+        },
+        "claude-config": {
+          "target": "/home/node/.claude",
+          "recommendedSource": "~/.claude",
+          "description": "Claude Code configuration and credentials"
+        }
+      }
+    }
+  }
+}
+```
+
+Declaration fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `target` | Yes | Container target path |
+| `recommendedSource` | No | Suggested host path, shown in guided config (never used as actual source) |
+| `description` | No | Human-readable description |
+| `readonly` | No | Mount as read-only (default: false) |
+| `type` | No | Docker mount type (default: `"bind"`) |
+| `consistency` | No | Docker consistency hint (`"delegated"`, `"cached"`) |
+
+### Auto-injection
+
+Declared mounts are auto-injected into the `mounts` array as `${lace.mount(ns/label)}` entries. If a declaration's label already appears in the mounts array in any accessor form, injection is suppressed — the user's explicit entry controls placement.
+
+Both regular features and prebuild features participate in auto-injection. Mounts are runtime config (`docker run` flags), so there is no build/runtime lifecycle asymmetry as there is with ports.
+
+### Source resolution
+
+The host source path for each mount is resolved in this order:
+
+1. **Settings override**: `settings.json` → `mounts["ns/label"].source` (must exist on disk; hard error if missing)
+2. **Default path**: `~/.config/lace/<projectId>/mounts/<namespace>/<label>` (auto-created)
+
+Features declare mount _needs_ (a target path), not mount _sources_ (host directories). The actual source is always user-controlled: either an explicit settings override or a lace-managed empty default. This prevents features from silently mounting arbitrary host directories.
+
+The `recommendedSource` field is guidance only — it appears in console output to help users configure their settings, but is never used as an actual mount source path.
+
+### Guided configuration
+
+When mounts resolve to default paths (no settings override), lace emits actionable guidance:
+
+```
+Mount configuration:
+  project/claude-config: using default path ~/.config/lace/myproject/mounts/project/claude-config
+    → Recommended: configure source to ~/.claude in settings.json
+
+To configure custom mount sources, add to ~/.config/lace/settings.json:
+{
+  "mounts": {
+    "project/claude-config": { "source": "~/.claude" }
+  }
+}
+```
+
+Guidance is informational only — `lace up` always succeeds, even without user configuration.
+
+### Validation
+
+Lace validates mount declarations before resolution:
+
+- **Namespace validation**: each label's namespace must be `project` or a known feature short ID. Unknown namespaces produce a hard error.
+- **Target conflict detection**: no two declarations may share the same container target path.
+- **Declaration existence**: referencing an undeclared label (e.g., `${lace.mount(project/unknown)}`) fails with an error listing available labels.
+
+### Settings
+
+Mount source overrides live in `~/.config/lace/settings.json`:
+
+```jsonc
+{
+  "mounts": {
+    "project/claude-config": { "source": "~/.claude" },
+    "project/bash-history": { "source": "~/dev_records/bash/history" }
+  }
+}
+```
+
+Override paths must exist on disk. Tilde (`~`) is expanded to the user's home directory.
+
+### Example
+
+**devcontainer.json** (source):
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "mounts": {
+        "bash-history": { "target": "/commandhistory" },
+        "claude-config": {
+          "target": "/home/node/.claude",
+          "recommendedSource": "~/.claude"
+        }
+      }
+    }
+  },
+  "mounts": [
+    // Static mounts (not managed by lace):
+    "source=${localEnv:HOME}/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"
+    // project/bash-history and project/claude-config auto-injected from declarations
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "${lace.mount(project/claude-config).target}"
+  }
+}
+```
+
+**Resolved `.lace/devcontainer.json`** (with `"project/claude-config": { "source": "~/.claude" }` in settings):
+```jsonc
+{
+  "mounts": [
+    "source=/home/user/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
+    "source=/home/user/.config/lace/myproject/mounts/project/bash-history,target=/commandhistory,type=bind",
+    "source=/home/user/.claude,target=/home/node/.claude,type=bind"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
+  }
+}
+```
+
+> NOTE: Lace does not currently detect overlapping mount paths (e.g., `/home/node` and `/home/node/.claude`). If ordering matters, write explicit `${lace.mount()}` entries to control placement.
+
+> NOTE: Only directory mounts with auto-creation are supported. Static file mounts (like SSH keys) should remain as plain mount strings, not lace declarations.
+
+> NOTE: Multi-project mount sharing is not first-class. Two projects declaring `project/bash-history` get isolated directories (different project IDs). Share by pointing both to the same path via settings overrides.
+
 ## Feature metadata
 
 Lace fetches `devcontainer-feature.json` metadata from OCI registries (via `devcontainer features info manifest`) for every feature in your config. This enables:
 
 - **Option validation**: warns if you pass an option name not in the feature's schema
 - **Port declaration validation**: ensures `customizations.lace.ports` keys match option names
-- **Auto-injection**: injects port templates for declared port options
+- **Port auto-injection**: injects `${lace.port()}` templates for declared port options
+- **Mount auto-injection**: injects `${lace.mount()}` templates for declared mount points
 
 Metadata is cached at `~/.config/lace/cache/features/`. Pinned versions (exact semver, digest refs) are cached permanently. Floating tags (major-only, `latest`) expire after 24 hours.
 
@@ -253,11 +415,13 @@ Lace stores data in three locations: a per-project `.lace/` directory, a user-le
   settings.json                          # User settings (JSONC, manually created)
   cache/features/<encoded-id>.json       # OCI feature metadata cache
   <project-id>/repos/<name-or-alias>/    # Shallow git clones for repo mounts
+  <project-id>/mounts/<ns>/<label>/      # Default mount source directories
 
 <workspace>/.lace/                       # Per-project, gitignored
   devcontainer.json                      # Generated extended config
   port-assignments.json                  # Persisted port allocations
-  resolved-mounts.json                   # Resolved mount specs
+  mount-assignments.json                 # Persisted mount path assignments
+  resolved-mounts.json                   # Resolved repo mount specs
   prebuild.lock                          # flock(1) exclusion file
   prebuild/
     Dockerfile, devcontainer.json        # Temp prebuild context
@@ -275,7 +439,7 @@ Lace also modifies `.devcontainer/Dockerfile` (the FROM line) and `.devcontainer
 
 ### Configuration
 
-**Settings file** (`~/.config/lace/settings.json`, JSONC format): discovered via `$LACE_SETTINGS` env var, then `~/.config/lace/settings.json`. Currently supports only `repoMounts` overrides (see [Settings overrides](#settings-overrides)).
+**Settings file** (`~/.config/lace/settings.json`, JSONC format): discovered via `$LACE_SETTINGS` env var, then `~/.config/lace/settings.json`. Supports `mounts` overrides (see [Mount templates > Settings](#settings)) and `repoMounts` overrides (see [Settings overrides](#settings-overrides)).
 
 **Environment variables**: `LACE_SETTINGS` — override path to settings file (must exist if set).
 
@@ -292,7 +456,8 @@ Values that are fixed today but could become user-configurable:
 | OCI token timeout | `oci-blob-fallback.ts` | 10 s |
 | OCI blob download timeout | `oci-blob-fallback.ts` | 30 s |
 | Git clone depth | `repo-clones.ts` | `--depth 1` |
-| Container mount prefix | `mounts.ts` | `/mnt/lace/repos` |
+| Container mount prefix (repo mounts) | `mounts.ts` | `/mnt/lace/repos` |
+| Default mount source dir | `mount-resolver.ts` | `~/.config/lace/<projectId>/mounts/<ns>/<label>` |
 | Docker image tag prefix | `dockerfile.ts` | `lace.local/` |
 
 Note: paths under `~/.config/lace/` do not currently honor `$XDG_CONFIG_HOME` or `$XDG_CACHE_HOME`. The cache directory is stored alongside config rather than under `$XDG_CACHE_HOME`.

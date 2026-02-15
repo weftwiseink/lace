@@ -9,6 +9,8 @@ import {
   extractPrebuildFeaturesRaw,
   autoInjectPortTemplates,
   autoInjectMountTemplates,
+  validateMountNamespaces,
+  validateMountTargetConflicts,
   resolveTemplates,
   generatePortEntries,
   mergePortEntries,
@@ -2295,5 +2297,151 @@ describe("mount template resolution", () => {
 
     const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
     expect(containerEnv.WEZTERM_CONFIG).toBe("/home/user/.config/wezterm");
+  });
+});
+
+// ── validateMountNamespaces ──
+
+describe("validateMountNamespaces", () => {
+  it("passes when all namespaces are valid (project + known feature)", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "wezterm-server/config": { target: "/config" },
+    };
+    const featureShortIds = new Set(["wezterm-server"]);
+
+    // Should not throw
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).not.toThrow();
+  });
+
+  it("passes with only project declarations and no features", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "project/cache": { target: "/cache" },
+    };
+    const featureShortIds = new Set<string>();
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).not.toThrow();
+  });
+
+  it("throws when namespace is unknown", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "unknown-feature/config": { target: "/config" },
+    };
+    const featureShortIds = new Set(["wezterm-server"]);
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /Unknown mount namespace/,
+    );
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /"unknown-feature\/config"/,
+    );
+  });
+
+  it("includes valid namespaces in error message", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "bad-ns/data": { target: "/data" },
+    };
+    const featureShortIds = new Set(["wezterm-server", "claude-code"]);
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /Valid namespaces:.*project/,
+    );
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /Valid namespaces:.*wezterm-server/,
+    );
+  });
+
+  it("reports all unknown labels in a single error", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "bad1/data": { target: "/data" },
+      "bad2/config": { target: "/config" },
+    };
+    const featureShortIds = new Set<string>();
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /"bad1\/data"/,
+    );
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).toThrow(
+      /"bad2\/config"/,
+    );
+  });
+
+  it("passes with empty declarations", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {};
+    const featureShortIds = new Set<string>();
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).not.toThrow();
+  });
+
+  it("passes with multiple valid feature namespaces", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "wezterm-server/config": { target: "/config" },
+      "claude-code/session": { target: "/session" },
+    };
+    const featureShortIds = new Set(["wezterm-server", "claude-code"]);
+
+    expect(() => validateMountNamespaces(declarations, featureShortIds)).not.toThrow();
+  });
+});
+
+// ── validateMountTargetConflicts ──
+
+describe("validateMountTargetConflicts", () => {
+  it("passes when all targets are unique", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "project/cache": { target: "/cache" },
+      "wezterm-server/config": { target: "/config" },
+    };
+
+    expect(() => validateMountTargetConflicts(declarations)).not.toThrow();
+  });
+
+  it("throws when two declarations share the same target", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/shared-path" },
+      "wezterm-server/config": { target: "/shared-path" },
+    };
+
+    expect(() => validateMountTargetConflicts(declarations)).toThrow(
+      /Mount target conflict/,
+    );
+    expect(() => validateMountTargetConflicts(declarations)).toThrow(
+      /\/shared-path/,
+    );
+    expect(() => validateMountTargetConflicts(declarations)).toThrow(
+      /project\/data/,
+    );
+    expect(() => validateMountTargetConflicts(declarations)).toThrow(
+      /wezterm-server\/config/,
+    );
+  });
+
+  it("passes with empty declarations", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {};
+
+    expect(() => validateMountTargetConflicts(declarations)).not.toThrow();
+  });
+
+  it("passes with a single declaration", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+
+    expect(() => validateMountTargetConflicts(declarations)).not.toThrow();
+  });
+
+  it("detects conflict between project and feature declarations", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/my-data": { target: "/mnt/data" },
+      "feature/other-data": { target: "/mnt/data" },
+    };
+
+    expect(() => validateMountTargetConflicts(declarations)).toThrow(
+      /Mount target conflict.*\/mnt\/data/,
+    );
   });
 });

@@ -304,6 +304,110 @@ export function buildMountDeclarationsMap(
   return declarations;
 }
 
+// ── Mount declaration validation ──
+
+/**
+ * Validate that all mount declaration namespaces are recognized.
+ * Valid namespaces are "project" (for project-level) or a known feature shortId.
+ *
+ * @param declarations The unified declarations map
+ * @param featureShortIds Set of known feature short IDs (from features + prebuildFeatures)
+ * @throws Error if any namespace is unknown
+ */
+export function validateMountNamespaces(
+  declarations: Record<string, LaceMountDeclaration>,
+  featureShortIds: Set<string>,
+): void {
+  const validNamespaces = new Set(["project", ...featureShortIds]);
+  const unknownLabels: string[] = [];
+
+  for (const label of Object.keys(declarations)) {
+    const [namespace] = label.split("/");
+    if (!validNamespaces.has(namespace)) {
+      unknownLabels.push(label);
+    }
+  }
+
+  if (unknownLabels.length > 0) {
+    const available = Array.from(validNamespaces).sort().join(", ");
+    throw new Error(
+      `Unknown mount namespace(s): ${unknownLabels.map((l) => `"${l}"`).join(", ")}. ` +
+        `Valid namespaces: ${available}`,
+    );
+  }
+}
+
+/**
+ * Validate that no two declarations share the same container target path.
+ *
+ * @param declarations The unified declarations map
+ * @throws Error if two labels declare the same target
+ */
+export function validateMountTargetConflicts(
+  declarations: Record<string, LaceMountDeclaration>,
+): void {
+  const targetToLabel = new Map<string, string>();
+
+  for (const [label, decl] of Object.entries(declarations)) {
+    const existing = targetToLabel.get(decl.target);
+    if (existing) {
+      throw new Error(
+        `Mount target conflict: '${decl.target}' declared by both '${existing}' and '${label}'`,
+      );
+    }
+    targetToLabel.set(decl.target, label);
+  }
+}
+
+/**
+ * Emit guided configuration messages for mount paths.
+ * Called after resolution to inform users about default paths and recommended overrides.
+ */
+export function emitMountGuidance(
+  declarations: Record<string, LaceMountDeclaration>,
+  assignments: Array<{ label: string; resolvedSource: string; isOverride: boolean }>,
+): void {
+  if (assignments.length === 0) return;
+
+  const defaultAssignments = assignments.filter((a) => !a.isOverride);
+  if (defaultAssignments.length === 0) return;
+
+  const lines: string[] = ["Mount configuration:"];
+  for (const assignment of assignments) {
+    const decl = declarations[assignment.label];
+    if (assignment.isOverride) {
+      lines.push(`  ${assignment.label}: ${assignment.resolvedSource} (override)`);
+    } else {
+      lines.push(`  ${assignment.label}: using default path ${assignment.resolvedSource}`);
+      if (decl?.recommendedSource) {
+        lines.push(`    → Recommended: configure source to ${decl.recommendedSource} in settings.json`);
+      }
+    }
+  }
+
+  // Only show settings hint if there are default-path mounts
+  const hasRecommendations = defaultAssignments.some(
+    (a) => declarations[a.label]?.recommendedSource,
+  );
+  if (hasRecommendations) {
+    const exampleLabel = defaultAssignments.find(
+      (a) => declarations[a.label]?.recommendedSource,
+    );
+    if (exampleLabel) {
+      const decl = declarations[exampleLabel.label];
+      lines.push("");
+      lines.push("To configure custom mount sources, add to ~/.config/lace/settings.json:");
+      lines.push("{");
+      lines.push('  "mounts": {');
+      lines.push(`    "${exampleLabel.label}": { "source": "${decl!.recommendedSource}" }`);
+      lines.push("  }");
+      lines.push("}");
+    }
+  }
+
+  console.log(lines.join("\n"));
+}
+
 /**
  * Check if a mount label is already referenced in the mounts array
  * in any accessor form: ${lace.mount(label)}, ${lace.mount(label).source},

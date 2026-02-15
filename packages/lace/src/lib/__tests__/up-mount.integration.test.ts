@@ -543,3 +543,217 @@ describe("lace up: mount source in containerEnv", () => {
     expect(containerEnv.DATA_DIR).toBe(expectedPath);
   });
 });
+
+// ── Project declarations with auto-injection ──
+
+describe("lace up: project mount declarations", () => {
+  it("auto-injects and resolves project-level mount declarations", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        customizations: {
+          lace: {
+            mounts: {
+              "bash-history": {
+                target: "/commandhistory",
+                description: "Persistent bash history",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    // Auto-injected mount entry should be resolved
+    const mounts = extended.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toMatch(/^source=\/.*,target=\/commandhistory,type=bind$/);
+    expect(mounts[0]).not.toContain("${lace.mount(");
+
+    // Assignment persisted
+    const assignments = JSON.parse(
+      readFileSync(join(laceDir, "mount-assignments.json"), "utf-8"),
+    ) as MountAssignmentsFile;
+    expect(assignments.assignments["project/bash-history"]).toBeDefined();
+  });
+});
+
+// ── Mount target in containerEnv ──
+
+describe("lace up: mount target in containerEnv", () => {
+  it("resolves ${lace.mount(label).target} in containerEnv to declaration target", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        customizations: {
+          lace: {
+            mounts: {
+              config: {
+                target: "/home/node/.claude",
+              },
+            },
+          },
+        },
+        containerEnv: {
+          CLAUDE_CONFIG: "${lace.mount(project/config).target}",
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    expect(containerEnv.CLAUDE_CONFIG).toBe("/home/node/.claude");
+  });
+});
+
+// ── Validation errors ──
+
+describe("lace up: mount validation", () => {
+  it("fails with target conflict error when two declarations share the same target", async () => {
+    setupSettings({});
+
+    // Feature metadata with mount declaring same target as project declaration
+    const featureWithConflict: FeatureMetadata = {
+      id: "my-feature",
+      version: "1.0.0",
+      options: {},
+      customizations: {
+        lace: {
+          mounts: {
+            config: {
+              target: "/data",
+              description: "Conflicting mount",
+            },
+          },
+        },
+      },
+    };
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        features: {
+          "ghcr.io/org/my-feature:1": {},
+        },
+        customizations: {
+          lace: {
+            mounts: {
+              data: {
+                target: "/data",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/org/my-feature:1": featureWithConflict,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("Mount target conflict");
+    expect(result.message).toContain("/data");
+  });
+});
+
+// ── Feature mount declarations (end-to-end) ──
+
+describe("lace up: feature mount declarations", () => {
+  it("auto-injects and resolves feature-level mount declarations from metadata", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const featureWithMount: FeatureMetadata = {
+      id: "claude-code",
+      version: "1.0.0",
+      options: {},
+      customizations: {
+        lace: {
+          mounts: {
+            config: {
+              target: "/home/node/.claude",
+              description: "Claude config",
+            },
+          },
+        },
+      },
+    };
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        features: {
+          "ghcr.io/org/claude-code:1": {},
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/org/claude-code:1": featureWithMount,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const mounts = extended.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toMatch(/^source=\/.*,target=\/home\/node\/\.claude,type=bind$/);
+
+    const assignments = JSON.parse(
+      readFileSync(join(laceDir, "mount-assignments.json"), "utf-8"),
+    ) as MountAssignmentsFile;
+    expect(assignments.assignments["claude-code/config"]).toBeDefined();
+  });
+});

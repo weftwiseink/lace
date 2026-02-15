@@ -5,12 +5,14 @@ first_authored:
 task_list: lace/template-variables
 type: proposal
 state: live
-status: implementation_wip
+status: evolved
+superseded_by: cdocs/proposals/2026-02-15-mount-accessor-api.md
 tags: [mount-resolver, template-variables, settings, extensibility]
 related_to:
   - cdocs/proposals/2026-02-14-structured-devcontainer-output.md
   - cdocs/reports/2026-02-14-devcontainer-json-object-specifications.md
   - cdocs/proposals/2026-02-06-rfp-claude-tools-lace-feature.md
+  - cdocs/proposals/2026-02-15-mount-accessor-api.md
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"

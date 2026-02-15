@@ -26,6 +26,10 @@ import {
   autoInjectPortTemplates,
   autoInjectMountTemplates,
   extractProjectMountDeclarations,
+  extractFeatureShortId,
+  validateMountNamespaces,
+  validateMountTargetConflicts,
+  emitMountGuidance,
   resolveTemplates,
   generatePortEntries,
   mergePortEntries,
@@ -228,6 +232,30 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
   }
 
+  // Step 3e: Validate mount declarations
+  if (Object.keys(mountDeclarations).length > 0) {
+    // Build set of known feature short IDs for namespace validation
+    const features = (configForResolution.features ?? {}) as Record<string, unknown>;
+    const prebuildFeatures = extractPrebuildFeaturesRaw(configForResolution);
+    const featureShortIds = new Set<string>();
+    for (const ref of [...Object.keys(features), ...Object.keys(prebuildFeatures)]) {
+      featureShortIds.add(extractFeatureShortId(ref));
+    }
+    try {
+      validateMountNamespaces(mountDeclarations, featureShortIds);
+      validateMountTargetConflicts(mountDeclarations);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result.exitCode = 1;
+      result.message = `Mount validation failed: ${message}`;
+      result.phases.templateResolution = {
+        exitCode: 1,
+        message: `Mount validation failed: ${message}`,
+      };
+      return result;
+    }
+  }
+
   // Step 3b: Warn about prebuild features with static port values and no appPort
   const staticPortWarnings = warnPrebuildPortFeaturesStaticPort(
     configForResolution,
@@ -295,6 +323,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         .map((a) => `  ${a.label}: ${a.resolvedSource}${a.isOverride ? ' (override)' : ''}`)
         .join("\n");
       console.log(`Resolved mount sources:\n${mountSummary}`);
+
+      // Emit guided config for default-path mounts
+      emitMountGuidance(mountDeclarations, templateResult.mountAssignments);
     }
 
     for (const warning of templateResult.warnings) {

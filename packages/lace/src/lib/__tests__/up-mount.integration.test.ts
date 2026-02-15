@@ -157,10 +157,10 @@ afterEach(() => {
   delete process.env.LACE_SETTINGS;
 });
 
-// ── End-to-end mount source resolution ──
+// ── End-to-end mount source resolution (v2 accessor syntax) ──
 
 describe("lace up: mount source template resolution (end-to-end)", () => {
-  it("resolves ${lace.mount.source()} in mounts array and persists assignments", async () => {
+  it("resolves ${lace.mount(label).source} in mounts array and persists assignments", async () => {
     trackProjectMountsDir(workspaceRoot);
     setupSettings({});
 
@@ -168,7 +168,7 @@ describe("lace up: mount source template resolution (end-to-end)", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         mounts: [
-          "source=${lace.mount.source(project/data)},target=/data,type=bind",
+          "source=${lace.mount(project/data).source},target=/data,type=bind",
         ],
       },
       null,
@@ -191,7 +191,7 @@ describe("lace up: mount source template resolution (end-to-end)", () => {
     );
     const mounts = extended.mounts as string[];
     expect(mounts).toHaveLength(1);
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).not.toContain("${lace.mount(");
     expect(mounts[0]).toMatch(/source=\/.*,target=\/data,type=bind/);
 
     // Verify the default mount directory exists on disk
@@ -229,8 +229,8 @@ describe("lace up: mount source template resolution (end-to-end)", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         mounts: [
-          "source=${lace.mount.source(project/data)},target=/data,type=bind",
-          "source=${lace.mount.source(project/cache)},target=/cache,type=bind",
+          "source=${lace.mount(project/data).source},target=/data,type=bind",
+          "source=${lace.mount(project/cache).source},target=/cache,type=bind",
         ],
       },
       null,
@@ -253,8 +253,8 @@ describe("lace up: mount source template resolution (end-to-end)", () => {
     expect(mounts).toHaveLength(2);
     expect(mounts[0]).toMatch(/source=\/.*,target=\/data,type=bind/);
     expect(mounts[1]).toMatch(/source=\/.*,target=\/cache,type=bind/);
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
-    expect(mounts[1]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).not.toContain("${lace.mount(");
+    expect(mounts[1]).not.toContain("${lace.mount(");
 
     // Both assignments recorded
     const assignments = JSON.parse(
@@ -288,7 +288,7 @@ describe("lace up: mount source with settings override", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         mounts: [
-          "source=${lace.mount.source(project/data)},target=/data,type=bind",
+          "source=${lace.mount(project/data).source},target=/data,type=bind",
         ],
       },
       null,
@@ -327,7 +327,7 @@ describe("lace up: mount source with settings override", () => {
 // ── Port + mount mixed config ──
 
 describe("lace up: mixed port and mount templates", () => {
-  it("resolves both ${lace.port()} and ${lace.mount.source()} in the same config", async () => {
+  it("resolves both ${lace.port()} and ${lace.mount(label).source} in the same config", async () => {
     trackProjectMountsDir(workspaceRoot);
     setupSettings({});
 
@@ -338,7 +338,7 @@ describe("lace up: mixed port and mount templates", () => {
           "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
         },
         mounts: [
-          "source=${lace.mount.source(project/data)},target=/data,type=bind",
+          "source=${lace.mount(project/data).source},target=/data,type=bind",
         ],
       },
       null,
@@ -381,7 +381,7 @@ describe("lace up: mixed port and mount templates", () => {
 
     // Mount resolved to path
     const mounts = extended.mounts as string[];
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).not.toContain("${lace.mount(");
     expect(mounts[0]).toMatch(/source=\/.*,target=\/data,type=bind/);
 
     // Port entries generated
@@ -412,7 +412,7 @@ describe("lace up: mount resolution failure", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         mounts: [
-          "source=${lace.mount.source(invalid label)},target=/data,type=bind",
+          "source=${lace.mount(invalid label).source},target=/data,type=bind",
         ],
       },
       null,
@@ -442,7 +442,7 @@ describe("lace up: mount resolution failure", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         mounts: [
-          "source=${lace.mount.source(project/data)},target=/data,type=bind",
+          "source=${lace.mount(project/data).source},target=/data,type=bind",
         ],
       },
       null,
@@ -499,7 +499,7 @@ describe("lace up: no mount templates present", () => {
 // ── Mount source in containerEnv ──
 
 describe("lace up: mount source in containerEnv", () => {
-  it("resolves ${lace.mount.source()} in containerEnv values", async () => {
+  it("resolves ${lace.mount(label).source} in containerEnv values", async () => {
     trackProjectMountsDir(workspaceRoot);
     setupSettings({});
 
@@ -507,7 +507,7 @@ describe("lace up: mount source in containerEnv", () => {
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
         containerEnv: {
-          DATA_DIR: "${lace.mount.source(project/data)}",
+          DATA_DIR: "${lace.mount(project/data).source}",
         },
       },
       null,
@@ -527,7 +527,7 @@ describe("lace up: mount source in containerEnv", () => {
       readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
     );
     const containerEnv = extended.containerEnv as Record<string, string>;
-    expect(containerEnv.DATA_DIR).not.toContain("${lace.mount.source(");
+    expect(containerEnv.DATA_DIR).not.toContain("${lace.mount(");
     expect(containerEnv.DATA_DIR).toMatch(/^\//);
 
     const projectId = deriveProjectId(workspaceRoot);

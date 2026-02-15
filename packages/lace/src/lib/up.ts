@@ -29,7 +29,6 @@ import {
   generatePortEntries,
   mergePortEntries,
   buildFeaturePortMetadata,
-  buildMountTargetMap,
   warnPrebuildPortTemplates,
   warnPrebuildPortFeaturesStaticPort,
   extractPrebuildFeaturesRaw,
@@ -236,7 +235,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.warn(`Warning: ${warning}`);
   }
 
-  // Step 3c: Create mount path resolver for ${lace.mount.source()} resolution
+  // Step 3c: Create mount path resolver for ${lace.mount()} resolution
   let settings: LaceSettings = {};
   try {
     settings = loadSettings();
@@ -249,13 +248,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
   const mountResolver = new MountPathResolver(workspaceFolder, settings);
 
-  // Step 3e: Build mount target map for ${lace.mount.target()} resolution
-  const mountTargetMap = buildMountTargetMap(metadataMap);
-
   // Step 4: Resolve all templates (auto-injected + user-written)
   const portAllocator = new PortAllocator(workspaceFolder);
   try {
-    templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver, mountTargetMap);
+    templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver);
     portAllocator.save(); // Persist assignments after successful resolution
     mountResolver.save(); // Persist mount assignments after successful resolution
 

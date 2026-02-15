@@ -13,10 +13,10 @@ import {
   generatePortEntries,
   mergePortEntries,
   buildFeaturePortMetadata,
-  buildMountTargetMap,
   warnPrebuildPortTemplates,
   warnPrebuildPortFeaturesStaticPort,
 } from "../template-resolver";
+import type { LaceMountDeclaration } from "../feature-metadata";
 import { PortAllocator } from "../port-allocator";
 import type { PortAllocation } from "../port-allocator";
 import type { FeatureMetadata } from "../feature-metadata";
@@ -586,7 +586,7 @@ describe("autoInjectMountTemplates", () => {
     },
   };
 
-  it("injects mount entry for feature with mount declaration", () => {
+  it("injects bare mount template for feature with mount declaration", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
@@ -604,12 +604,10 @@ describe("autoInjectMountTemplates", () => {
     expect(injected).toEqual(["wezterm-server/config"]);
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(1);
-    expect(mounts[0]).toBe(
-      "source=${lace.mount.source(wezterm-server/config)},target=/home/user/.config/wezterm,type=bind",
-    );
+    expect(mounts[0]).toBe("${lace.mount(wezterm-server/config)}");
   });
 
-  it("injects multiple mounts for feature with multiple declarations", () => {
+  it("injects multiple bare mount templates for feature with multiple declarations", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/org/data-feature:1": {},
@@ -629,11 +627,11 @@ describe("autoInjectMountTemplates", () => {
     expect(injected).toContain("data-feature/cache");
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(2);
-    expect(mounts.some((m: string) => m.includes("target=/mnt/data"))).toBe(true);
-    expect(mounts.some((m: string) => m.includes("target=/mnt/cache"))).toBe(true);
+    expect(mounts.some((m: string) => m === "${lace.mount(data-feature/data)}")).toBe(true);
+    expect(mounts.some((m: string) => m === "${lace.mount(data-feature/cache)}")).toBe(true);
   });
 
-  it("injects readonly mount when declared", () => {
+  it("injects bare mount template for readonly declaration (readonly resolved at spec time)", () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/org/config-feature:1": {},
@@ -651,9 +649,8 @@ describe("autoInjectMountTemplates", () => {
     expect(injected).toEqual(["config-feature/settings"]);
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(1);
-    expect(mounts[0]).toBe(
-      "source=${lace.mount.source(config-feature/settings)},target=/etc/app/settings,type=bind,readonly",
-    );
+    // Bare form — readonly is handled by resolveFullSpec via declarations
+    expect(mounts[0]).toBe("${lace.mount(config-feature/settings)}");
   });
 
   it("skips features without mount metadata", () => {
@@ -719,7 +716,7 @@ describe("autoInjectMountTemplates", () => {
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(2);
     expect(mounts[0]).toBe("source=/existing,target=/existing,type=bind");
-    expect(mounts[1]).toContain("wezterm-server/config");
+    expect(mounts[1]).toBe("${lace.mount(wezterm-server/config)}");
   });
 });
 
@@ -1589,25 +1586,31 @@ describe("warnPrebuildPortFeaturesStaticPort", () => {
   });
 });
 
-// ── mount template resolution ──
+// ── mount template resolution (v2 accessor syntax) ──
 
 describe("mount template resolution", () => {
-  // Test 1: LACE_UNKNOWN_PATTERN relaxation
-  it("does not reject ${lace.mount.source()} as unknown, but still rejects ${lace.nonsense()}", async () => {
-    // mount.source should pass the guard (no error thrown)
-    const configWithMountSource: Record<string, unknown> = {
+  // Declarations for tests that need declaration-aware resolution
+  const projectDeclarations: Record<string, LaceMountDeclaration> = {
+    "project/history": { target: "/history" },
+    "project/data": { target: "/data" },
+    "project/cache": { target: "/cache" },
+  };
+
+  // Test 1: LACE_UNKNOWN_PATTERN rejects non-mount/port patterns
+  it("does not reject ${lace.mount()} as unknown, but still rejects ${lace.nonsense()}", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const configWithMount: Record<string, unknown> = {
       features: {
         "ghcr.io/devcontainers/features/git:1": {},
       },
-      mounts: ["source=${lace.mount.source(project/history)},target=/history,type=bind"],
+      mounts: ["${lace.mount(project/history)}"],
     };
-    trackProjectMountsDir(workspaceRoot);
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
 
-    // Should not throw — mount.source passes the guard
+    // Should not throw — mount() passes the guard
     await expect(
-      resolveTemplates(configWithMountSource, allocator, mountResolver),
+      resolveTemplates(configWithMount, allocator, mountResolver),
     ).resolves.toBeDefined();
 
     // Nonsense lace template should still throw
@@ -1624,23 +1627,22 @@ describe("mount template resolution", () => {
     ).rejects.toThrow(/Unknown template variable/);
   });
 
-  // Test 2: Mount source resolution in string
-  it("resolves ${lace.mount.source()} embedded in a mount string", async () => {
+  // Test 2: Mount .source resolution in string
+  it("resolves ${lace.mount(label).source} embedded in a mount string", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/devcontainers/features/git:1": {},
       },
-      mounts: ["source=${lace.mount.source(project/history)},target=/history,type=bind"],
+      mounts: ["source=${lace.mount(project/history).source},target=/history,type=bind"],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     const mounts = result.resolvedConfig.mounts as string[];
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
-    // Should contain a concrete path
+    expect(mounts[0]).not.toContain("${lace.mount(");
     expect(mounts[0]).toMatch(/source=\/.*,target=\/history,type=bind/);
 
     const projectId = deriveProjectId(workspaceRoot);
@@ -1656,31 +1658,30 @@ describe("mount template resolution", () => {
     expect(mounts[0]).toBe(`source=${expectedPath},target=/history,type=bind`);
   });
 
-  // Test 3: Mount source standalone
-  it("resolves standalone ${lace.mount.source()} to a path string (not integer)", async () => {
+  // Test 3: Mount .source standalone
+  it("resolves standalone ${lace.mount(label).source} to a path string (not integer)", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       containerEnv: {
-        HISTORY_DIR: "${lace.mount.source(project/history)}",
+        HISTORY_DIR: "${lace.mount(project/history).source}",
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
     expect(typeof containerEnv.HISTORY_DIR).toBe("string");
-    expect(containerEnv.HISTORY_DIR).not.toContain("${lace.mount.source(");
-    // Should be a path, not a number
+    expect(containerEnv.HISTORY_DIR).not.toContain("${lace.mount(");
     expect(containerEnv.HISTORY_DIR).toMatch(/^\//);
   });
 
   // Test 4: Mixed port and mount
-  it("resolves both ${lace.port()} and ${lace.mount.source()} in the same config", async () => {
+  it("resolves both ${lace.port()} and ${lace.mount(label).source} in the same config", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
       features: {
@@ -1688,11 +1689,11 @@ describe("mount template resolution", () => {
           hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
-      mounts: ["source=${lace.mount.source(project/data)},target=/data,type=bind"],
+      mounts: ["source=${lace.mount(project/data).source},target=/data,type=bind"],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     // Port resolved to integer
@@ -1703,7 +1704,7 @@ describe("mount template resolution", () => {
 
     // Mount resolved to path
     const mounts = result.resolvedConfig.mounts as string[];
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).not.toContain("${lace.mount(");
     expect(mounts[0]).toMatch(/source=\/.*,target=\/data,type=bind/);
 
     // Both allocations and mount assignments present
@@ -1711,7 +1712,7 @@ describe("mount template resolution", () => {
     expect(result.mountAssignments).toHaveLength(1);
   });
 
-  // Test 5: Mount source in nested config
+  // Test 5: Mount .source in nested config
   it("resolves mount source template in nested config objects", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
@@ -1721,24 +1722,24 @@ describe("mount template resolution", () => {
       customizations: {
         vscode: {
           settings: {
-            "myExtension.historyPath": "${lace.mount.source(project/history)}",
+            "myExtension.historyPath": "${lace.mount(project/history).source}",
           },
         },
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     const customizations = result.resolvedConfig.customizations as Record<string, Record<string, Record<string, unknown>>>;
     const historyPath = customizations.vscode.settings["myExtension.historyPath"];
     expect(typeof historyPath).toBe("string");
-    expect(historyPath).not.toContain("${lace.mount.source(");
+    expect(historyPath).not.toContain("${lace.mount(");
     expect(historyPath).toMatch(/^\//);
   });
 
-  // Test 6: Mount source in mounts array
+  // Test 6: Mount .source in mounts array with mixed entries
   it("resolves mount source template inside a mounts array string", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
@@ -1746,24 +1747,22 @@ describe("mount template resolution", () => {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       mounts: [
-        "source=${lace.mount.source(project/cache)},target=/cache,type=bind",
+        "source=${lace.mount(project/cache).source},target=/cache,type=bind",
         "source=/fixed/path,target=/fixed,type=bind",
       ],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     const mounts = result.resolvedConfig.mounts as string[];
-    // First entry resolved
-    expect(mounts[0]).not.toContain("${lace.mount.source(");
+    expect(mounts[0]).not.toContain("${lace.mount(");
     expect(mounts[0]).toMatch(/source=\/.*,target=\/cache,type=bind/);
-    // Second entry unchanged
     expect(mounts[1]).toBe("source=/fixed/path,target=/fixed,type=bind");
   });
 
-  // Test 7: No mount templates
+  // Test 7: No mount templates passes through
   it("passes config unchanged when no mount templates present", async () => {
     const config: Record<string, unknown> = {
       features: {
@@ -1789,7 +1788,7 @@ describe("mount template resolution", () => {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       containerEnv: {
-        BAD: "${lace.mount.source(noslash)}",
+        BAD: "${lace.mount(noslash).source}",
       },
     };
 
@@ -1800,27 +1799,164 @@ describe("mount template resolution", () => {
     ).rejects.toThrow(/Invalid mount label "noslash"/);
   });
 
-  // Test 9: Unresolved target expression
-  it("passes ${lace.mount.target()} through as literal string when no target resolver exists", async () => {
+  // Test 9: Mount .target resolution
+  it("resolves ${lace.mount(label).target} to declaration target path", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       containerEnv: {
-        TARGET: "${lace.mount.target(foo/bar)}",
+        CLAUDE_CONFIG: "${lace.mount(project/config).target}",
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    // No mount resolver, or a mount resolver that doesn't handle targets
-    const result = await resolveTemplates(config, allocator);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
 
     const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
-    // Should pass through as literal string — not rejected by guard, not resolved
-    expect(containerEnv.TARGET).toBe("${lace.mount.target(foo/bar)}");
+    expect(containerEnv.CLAUDE_CONFIG).toBe("/home/node/.claude");
   });
 
-  // Test 10: mountAssignments in result
+  // Test 10: Mount .target with path suffix
+  it("resolves ${lace.mount(label).target}/subpath correctly", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      containerEnv: {
+        SETTINGS_FILE: "${lace.mount(project/config).target}/settings.json",
+      },
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
+    expect(containerEnv.SETTINGS_FILE).toBe("/home/node/.claude/settings.json");
+  });
+
+  // Test 11: Mount .target in lifecycle commands
+  it("resolves mount target in lifecycle commands", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      postCreateCommand: "mkdir -p ${lace.mount(project/config).target}/extensions",
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    expect(result.resolvedConfig.postCreateCommand).toBe(
+      "mkdir -p /home/node/.claude/extensions",
+    );
+  });
+
+  // Test 12: Mixed .source and .target in the same string
+  it("resolves both .source and .target in the same string", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      postCreateCommand:
+        "cp ${lace.mount(project/config).source}/defaults.json ${lace.mount(project/config).target}/defaults.json",
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const cmd = result.resolvedConfig.postCreateCommand as string;
+    expect(cmd).not.toContain("${lace.mount(");
+    expect(cmd).toContain("/home/node/.claude/defaults.json");
+    expect(cmd).toMatch(/^cp \/.*\/defaults\.json \/home\/node\/\.claude\/defaults\.json$/);
+  });
+
+  // Test 13: Bare ${lace.mount(label)} resolves to full mount spec
+  it("resolves bare ${lace.mount(label)} to full mount spec string", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["${lace.mount(project/data)}"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).toMatch(/^source=\/.*,target=\/data,type=bind$/);
+    expect(mounts[0]).not.toContain("${lace.mount(");
+  });
+
+  // Test 14: Bare ${lace.mount(label)} with readonly declaration
+  it("resolves bare ${lace.mount(label)} with readonly flag", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/secrets": { target: "/secrets", readonly: true },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["${lace.mount(project/secrets)}"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).toMatch(/,type=bind,readonly$/);
+  });
+
+  // Test 15: Bare ${lace.mount(label)} with custom type and consistency
+  it("resolves bare ${lace.mount(label)} with custom type and consistency", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/vol": { target: "/vol", type: "volume", consistency: "delegated" },
+    };
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+      mounts: ["${lace.mount(project/vol)}"],
+    };
+
+    const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
+
+    const mounts = result.resolvedConfig.mounts as string[];
+    expect(mounts[0]).toContain("type=volume");
+    expect(mounts[0]).toContain("consistency=delegated");
+  });
+
+  // Test 16: mountAssignments in result
   it("populates mountAssignments in TemplateResolutionResult", async () => {
     trackProjectMountsDir(workspaceRoot);
     const config: Record<string, unknown> = {
@@ -1828,346 +1964,70 @@ describe("mount template resolution", () => {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       mounts: [
-        "source=${lace.mount.source(project/data)},target=/data,type=bind",
-        "source=${lace.mount.source(project/cache)},target=/cache,type=bind",
+        "source=${lace.mount(project/data).source},target=/data,type=bind",
+        "source=${lace.mount(project/cache).source},target=/cache,type=bind",
       ],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, projectDeclarations);
     const result = await resolveTemplates(config, allocator, mountResolver);
 
     expect(result.mountAssignments).toHaveLength(2);
     const labels = result.mountAssignments.map((a) => a.label);
     expect(labels).toContain("project/data");
     expect(labels).toContain("project/cache");
-    // Each assignment has a resolved source path
     for (const assignment of result.mountAssignments) {
       expect(assignment.resolvedSource).toMatch(/^\//);
       expect(assignment.isOverride).toBe(false);
     }
   });
 
-  // Test 11: No resolver supplied
-  it("leaves ${lace.mount.source()} as literal string when no resolver is supplied", async () => {
+  // Test 17: No resolver supplied — mount expressions pass through
+  it("leaves mount expressions as literal strings when no resolver is supplied", async () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/devcontainers/features/git:1": {},
       },
       containerEnv: {
-        MOUNT_SRC: "${lace.mount.source(foo/bar)}",
+        MOUNT_SRC: "${lace.mount(foo/bar).source}",
+        MOUNT_TGT: "${lace.mount(foo/bar).target}",
+        MOUNT_FULL: "${lace.mount(foo/bar)}",
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    // No mountResolver passed — expressions should remain as-is
     const result = await resolveTemplates(config, allocator);
 
     const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
-    expect(containerEnv.MOUNT_SRC).toBe("${lace.mount.source(foo/bar)}");
+    expect(containerEnv.MOUNT_SRC).toBe("${lace.mount(foo/bar).source}");
+    expect(containerEnv.MOUNT_TGT).toBe("${lace.mount(foo/bar).target}");
+    expect(containerEnv.MOUNT_FULL).toBe("${lace.mount(foo/bar)}");
     expect(result.mountAssignments).toHaveLength(0);
   });
-});
 
-// ── buildMountTargetMap ──
-
-describe("buildMountTargetMap", () => {
-  it("builds target map from feature metadata with mount declarations", () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/org/claude-code:1",
-        {
-          id: "claude-code",
-          version: "1.0.0",
-          options: {},
-          customizations: {
-            lace: {
-              mounts: {
-                config: {
-                  target: "/home/node/.claude",
-                  description: "Claude config",
-                },
-              },
-            },
-          },
-        },
-      ],
-    ]);
-
-    const result = buildMountTargetMap(metadataMap);
-
-    expect(result.size).toBe(1);
-    expect(result.get("claude-code/config")).toBe("/home/node/.claude");
-  });
-
-  it("builds map for multiple features with multiple mounts", () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/org/claude-code:1",
-        {
-          id: "claude-code",
-          version: "1.0.0",
-          options: {},
-          customizations: {
-            lace: {
-              mounts: {
-                config: {
-                  target: "/home/node/.claude",
-                  description: "Claude config",
-                },
-                data: {
-                  target: "/home/node/.claude-data",
-                  description: "Claude data",
-                },
-              },
-            },
-          },
-        },
-      ],
-      [
-        "ghcr.io/org/wezterm-server:1",
-        {
-          id: "wezterm-server",
-          version: "1.0.0",
-          options: {},
-          customizations: {
-            lace: {
-              mounts: {
-                config: {
-                  target: "/home/user/.config/wezterm",
-                  description: "WezTerm config",
-                },
-              },
-            },
-          },
-        },
-      ],
-    ]);
-
-    const result = buildMountTargetMap(metadataMap);
-
-    expect(result.size).toBe(3);
-    expect(result.get("claude-code/config")).toBe("/home/node/.claude");
-    expect(result.get("claude-code/data")).toBe("/home/node/.claude-data");
-    expect(result.get("wezterm-server/config")).toBe("/home/user/.config/wezterm");
-  });
-
-  it("returns empty map for features with no mount declarations", () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/devcontainers/features/git:1", gitMetadata],
-    ]);
-
-    const result = buildMountTargetMap(metadataMap);
-
-    expect(result.size).toBe(0);
-  });
-
-  it("skips null metadata entries", () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", null],
-    ]);
-
-    const result = buildMountTargetMap(metadataMap);
-
-    expect(result.size).toBe(0);
-  });
-
-  it("returns empty map for empty metadata map", () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>();
-
-    const result = buildMountTargetMap(metadataMap);
-
-    expect(result.size).toBe(0);
-  });
-});
-
-// ── mount target template resolution ──
-
-describe("mount target template resolution", () => {
-  const claudeCodeMetadata: FeatureMetadata = {
-    id: "claude-code",
-    version: "1.0.0",
-    options: {},
-    customizations: {
-      lace: {
-        mounts: {
-          config: {
-            target: "/home/node/.claude",
-            description: "Claude config directory",
-          },
-        },
-      },
-    },
-  };
-
-  const weztermWithMountMetadata: FeatureMetadata = {
-    id: "wezterm-server",
-    version: "1.0.0",
-    options: {
-      hostSshPort: { type: "string", default: "2222" },
-    },
-    customizations: {
-      lace: {
-        ports: {
-          hostSshPort: { label: "wezterm ssh" },
-        },
-        mounts: {
-          config: {
-            target: "/home/user/.config/wezterm",
-            description: "WezTerm config",
-          },
-        },
-      },
-    },
-  };
-
-  // Test 1: Basic mount target resolution
-  it("resolves ${lace.mount.target(claude-code/config)} to declared target path", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/claude-code:1": {},
-      },
-      containerEnv: {
-        CLAUDE_CONFIG: "${lace.mount.target(claude-code/config)}",
-      },
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
-
-    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
-    expect(containerEnv.CLAUDE_CONFIG).toBe("/home/node/.claude");
-  });
-
-  // Test 2: Non-existent mount label throws descriptive error
-  it("throws descriptive error when mount target label not found", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/claude-code:1": {},
-      },
-      containerEnv: {
-        MISSING: "${lace.mount.target(nonexistent/mount)}",
-      },
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    await expect(
-      resolveTemplates(config, allocator, undefined, mountTargetMap),
-    ).rejects.toThrow(/Mount target label "nonexistent\/mount" not found in feature metadata/);
-    await expect(
-      resolveTemplates(config, allocator, undefined, mountTargetMap),
-    ).rejects.toThrow(/Available mount labels: claude-code\/config/);
-  });
-
-  // Test 3: Target template in containerEnv resolves
-  it("resolves mount target in containerEnv", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/claude-code:1": {},
-      },
-      containerEnv: {
-        CONFIG_DIR: "${lace.mount.target(claude-code/config)}",
-        SETTINGS_FILE: "${lace.mount.target(claude-code/config)}/settings.json",
-      },
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
-
-    const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
-    expect(containerEnv.CONFIG_DIR).toBe("/home/node/.claude");
-    expect(containerEnv.SETTINGS_FILE).toBe("/home/node/.claude/settings.json");
-  });
-
-  // Test 4: Target template in lifecycle commands
-  it("resolves mount target in lifecycle commands", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/claude-code:1": {},
-      },
-      postCreateCommand: "mkdir -p ${lace.mount.target(claude-code/config)}/extensions",
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
-
-    expect(result.resolvedConfig.postCreateCommand).toBe(
-      "mkdir -p /home/node/.claude/extensions",
-    );
-  });
-
-  // Test 5: Mixed mount.source and mount.target in the same string
-  it("resolves both mount.source and mount.target in the same string", async () => {
-    trackProjectMountsDir(workspaceRoot);
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/claude-code:1": {},
-      },
-      postCreateCommand:
-        "cp ${lace.mount.source(claude-code/config)}/defaults.json ${lace.mount.target(claude-code/config)}/defaults.json",
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    const mountResolver = new MountPathResolver(workspaceRoot, {});
-    const result = await resolveTemplates(config, allocator, mountResolver, mountTargetMap);
-
-    const cmd = result.resolvedConfig.postCreateCommand as string;
-    // mount.source should be resolved to a host path
-    expect(cmd).not.toContain("${lace.mount.source(");
-    // mount.target should be resolved to the container path
-    expect(cmd).not.toContain("${lace.mount.target(");
-    expect(cmd).toContain("/home/node/.claude/defaults.json");
-    // The source portion should be a concrete host path
-    expect(cmd).toMatch(/^cp \/.*\/defaults\.json \/home\/node\/\.claude\/defaults\.json$/);
-  });
-
-  // Test 6: Target template in nested config objects
+  // Test 18: Mount target in nested objects
   it("resolves mount target in nested config objects", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
     const config: Record<string, unknown> = {
       features: {
-        "ghcr.io/org/claude-code:1": {},
+        "ghcr.io/devcontainers/features/git:1": {},
       },
       customizations: {
         vscode: {
           settings: {
-            "claude.configPath": "${lace.mount.target(claude-code/config)}",
+            "claude.configPath": "${lace.mount(project/config).target}",
           },
         },
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
 
     const customizations = result.resolvedConfig.customizations as Record<
       string,
@@ -2178,24 +2038,24 @@ describe("mount target template resolution", () => {
     );
   });
 
-  // Test 7: Target template in arrays
+  // Test 19: Mount target in array elements
   it("resolves mount target in array elements", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/claude-code:1", claudeCodeMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
     const config: Record<string, unknown> = {
       features: {
-        "ghcr.io/org/claude-code:1": {},
+        "ghcr.io/devcontainers/features/git:1": {},
       },
       mounts: [
-        "source=/host/path,target=${lace.mount.target(claude-code/config)},type=bind",
+        "source=/host/path,target=${lace.mount(project/config).target},type=bind",
       ],
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
 
     const mounts = result.resolvedConfig.mounts as string[];
     expect(mounts[0]).toBe(
@@ -2203,53 +2063,57 @@ describe("mount target template resolution", () => {
     );
   });
 
-  // Test 8: Error message shows empty available labels when map is empty
-  it("shows (none) when no mount labels are available", async () => {
-    const mountTargetMap = new Map<string, string>();
-
+  // Test 20: Unknown mount label throws with declaration-aware error
+  it("throws when mount label not in declarations", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/node/.claude" },
+    };
     const config: Record<string, unknown> = {
       features: {
-        "ghcr.io/org/claude-code:1": {},
+        "ghcr.io/devcontainers/features/git:1": {},
       },
       containerEnv: {
-        MISSING: "${lace.mount.target(nonexistent/mount)}",
+        MISSING: "${lace.mount(project/unknown).target}",
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
     await expect(
-      resolveTemplates(config, allocator, undefined, mountTargetMap),
-    ).rejects.toThrow(/Available mount labels: \(none\)/);
+      resolveTemplates(config, allocator, mountResolver),
+    ).rejects.toThrow(/Mount label "project\/unknown" not found in declarations/);
+    await expect(
+      resolveTemplates(config, allocator, mountResolver),
+    ).rejects.toThrow(/Available: project\/config/);
   });
 
-  // Test 9: Mount target with port in same config resolves both
+  // Test 21: Port + mount target in same config
   it("resolves both port templates and mount target templates in the same config", async () => {
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/wezterm-server:1", weztermWithMountMetadata],
-    ]);
-    const mountTargetMap = buildMountTargetMap(metadataMap);
-
+    trackProjectMountsDir(workspaceRoot);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/config": { target: "/home/user/.config/wezterm" },
+    };
     const config: Record<string, unknown> = {
       features: {
-        "ghcr.io/org/wezterm-server:1": {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
           hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
       },
       containerEnv: {
-        WEZTERM_CONFIG: "${lace.mount.target(wezterm-server/config)}",
+        WEZTERM_CONFIG: "${lace.mount(project/config).target}",
       },
     };
 
     const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator, undefined, mountTargetMap);
+    const mountResolver = new MountPathResolver(workspaceRoot, {}, declarations);
+    const result = await resolveTemplates(config, allocator, mountResolver);
 
-    // Port resolved to integer
     const features = result.resolvedConfig.features as Record<string, Record<string, unknown>>;
-    const hostSshPort = features["ghcr.io/org/wezterm-server:1"].hostSshPort;
+    const hostSshPort = features["ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"].hostSshPort;
     expect(typeof hostSshPort).toBe("number");
     expect(hostSshPort).toBeGreaterThanOrEqual(22425);
 
-    // Mount target resolved to path
     const containerEnv = result.resolvedConfig.containerEnv as Record<string, unknown>;
     expect(containerEnv.WEZTERM_CONFIG).toBe("/home/user/.config/wezterm");
   });

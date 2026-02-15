@@ -8,9 +8,9 @@
     "dockerfile": "Dockerfile",
     "args": {
       "TZ": "${localEnv:TZ:America/Los_Angeles}",
-      // NOTE: Tied to mounts[0]
+      // NOTE: Tied to project/bash-history declaration below
       "COMMAND_HISTORY_PATH": "/commandhistory",
-      // NOTE: Tied to mounts[1], .containerEnv.CLAUDE_CONFIG_DIR
+      // NOTE: Tied to project/claude-config declaration below
       "USERNAME": "node"
     },
     "context": ".."
@@ -62,6 +62,21 @@
     // git and sshd are baked in via prebuild; port-declaring features (wezterm-server)
     // stay in the features block for lace up auto-injection to work.
     "lace": {
+      // Mount declarations: lace resolves host source paths from settings or defaults.
+      // project/bash-history and project/claude-config are auto-injected into the
+      // mounts array during lace up. Configure custom source paths in settings.json:
+      //   { "mounts": { "project/claude-config": { "source": "~/.claude" } } }
+      "mounts": {
+        "bash-history": {
+          "target": "/commandhistory",
+          "description": "Bash command history persistence"
+        },
+        "claude-config": {
+          "target": "/home/node/.claude",
+          "recommendedSource": "~/.claude",
+          "description": "Claude Code configuration and credentials"
+        }
+      },
       "prebuildFeatures": {
         "ghcr.io/devcontainers/features/git:1": {},
         "ghcr.io/devcontainers/features/sshd:1": {}
@@ -73,18 +88,18 @@
   // Asymmetric: host port is in lace range, container port stays at sshd default.
   "appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"],
   "mounts": [
-    "source=${lace.mount.source(project/bash-history)},target=/commandhistory,type=bind",
-    "source=${lace.mount.source(project/claude-config)},target=/home/node/.claude,type=bind",
     // SSH public key for WezTerm SSH domain access (host -> container)
     // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""
     "source=${localEnv:HOME}/.ssh/lace_devcontainer.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
     // Container-side wezterm config for mux server (sets default_cwd)
     // Bind mount instead of Dockerfile COPY so changes take effect without rebuild
     "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly"
+    // project/bash-history and project/claude-config are auto-injected from
+    // customizations.lace.mounts declarations above
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
-    "CLAUDE_CONFIG_DIR": "/home/node/.claude"
+    "CLAUDE_CONFIG_DIR": "${lace.mount(project/claude-config).target}"
   },
   "workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace/main",

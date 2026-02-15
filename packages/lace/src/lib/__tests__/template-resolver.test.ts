@@ -1808,6 +1808,29 @@ describe("mount template resolution", () => {
     ).rejects.toThrow(/Unknown template variable/);
   });
 
+  // Test 1b: v1 syntax rejected by LACE_UNKNOWN_PATTERN
+  it("rejects v1 ${lace.mount.source()} and ${lace.mount.target()} syntax as unknown", async () => {
+    const allocator = new PortAllocator(workspaceRoot);
+
+    // v1 ${lace.mount.source()} starts with "mount." (dot) not "mount(" (paren),
+    // so it fails the mount( lookahead and is caught by LACE_UNKNOWN_PATTERN
+    const configV1Source: Record<string, unknown> = {
+      features: { "ghcr.io/devcontainers/features/git:1": {} },
+      mounts: ["source=${lace.mount.source(project/data)},target=/data,type=bind"],
+    };
+    await expect(
+      resolveTemplates(configV1Source, allocator),
+    ).rejects.toThrow(/Unknown template variable/);
+
+    const configV1Target: Record<string, unknown> = {
+      features: { "ghcr.io/devcontainers/features/git:1": {} },
+      containerEnv: { FOO: "${lace.mount.target(project/data)}" },
+    };
+    await expect(
+      resolveTemplates(configV1Target, allocator),
+    ).rejects.toThrow(/Unknown template variable/);
+  });
+
   // Test 2: Mount .source resolution in string
   it("resolves ${lace.mount(label).source} embedded in a mount string", async () => {
     trackProjectMountsDir(workspaceRoot);

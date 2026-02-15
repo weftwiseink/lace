@@ -224,7 +224,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.log(`Auto-injected port templates for: ${injected.join(", ")}`);
   }
 
-  // Step 3d: Auto-inject mount templates from project + feature declarations
+  // Step 4: Auto-inject mount templates from project + feature declarations
   const projectMountDeclarations = extractProjectMountDeclarations(configForResolution);
   const { injected: mountInjected, declarations: mountDeclarations } =
     autoInjectMountTemplates(configForResolution, projectMountDeclarations, metadataMap);
@@ -232,7 +232,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
   }
 
-  // Step 3e: Validate mount declarations
+  // Step 5: Validate mount declarations
   if (Object.keys(mountDeclarations).length > 0) {
     // Build set of known feature short IDs for namespace validation
     const features = (configForResolution.features ?? {}) as Record<string, unknown>;
@@ -256,7 +256,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
-  // Step 3b: Warn about prebuild features with static port values and no appPort
+  // Step 6: Warn about prebuild features with static port values and no appPort
   const staticPortWarnings = warnPrebuildPortFeaturesStaticPort(
     configForResolution,
     metadataMap,
@@ -266,7 +266,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.warn(`Warning: ${warning}`);
   }
 
-  // Step 3c: Create mount path resolver for ${lace.mount()} resolution
+  // Step 7: Create mount path resolver for ${lace.mount()} resolution
   let settings: LaceSettings = {};
   try {
     settings = loadSettings();
@@ -279,7 +279,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
   const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations);
 
-  // Step 4: Resolve all templates (auto-injected + user-written)
+  // Step 8: Resolve all templates (auto-injected + user-written)
   const portAllocator = new PortAllocator(workspaceFolder);
   try {
     templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver);

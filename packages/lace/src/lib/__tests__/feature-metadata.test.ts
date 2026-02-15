@@ -17,6 +17,7 @@ import {
   validateFeatureOptions,
   validatePortDeclarations,
   extractLaceCustomizations,
+  parseMountDeclarationEntry,
   isLocalPath,
   featureIdToCacheKey,
   getTtlMs,
@@ -639,6 +640,57 @@ describe("extractLaceCustomizations", () => {
     const result = extractLaceCustomizations(metadata);
 
     expect(result?.mounts?.data?.readonly).toBeUndefined();
+  });
+
+  // Scenario: parseMountDeclarationEntry with v2 fields (recommendedSource, type, consistency)
+  it("parseMountDeclarationEntry parses all v2 fields", () => {
+    const result = parseMountDeclarationEntry("config", {
+      target: "/home/node/.claude",
+      recommendedSource: "~/.claude",
+      description: "Claude config",
+      readonly: true,
+      type: "volume",
+      consistency: "delegated",
+    });
+
+    expect(result).toEqual({
+      target: "/home/node/.claude",
+      recommendedSource: "~/.claude",
+      description: "Claude config",
+      readonly: true,
+      type: "volume",
+      consistency: "delegated",
+    });
+  });
+
+  it("parseMountDeclarationEntry ignores non-string recommendedSource", () => {
+    const result = parseMountDeclarationEntry("data", {
+      target: "/data",
+      recommendedSource: 42,
+    });
+
+    expect(result).toBeDefined();
+    expect(result!.target).toBe("/data");
+    expect(result!.recommendedSource).toBeUndefined();
+  });
+
+  it("parseMountDeclarationEntry ignores non-string type and consistency", () => {
+    const result = parseMountDeclarationEntry("data", {
+      target: "/data",
+      type: true,
+      consistency: 123,
+    });
+
+    expect(result).toBeDefined();
+    expect(result!.type).toBeUndefined();
+    expect(result!.consistency).toBeUndefined();
+  });
+
+  it("parseMountDeclarationEntry returns null for missing target", () => {
+    const result = parseMountDeclarationEntry("data", {
+      description: "no target",
+    });
+    expect(result).toBeNull();
   });
 
   // Additional: requireLocalPort boolean

@@ -227,6 +227,10 @@ export class MountPathResolver {
    */
   resolveFullSpec(label: string): string {
     const source = this.resolveSource(label);
+    // resolveSource() already validates the label exists in declarations via
+    // validateDeclaration(), but that check is a no-op when declarations is empty
+    // (backwards compat for tests without declarations). The explicit check here
+    // ensures resolveFullSpec() always fails on missing declarations regardless.
     const decl = this.declarations[label];
     if (!decl) {
       const available = Object.keys(this.declarations).join(", ");

@@ -586,6 +586,8 @@ describe("autoInjectMountTemplates", () => {
     },
   };
 
+  const noProjectDecls: Record<string, LaceMountDeclaration> = {};
+
   it("injects bare mount template for feature with mount declaration", () => {
     const config: Record<string, unknown> = {
       features: {
@@ -599,12 +601,15 @@ describe("autoInjectMountTemplates", () => {
       ],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual(["wezterm-server/config"]);
+    expect(result.injected).toEqual(["wezterm-server/config"]);
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(1);
     expect(mounts[0]).toBe("${lace.mount(wezterm-server/config)}");
+    // Declarations map includes feature declaration
+    expect(result.declarations["wezterm-server/config"]).toBeDefined();
+    expect(result.declarations["wezterm-server/config"].target).toBe("/home/user/.config/wezterm");
   });
 
   it("injects multiple bare mount templates for feature with multiple declarations", () => {
@@ -620,11 +625,11 @@ describe("autoInjectMountTemplates", () => {
       ],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toHaveLength(2);
-    expect(injected).toContain("data-feature/data");
-    expect(injected).toContain("data-feature/cache");
+    expect(result.injected).toHaveLength(2);
+    expect(result.injected).toContain("data-feature/data");
+    expect(result.injected).toContain("data-feature/cache");
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(2);
     expect(mounts.some((m: string) => m === "${lace.mount(data-feature/data)}")).toBe(true);
@@ -644,12 +649,11 @@ describe("autoInjectMountTemplates", () => {
       ],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual(["config-feature/settings"]);
+    expect(result.injected).toEqual(["config-feature/settings"]);
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(1);
-    // Bare form — readonly is handled by resolveFullSpec via declarations
     expect(mounts[0]).toBe("${lace.mount(config-feature/settings)}");
   });
 
@@ -663,19 +667,20 @@ describe("autoInjectMountTemplates", () => {
       ["ghcr.io/devcontainers/features/git:1", gitMetadata],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual([]);
+    expect(result.injected).toEqual([]);
     expect(config.mounts).toBeUndefined();
   });
 
-  it("returns empty when no features in config", () => {
+  it("returns empty when no declarations at all", () => {
     const config: Record<string, unknown> = {};
     const metadataMap = new Map<string, FeatureMetadata | null>();
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual([]);
+    expect(result.injected).toEqual([]);
+    expect(Object.keys(result.declarations)).toHaveLength(0);
   });
 
   it("skips features with null metadata", () => {
@@ -691,9 +696,9 @@ describe("autoInjectMountTemplates", () => {
       ],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual([]);
+    expect(result.injected).toEqual([]);
   });
 
   it("appends to existing mounts array", () => {
@@ -710,13 +715,187 @@ describe("autoInjectMountTemplates", () => {
       ],
     ]);
 
-    const injected = autoInjectMountTemplates(config, metadataMap);
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
 
-    expect(injected).toEqual(["wezterm-server/config"]);
+    expect(result.injected).toEqual(["wezterm-server/config"]);
     const mounts = config.mounts as string[];
     expect(mounts).toHaveLength(2);
     expect(mounts[0]).toBe("source=/existing,target=/existing,type=bind");
     expect(mounts[1]).toBe("${lace.mount(wezterm-server/config)}");
+  });
+
+  // ── Project declarations ──
+
+  it("injects project-level declaration as ${lace.mount(project/key)}", () => {
+    const config: Record<string, unknown> = {};
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/bash-history": { target: "/commandhistory" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>();
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(result.injected).toEqual(["project/bash-history"]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toBe("${lace.mount(project/bash-history)}");
+    expect(result.declarations["project/bash-history"]).toBeDefined();
+  });
+
+  it("injects both project and feature declarations", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      },
+    };
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(result.injected).toHaveLength(2);
+    expect(result.injected).toContain("project/data");
+    expect(result.injected).toContain("wezterm-server/config");
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(2);
+  });
+
+  // ── Suppression tests ──
+
+  it("suppresses injection when bare ${lace.mount(label)} already in mounts", () => {
+    const config: Record<string, unknown> = {
+      mounts: ["${lace.mount(project/data)}"],
+    };
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>();
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(result.injected).toEqual([]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1); // No duplicate
+  });
+
+  it("suppresses injection when ${lace.mount(label).source} already in mounts", () => {
+    const config: Record<string, unknown> = {
+      mounts: ["source=${lace.mount(project/data).source},target=/data,type=bind"],
+    };
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>();
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(result.injected).toEqual([]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1);
+  });
+
+  it("suppresses injection when ${lace.mount(label).target} already in mounts", () => {
+    const config: Record<string, unknown> = {
+      mounts: ["target=${lace.mount(project/data).target}"],
+    };
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>();
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(result.injected).toEqual([]);
+  });
+
+  // ── Prebuild feature declarations ──
+
+  it("injects prebuild feature mount declarations identically to regular features", () => {
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+          },
+        },
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
+
+    expect(result.injected).toEqual(["wezterm-server/config"]);
+    const mounts = config.mounts as string[];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toBe("${lace.mount(wezterm-server/config)}");
+  });
+
+  it("injects both regular and prebuild feature mount declarations", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/org/data-feature:1": {},
+      },
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+          },
+        },
+      },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      ["ghcr.io/org/data-feature:1", featureWithMultipleMountsMetadata],
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
+
+    expect(result.injected).toHaveLength(3);
+    expect(result.injected).toContain("data-feature/data");
+    expect(result.injected).toContain("data-feature/cache");
+    expect(result.injected).toContain("wezterm-server/config");
+  });
+
+  // ── Unified declarations map ──
+
+  it("returns unified declarations map combining project + feature", () => {
+    const config: Record<string, unknown> = {
+      features: {
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+      },
+    };
+    const projectDecls: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const metadataMap = new Map<string, FeatureMetadata | null>([
+      [
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
+        featureWithMountMetadata,
+      ],
+    ]);
+
+    const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
+
+    expect(Object.keys(result.declarations)).toHaveLength(2);
+    expect(result.declarations["project/data"]).toBeDefined();
+    expect(result.declarations["project/data"].target).toBe("/data");
+    expect(result.declarations["wezterm-server/config"]).toBeDefined();
+    expect(result.declarations["wezterm-server/config"].target).toBe("/home/user/.config/wezterm");
   });
 });
 

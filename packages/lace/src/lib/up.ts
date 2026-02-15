@@ -25,6 +25,7 @@ import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
 import {
   autoInjectPortTemplates,
   autoInjectMountTemplates,
+  extractProjectMountDeclarations,
   resolveTemplates,
   generatePortEntries,
   mergePortEntries,
@@ -219,8 +220,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     console.log(`Auto-injected port templates for: ${injected.join(", ")}`);
   }
 
-  // Step 3d: Auto-inject mount templates from feature metadata
-  const mountInjected = autoInjectMountTemplates(configForResolution, metadataMap);
+  // Step 3d: Auto-inject mount templates from project + feature declarations
+  const projectMountDeclarations = extractProjectMountDeclarations(configForResolution);
+  const { injected: mountInjected, declarations: mountDeclarations } =
+    autoInjectMountTemplates(configForResolution, projectMountDeclarations, metadataMap);
   if (mountInjected.length > 0) {
     console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
   }
@@ -246,7 +249,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       throw err;
     }
   }
-  const mountResolver = new MountPathResolver(workspaceFolder, settings);
+  const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations);
 
   // Step 4: Resolve all templates (auto-injected + user-written)
   const portAllocator = new PortAllocator(workspaceFolder);

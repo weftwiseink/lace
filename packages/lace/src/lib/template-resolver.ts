@@ -259,52 +259,109 @@ function injectForPrebuildBlock(
   }
 }
 
+/** Result of auto-injecting mount templates. */
+export interface MountAutoInjectionResult {
+  /** Labels that were auto-injected into the mounts array. */
+  injected: string[];
+  /** Unified declarations map (project + feature + prebuild feature). */
+  declarations: Record<string, LaceMountDeclaration>;
+}
+
 /**
- * Auto-inject mount entries for features declaring customizations.lace.mounts.
- * For each feature mount declaration, inject a bare ${lace.mount(label)} entry
- * into the config's mounts array. The bare form resolves to a full mount spec
- * string during template resolution (source=...,target=...,type=...).
+ * Build a unified mount declarations map from project-level, feature-level,
+ * and prebuild feature-level declarations.
  *
- * Only processes top-level features, not prebuildFeatures. Prebuild features
- * are baked into the image at build time and their mounts would need different
- * lifecycle handling (not yet implemented).
+ * Project declarations come from `customizations.lace.mounts` in the devcontainer config.
+ * Feature/prebuild feature declarations come from feature metadata's `customizations.lace.mounts`.
  *
- * Modifies the config in-place before template resolution.
- * Returns the list of labels that were auto-injected.
+ * Project declarations are prefixed with "project/".
+ * Feature declarations are prefixed with "<shortId>/".
+ * Mounts are runtime config (docker run flags), so prebuild features are treated identically
+ * to regular features — no build/runtime asymmetry.
  */
-export function autoInjectMountTemplates(
-  config: Record<string, unknown>,
+export function buildMountDeclarationsMap(
+  projectDeclarations: Record<string, LaceMountDeclaration>,
   metadataMap: Map<string, FeatureMetadata | null>,
-): string[] {
-  const features = (config.features ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
-  if (Object.keys(features).length === 0) return [];
+): Record<string, LaceMountDeclaration> {
+  const declarations: Record<string, LaceMountDeclaration> = {
+    ...projectDeclarations,
+  };
 
-  const injected: string[] = [];
-
-  for (const [fullRef] of Object.entries(features)) {
-    const shortId = extractFeatureShortId(fullRef);
-    const metadata = metadataMap.get(fullRef);
+  for (const [fullRef, metadata] of metadataMap) {
     if (!metadata) continue;
-
+    const shortId = extractFeatureShortId(fullRef);
     const laceCustom = extractLaceCustomizations(metadata);
     if (!laceCustom?.mounts) continue;
 
-    for (const [mountName] of Object.entries(laceCustom.mounts)) {
-      const label = `${shortId}/${mountName}`;
-
-      // Add bare ${lace.mount(label)} to mounts array — resolves to full spec
-      const mounts = (config.mounts ?? []) as string[];
-      mounts.push(`\${lace.mount(${label})}`);
-      config.mounts = mounts;
-
-      injected.push(label);
+    for (const [mountName, value] of Object.entries(laceCustom.mounts)) {
+      const parsed = parseMountDeclarationEntry(mountName, value);
+      if (parsed) {
+        declarations[`${shortId}/${mountName}`] = parsed;
+      }
     }
   }
 
-  return injected;
+  return declarations;
+}
+
+/**
+ * Check if a mount label is already referenced in the mounts array
+ * in any accessor form: ${lace.mount(label)}, ${lace.mount(label).source},
+ * or ${lace.mount(label).target}.
+ */
+function mountLabelReferencedInMounts(
+  mounts: string[],
+  label: string,
+): boolean {
+  // Escape special regex chars in label (hyphens, underscores are safe but be safe)
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\$\\{lace\\.mount\\(${escaped}\\)(?:\\.(?:source|target))?\\}`);
+  return mounts.some((m) => pattern.test(m));
+}
+
+/**
+ * Auto-inject mount entries for all declarations not already referenced
+ * in the config's mounts array. Handles project-level, feature-level, and
+ * prebuild feature-level declarations.
+ *
+ * For each declaration label, scans the mounts array for any reference in
+ * any accessor form (bare, .source, .target). If no reference found, appends
+ * a bare ${lace.mount(ns/label)} entry.
+ *
+ * Mounts are runtime config (docker run flags), so prebuild features are
+ * treated identically to regular features — no build/runtime asymmetry.
+ *
+ * Modifies the config in-place before template resolution.
+ * Returns the injected labels and the unified declarations map.
+ */
+export function autoInjectMountTemplates(
+  config: Record<string, unknown>,
+  projectDeclarations: Record<string, LaceMountDeclaration>,
+  metadataMap: Map<string, FeatureMetadata | null>,
+): MountAutoInjectionResult {
+  const declarations = buildMountDeclarationsMap(
+    projectDeclarations,
+    metadataMap,
+  );
+
+  const injected: string[] = [];
+
+  for (const label of Object.keys(declarations)) {
+    const mounts = (config.mounts ?? []) as string[];
+
+    // Check if this label is already referenced in any accessor form
+    if (mountLabelReferencedInMounts(mounts, label)) {
+      continue;
+    }
+
+    // Append bare ${lace.mount(label)} — resolves to full spec during resolution
+    mounts.push(`\${lace.mount(${label})}`);
+    config.mounts = mounts;
+
+    injected.push(label);
+  }
+
+  return { injected, declarations };
 }
 
 // ── Template resolution ──

@@ -8,10 +8,11 @@ import {
 } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { MountPathResolver } from "@/lib/mount-resolver";
-import type { MountAssignmentsFile } from "@/lib/mount-resolver";
-import type { LaceSettings } from "@/lib/settings";
-import { deriveProjectId } from "@/lib/repo-clones";
+import { MountPathResolver } from "../mount-resolver";
+import type { MountAssignmentsFile } from "../mount-resolver";
+import type { LaceSettings } from "../settings";
+import type { LaceMountDeclaration } from "../feature-metadata";
+import { deriveProjectId } from "../repo-clones";
 
 let testDir: string;
 let workspaceFolder: string;
@@ -45,15 +46,15 @@ function trackProjectMountsDir(wf: string): string {
   return mountsDir;
 }
 
-// ── Default path derivation ──
+// ── Default path derivation (resolveSource) ──
 
-describe("MountPathResolver — default path derivation", () => {
+describe("MountPathResolver — resolveSource default path derivation", () => {
   it("returns ~/.config/lace/<projectId>/mounts/namespace/label for default resolution", () => {
     trackProjectMountsDir(workspaceFolder);
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    const result = resolver.resolve("myns/data");
+    const result = resolver.resolveSource("myns/data");
 
     const projectId = deriveProjectId(workspaceFolder);
     const expected = join(
@@ -73,7 +74,7 @@ describe("MountPathResolver — default path derivation", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    const result = resolver.resolve("ns/label");
+    const result = resolver.resolveSource("ns/label");
 
     const projectId = deriveProjectId(workspaceFolder);
     expect(projectId).toBe(basename(workspaceFolder).toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-"));
@@ -81,9 +82,9 @@ describe("MountPathResolver — default path derivation", () => {
   });
 });
 
-// ── Settings override ──
+// ── Settings override (resolveSource) ──
 
-describe("MountPathResolver — settings override", () => {
+describe("MountPathResolver — resolveSource settings override", () => {
   it("returns expanded custom path when override exists in settings", () => {
     const overrideDir = join(testDir, "custom-mount");
     mkdirSync(overrideDir, { recursive: true });
@@ -95,7 +96,7 @@ describe("MountPathResolver — settings override", () => {
     };
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    const result = resolver.resolve("myns/data");
+    const result = resolver.resolveSource("myns/data");
     expect(result).toBe(overrideDir);
   });
 
@@ -109,7 +110,7 @@ describe("MountPathResolver — settings override", () => {
       },
     };
     const resolver = new MountPathResolver(workspaceFolder, settings);
-    resolver.resolve("myns/data");
+    resolver.resolveSource("myns/data");
 
     const assignments = resolver.getAssignments();
     expect(assignments).toHaveLength(1);
@@ -125,7 +126,7 @@ describe("MountPathResolver — auto-create default directory", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    const result = resolver.resolve("myns/data");
+    const result = resolver.resolveSource("myns/data");
     expect(existsSync(result)).toBe(true);
   });
 });
@@ -146,7 +147,7 @@ describe("MountPathResolver — no auto-create for overrides", () => {
       },
     };
     const resolver = new MountPathResolver(workspaceFolder, settings);
-    resolver.resolve("myns/data");
+    resolver.resolveSource("myns/data");
 
     // The override path exists (it was pre-created)
     expect(existsSync(overrideDir)).toBe(true);
@@ -166,10 +167,10 @@ describe("MountPathResolver — override path missing", () => {
     };
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("myns/data")).toThrow(
+    expect(() => resolver.resolveSource("myns/data")).toThrow(
       /Mount override source does not exist/,
     );
-    expect(() => resolver.resolve("myns/data")).toThrow(
+    expect(() => resolver.resolveSource("myns/data")).toThrow(
       /"myns\/data"/,
     );
   });
@@ -184,7 +185,7 @@ describe("MountPathResolver — persistence", () => {
 
     // Create first resolver, resolve a label, and save
     const resolver1 = new MountPathResolver(workspaceFolder, settings);
-    const path1 = resolver1.resolve("myns/data");
+    const path1 = resolver1.resolveSource("myns/data");
     resolver1.save();
 
     // Verify the file was written
@@ -200,7 +201,7 @@ describe("MountPathResolver — persistence", () => {
 
     // Create second resolver -- it should load the persisted state
     const resolver2 = new MountPathResolver(workspaceFolder, settings);
-    const path2 = resolver2.resolve("myns/data");
+    const path2 = resolver2.resolveSource("myns/data");
     expect(path2).toBe(path1);
 
     // Assignments should match
@@ -217,7 +218,7 @@ describe("MountPathResolver — label validation", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("my ns/data")).toThrow(
+    expect(() => resolver.resolveSource("my ns/data")).toThrow(
       /Invalid mount label/,
     );
   });
@@ -226,7 +227,7 @@ describe("MountPathResolver — label validation", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("MyNs/Data")).toThrow(
+    expect(() => resolver.resolveSource("MyNs/Data")).toThrow(
       /Invalid mount label/,
     );
   });
@@ -235,8 +236,8 @@ describe("MountPathResolver — label validation", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("data")).toThrow(/Invalid mount label/);
-    expect(() => resolver.resolve("data")).toThrow(
+    expect(() => resolver.resolveSource("data")).toThrow(/Invalid mount label/);
+    expect(() => resolver.resolveSource("data")).toThrow(
       /exactly one "\/"/,
     );
   });
@@ -245,14 +246,14 @@ describe("MountPathResolver — label validation", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("")).toThrow(/Invalid mount label/);
+    expect(() => resolver.resolveSource("")).toThrow(/Invalid mount label/);
   });
 
   it("throws on label with too many slashes", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    expect(() => resolver.resolve("a/b/c")).toThrow(/Invalid mount label/);
+    expect(() => resolver.resolveSource("a/b/c")).toThrow(/Invalid mount label/);
   });
 
   it("accepts valid labels with hyphens and underscores", () => {
@@ -261,7 +262,7 @@ describe("MountPathResolver — label validation", () => {
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
     // Should not throw
-    const result = resolver.resolve("my-ns_1/data-file_2");
+    const result = resolver.resolveSource("my-ns_1/data-file_2");
     expect(result).toBeDefined();
   });
 });
@@ -274,8 +275,8 @@ describe("MountPathResolver — idempotent resolution", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    const path1 = resolver.resolve("myns/data");
-    const path2 = resolver.resolve("myns/data");
+    const path1 = resolver.resolveSource("myns/data");
+    const path2 = resolver.resolveSource("myns/data");
     expect(path1).toBe(path2);
   });
 
@@ -284,9 +285,9 @@ describe("MountPathResolver — idempotent resolution", () => {
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(workspaceFolder, settings);
 
-    resolver.resolve("myns/data");
-    resolver.resolve("myns/data");
-    resolver.resolve("myns/data");
+    resolver.resolveSource("myns/data");
+    resolver.resolveSource("myns/data");
+    resolver.resolveSource("myns/data");
 
     const assignments = resolver.getAssignments();
     expect(assignments).toHaveLength(1);
@@ -304,11 +305,183 @@ describe("MountPathResolver — projectId derivation", () => {
 
     const settings: LaceSettings = {};
     const resolver = new MountPathResolver(customWorkspace, settings);
-    const result = resolver.resolve("ns/label");
+    const result = resolver.resolveSource("ns/label");
 
     // deriveProjectId lowercases and replaces non-alphanumeric with hyphens
     const expectedProjectId = "my-cool-project";
     expect(result).toContain(expectedProjectId);
     expect(result).toContain(join("mounts", "ns", "label"));
+  });
+});
+
+// ── resolveTarget ──
+
+describe("MountPathResolver — resolveTarget", () => {
+  it("returns the declaration target path", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(resolver.resolveTarget("project/foo")).toBe("/bar");
+  });
+
+  it("throws when label not in declarations", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() => resolver.resolveTarget("project/unknown")).toThrow(
+      /Mount label "project\/unknown" not found in declarations/,
+    );
+    expect(() => resolver.resolveTarget("project/unknown")).toThrow(
+      /Available: project\/foo/,
+    );
+  });
+
+  it("throws on invalid label format", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {};
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() => resolver.resolveTarget("noslash")).toThrow(/Invalid mount label/);
+  });
+});
+
+// ── resolveFullSpec ──
+
+describe("MountPathResolver — resolveFullSpec", () => {
+  it("produces source=<path>,target=/bar,type=bind for basic declaration", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toMatch(/^source=\/.*,target=\/bar,type=bind$/);
+  });
+
+  it("includes ,readonly when declaration has readonly: true", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar", readonly: true },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toContain(",readonly");
+    expect(spec).toMatch(/,type=bind,readonly$/);
+  });
+
+  it("uses custom type when declared", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar", type: "volume" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toContain("type=volume");
+  });
+
+  it("includes consistency when declared", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar", consistency: "delegated" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toContain("consistency=delegated");
+  });
+
+  it("assembles all options correctly", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": {
+        target: "/bar",
+        type: "bind",
+        readonly: true,
+        consistency: "cached",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toMatch(/^source=\/.*,target=\/bar,type=bind,readonly,consistency=cached$/);
+  });
+
+  it("uses settings override for source when present", () => {
+    const overrideDir = join(testDir, "custom-mount");
+    mkdirSync(overrideDir, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const settings: LaceSettings = {
+      mounts: {
+        "project/foo": { source: overrideDir },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings, declarations);
+
+    const spec = resolver.resolveFullSpec("project/foo");
+    expect(spec).toBe(`source=${overrideDir},target=/bar,type=bind`);
+  });
+
+  it("throws when label not in declarations", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() => resolver.resolveFullSpec("project/unknown")).toThrow(
+      /Mount label "project\/unknown" not found in declarations/,
+    );
+  });
+});
+
+// ── Declaration validation in resolveSource ──
+
+describe("MountPathResolver — declaration validation in resolveSource", () => {
+  it("throws when label not in non-empty declarations map", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() => resolver.resolveSource("project/unknown")).toThrow(
+      /Mount label "project\/unknown" not found in declarations/,
+    );
+    expect(() => resolver.resolveSource("project/unknown")).toThrow(
+      /Available: project\/foo/,
+    );
+  });
+
+  it("allows any label when declarations map is empty (backwards compat)", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const resolver = new MountPathResolver(workspaceFolder, {});
+
+    // Should not throw -- empty declarations = no declaration validation
+    const result = resolver.resolveSource("any/label");
+    expect(result).toBeDefined();
+  });
+});
+
+// ── hasDeclarations ──
+
+describe("MountPathResolver — hasDeclarations", () => {
+  it("returns false when no declarations", () => {
+    const resolver = new MountPathResolver(workspaceFolder, {});
+    expect(resolver.hasDeclarations()).toBe(false);
+  });
+
+  it("returns true when declarations are provided", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/foo": { target: "/bar" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    expect(resolver.hasDeclarations()).toBe(true);
   });
 });

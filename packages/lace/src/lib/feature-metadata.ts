@@ -59,10 +59,16 @@ export interface LacePortDeclaration {
 export interface LaceMountDeclaration {
   /** Container target path for this mount */
   target: string;
+  /** Suggested host source path, surfaced in config guidance (never used as actual source) */
+  recommendedSource?: string;
   /** Human-readable description */
   description?: string;
-  /** Whether the mount should be read-only */
+  /** Whether the mount should be read-only (default: false) */
   readonly?: boolean;
+  /** Docker mount type (default: "bind") */
+  type?: string;
+  /** Docker mount consistency hint (e.g., "delegated", "cached") */
+  consistency?: string;
 }
 
 export interface LaceCustomizations {
@@ -565,6 +571,35 @@ export function validatePortDeclarations(
 }
 
 /**
+ * Parse and validate a single mount declaration entry from raw config.
+ * Returns a validated LaceMountDeclaration or null if the entry is invalid.
+ * Shared by both extractLaceCustomizations() (feature-level) and
+ * extractProjectMountDeclarations() (project-level) to avoid duplicated validation.
+ */
+export function parseMountDeclarationEntry(
+  _key: string,
+  value: unknown,
+): LaceMountDeclaration | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.target !== "string") return null; // target is required
+  return {
+    target: entry.target,
+    recommendedSource:
+      typeof entry.recommendedSource === "string"
+        ? entry.recommendedSource
+        : undefined,
+    description:
+      typeof entry.description === "string" ? entry.description : undefined,
+    readonly:
+      typeof entry.readonly === "boolean" ? entry.readonly : undefined,
+    type: typeof entry.type === "string" ? entry.type : undefined,
+    consistency:
+      typeof entry.consistency === "string" ? entry.consistency : undefined,
+  };
+}
+
+/**
  * Extract customizations.lace from feature metadata (runtime type narrowing).
  * Returns null if no customizations or no customizations.lace exists.
  * Returns { ports: undefined } if customizations.lace exists but has no ports.
@@ -612,16 +647,8 @@ export function extractLaceCustomizations(
     for (const [key, value] of Object.entries(
       mounts as Record<string, unknown>,
     )) {
-      if (!value || typeof value !== "object") continue;
-      const entry = value as Record<string, unknown>;
-      if (typeof entry.target !== "string") continue; // target is required
-      validatedMounts[key] = {
-        target: entry.target,
-        description:
-          typeof entry.description === "string" ? entry.description : undefined,
-        readonly:
-          typeof entry.readonly === "boolean" ? entry.readonly : undefined,
-      };
+      const parsed = parseMountDeclarationEntry(key, value);
+      if (parsed) validatedMounts[key] = parsed;
     }
   }
 

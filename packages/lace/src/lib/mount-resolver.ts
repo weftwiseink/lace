@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { deriveProjectId } from "./repo-clones";
 import type { LaceSettings } from "./settings";
+import type { LaceMountDeclaration } from "./feature-metadata";
 
 // ── Types ──
 
@@ -70,6 +71,7 @@ export class MountPathResolver {
   constructor(
     private workspaceFolder: string,
     private settings: LaceSettings,
+    private declarations: Record<string, LaceMountDeclaration> = {},
   ) {
     this.persistPath = join(
       workspaceFolder,
@@ -78,6 +80,11 @@ export class MountPathResolver {
     );
     this.projectId = deriveProjectId(workspaceFolder);
     this.load();
+  }
+
+  /** Whether this resolver has declarations loaded. */
+  hasDeclarations(): boolean {
+    return Object.keys(this.declarations).length > 0;
   }
 
   /** Load persisted assignments from disk. */
@@ -112,19 +119,35 @@ export class MountPathResolver {
   }
 
   /**
+   * Validate that a label exists in the declarations map.
+   * @throws Error if the label is not declared
+   */
+  private validateDeclaration(label: string): void {
+    if (Object.keys(this.declarations).length > 0 && !(label in this.declarations)) {
+      const available = Object.keys(this.declarations).join(", ");
+      throw new Error(
+        `Mount label "${label}" not found in declarations. ` +
+          `Available: ${available || "(none)"}`,
+      );
+    }
+  }
+
+  /**
    * Resolve a mount label to a host source path.
    *
    * Resolution order:
-   * 1. If already resolved, return the existing assignment
-   * 2. Check settings override: settings.mounts[label].source
-   * 3. Derive default: ~/.config/lace/<projectId>/mounts/<namespace>/<label-part>
+   * 1. Validate label format and existence in declarations
+   * 2. If already resolved, return the existing assignment
+   * 3. Check settings override: settings.mounts[label].source
+   * 4. Derive default: ~/.config/lace/<projectId>/mounts/<namespace>/<label-part>
    *
    * @param label Mount label in namespace/label format (e.g., "myns/data")
    * @returns Resolved absolute host path
-   * @throws Error if label is invalid or override path doesn't exist
+   * @throws Error if label is invalid, not declared, or override path doesn't exist
    */
-  resolve(label: string): string {
+  resolveSource(label: string): string {
     validateLabel(label);
+    this.validateDeclaration(label);
 
     // Return existing assignment if already resolved
     const existing = this.assignments.get(label);
@@ -181,8 +204,62 @@ export class MountPathResolver {
     return defaultPath;
   }
 
+  /**
+   * Return container target path from declaration.
+   * @throws Error if label is not in declarations
+   */
+  resolveTarget(label: string): string {
+    validateLabel(label);
+    const decl = this.declarations[label];
+    if (!decl) {
+      const available = Object.keys(this.declarations).join(", ");
+      throw new Error(
+        `Mount label "${label}" not found in declarations. ` +
+          `Available: ${available || "(none)"}`,
+      );
+    }
+    return decl.target;
+  }
+
+  /**
+   * Produce complete mount spec string from declaration + resolved source.
+   * Format: source=<path>,target=<path>,type=<type>[,readonly][,consistency=<val>]
+   */
+  resolveFullSpec(label: string): string {
+    const source = this.resolveSource(label);
+    const decl = this.declarations[label];
+    if (!decl) {
+      const available = Object.keys(this.declarations).join(", ");
+      throw new Error(
+        `Mount label "${label}" not found in declarations. ` +
+          `Available: ${available || "(none)"}`,
+      );
+    }
+
+    const parts = [
+      `source=${source}`,
+      `target=${decl.target}`,
+      `type=${decl.type ?? "bind"}`,
+    ];
+
+    if (decl.readonly) {
+      parts.push("readonly");
+    }
+
+    if (decl.consistency) {
+      parts.push(`consistency=${decl.consistency}`);
+    }
+
+    return parts.join(",");
+  }
+
   /** Get all current assignments. */
   getAssignments(): MountAssignment[] {
     return Array.from(this.assignments.values());
+  }
+
+  /** Get declarations map. */
+  getDeclarations(): Record<string, LaceMountDeclaration> {
+    return this.declarations;
   }
 }

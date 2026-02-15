@@ -157,9 +157,12 @@ The label format is `namespace/label`. Project-level mounts use the reserved `pr
 
 ### Declarations
 
-Mounts are declared in `customizations.lace.mounts` — either in the devcontainer config (project-level) or in a feature's `devcontainer-feature.json` (feature-level):
+Mounts are declared in `customizations.lace.mounts` in two places:
+
+**Project-level** (in `devcontainer.json`): labels are prefixed with the `project` namespace.
 
 ```jsonc
+// devcontainer.json
 {
   "customizations": {
     "lace": {
@@ -178,6 +181,30 @@ Mounts are declared in `customizations.lace.mounts` — either in the devcontain
   }
 }
 ```
+
+These become `project/bash-history` and `project/claude-config` in the template system.
+
+**Feature-level** (in `devcontainer-feature.json`): labels are prefixed with the feature's short ID. A feature that wants persistent state can declare mounts in its own metadata:
+
+```jsonc
+// devcontainer-feature.json (inside a feature like ghcr.io/example/my-feature)
+{
+  "id": "my-feature",
+  "version": "1.0.0",
+  "customizations": {
+    "lace": {
+      "mounts": {
+        "cache": {
+          "target": "/home/node/.cache/my-feature",
+          "description": "Build cache persistence"
+        }
+      }
+    }
+  }
+}
+```
+
+This becomes `my-feature/cache` in the template system. Lace reads feature-level declarations from OCI metadata (the same `devcontainer features info manifest` data used for port declarations).
 
 Declaration fields:
 
@@ -209,11 +236,12 @@ The `recommendedSource` field is guidance only — it appears in console output 
 
 ### Guided configuration
 
-When mounts resolve to default paths (no settings override), lace emits actionable guidance:
+When mounts resolve to default paths (no settings override), `lace up` prints guidance to the console showing what was auto-created and how to configure it. This is not interactive — there is no prompt or wizard. Lace creates the default directory and proceeds, then tells you what happened:
 
 ```
 Mount configuration:
-  project/claude-config: using default path ~/.config/lace/myproject/mounts/project/claude-config
+  project/bash-history: using default path /home/user/.config/lace/myproject/mounts/project/bash-history
+  project/claude-config: using default path /home/user/.config/lace/myproject/mounts/project/claude-config
     → Recommended: configure source to ~/.claude in settings.json
 
 To configure custom mount sources, add to ~/.config/lace/settings.json:
@@ -224,7 +252,9 @@ To configure custom mount sources, add to ~/.config/lace/settings.json:
 }
 ```
 
-Guidance is informational only — `lace up` always succeeds, even without user configuration.
+The `→ Recommended` line appears only when a declaration includes `recommendedSource` — a hint from the feature or project author about where the mount _should_ point (e.g., `~/.claude` for Claude config). Without a settings override, the mount still works but uses an empty auto-created directory, which may not have the data the feature expects.
+
+The typical workflow: run `lace up`, read the guidance, then add overrides to `~/.config/lace/settings.json` for mounts where you want a specific host directory. Subsequent `lace up` runs use the override and suppress the recommendation.
 
 ### Validation
 
@@ -292,7 +322,7 @@ Override paths must exist on disk. Tilde (`~`) is expanded to the user's home di
 
 > NOTE: Lace does not currently detect overlapping mount paths (e.g., `/home/node` and `/home/node/.claude`). If ordering matters, write explicit `${lace.mount()}` entries to control placement.
 
-> NOTE: Only directory mounts with auto-creation are supported. Static file mounts (like SSH keys) should remain as plain mount strings, not lace declarations.
+> NOTE: Only directory mounts are supported as lace declarations. When a mount resolves to a default path (no settings override), lace auto-creates the source as a directory via `mkdir -p`. This means individual file mounts — like SSH public keys or config files that must exist as files, not directories — cannot use the declaration system. Keep these as plain mount strings in the `mounts` array (e.g., `"source=${localEnv:HOME}/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"`).
 
 > NOTE: Multi-project mount sharing is not first-class. Two projects declaring `project/bash-history` get isolated directories (different project IDs). Share by pointing both to the same path via settings overrides.
 

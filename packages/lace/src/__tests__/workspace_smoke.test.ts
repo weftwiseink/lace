@@ -21,11 +21,10 @@ import {
   rmSync,
   writeFileSync,
   readFileSync,
-  existsSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { classifyWorkspace, checkAbsolutePaths } from "@/lib/workspace-detector";
+import { classifyWorkspace } from "@/lib/workspace-detector";
 import { runUp } from "@/lib/up";
 import type { RunSubprocess } from "@/lib/subprocess";
 

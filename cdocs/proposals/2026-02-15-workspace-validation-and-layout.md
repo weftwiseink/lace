@@ -428,3 +428,677 @@ This helper is reusable for all worktree-related tests without requiring a real 
 **Acceptance criteria:**
 - `lace up` with the updated config produces an identical `.lace/devcontainer.json` to the current manual setup.
 - Missing SSH key produces a clear error message before container creation.
+
+## Detailed Implementation Guide
+
+This section provides implementation-level detail sufficient for an implementing agent to build the feature end-to-end. All code examples are concrete TypeScript targeting the existing patterns in this codebase.
+
+### 1. Type Definitions
+
+All new types live in their respective module files. They follow the established pattern of co-locating types with the module that owns them.
+
+#### `workspace-detector.ts` types
+
+```typescript
+/** Classification of a workspace directory's git layout. */
+export type WorkspaceClassification =
+  | {
+      type: "worktree";
+      /** Absolute path to the bare-repo root (parent of .bare/) */
+      bareRepoRoot: string;
+      /** Name of this worktree (basename of the workspace directory) */
+      worktreeName: string;
+      /** Whether the .git file used an absolute gitdir path */
+      usesAbsolutePath: boolean;
+    }
+  | {
+      type: "bare-root";
+      /** Absolute path to the bare-repo root (same as workspace) */
+      bareRepoRoot: string;
+    }
+  | {
+      type: "normal-clone";
+    }
+  | {
+      type: "standard-bare";
+    }
+  | {
+      type: "not-git";
+    }
+  | {
+      type: "malformed";
+      /** Description of what went wrong */
+      reason: string;
+    };
+
+/** Warnings emitted during workspace classification. */
+export interface ClassificationWarning {
+  code: "absolute-gitdir" | "standard-bare" | "prunable-worktree";
+  message: string;
+  remediation?: string;
+}
+
+/** Full result of workspace classification. */
+export interface ClassificationResult {
+  classification: WorkspaceClassification;
+  warnings: ClassificationWarning[];
+}
+```
+
+#### `workspace-layout.ts` types
+
+```typescript
+/** Schema for customizations.lace.workspace in devcontainer.json. */
+export interface WorkspaceConfig {
+  /** Layout type. Currently only "bare-worktree" or false (disabled). */
+  layout: "bare-worktree" | false;
+  /** Container mount target path (default: "/workspace"). */
+  mountTarget?: string;
+  /** Post-creation configuration. */
+  postCreate?: {
+    /** Inject `git config --global --add safe.directory '*'` (default: true). */
+    safeDirectory?: boolean;
+    /** Set git.repositoryScanMaxDepth in VS Code settings (default: 2). */
+    scanDepth?: number;
+  };
+}
+
+/** Result of applying workspace layout to a config. */
+export interface WorkspaceLayoutResult {
+  /** Whether any config mutation occurred. */
+  applied: boolean;
+  /** Human-readable summary message. */
+  message: string;
+  /** Warnings emitted during application. */
+  warnings: string[];
+}
+```
+
+#### `host-validator.ts` types
+
+```typescript
+/** A single file-existence check, fully normalized. */
+export interface FileExistsCheck {
+  /** Absolute host path (after tilde/env expansion). */
+  path: string;
+  /** Original path string from config (for error messages). */
+  originalPath: string;
+  /** "error" aborts lace up; "warn" logs and continues. */
+  severity: "error" | "warn";
+  /** Remediation hint shown alongside the error/warning. */
+  hint?: string;
+}
+
+/** Schema for customizations.lace.validate in devcontainer.json. */
+export interface ValidateConfig {
+  fileExists?: Array<string | FileExistsCheckInput>;
+}
+
+/** Input shape before normalization (from devcontainer.json). */
+export interface FileExistsCheckInput {
+  path: string;
+  severity?: "error" | "warn";
+  hint?: string;
+}
+
+/** Result of a single validation check. */
+export interface CheckResult {
+  passed: boolean;
+  severity: "error" | "warn";
+  message: string;
+  hint?: string;
+}
+
+/** Aggregated result of all host validation checks. */
+export interface HostValidationResult {
+  /** Whether all error-severity checks passed. */
+  passed: boolean;
+  /** Individual check results. */
+  checks: CheckResult[];
+  /** Number of checks that failed with severity "error". */
+  errorCount: number;
+  /** Number of checks that failed with severity "warn". */
+  warnCount: number;
+}
+```
+
+#### `up.ts` type extensions
+
+```typescript
+// Add to UpOptions:
+export interface UpOptions {
+  // ... existing fields ...
+  /** Skip host-side validation (downgrade errors to warnings). */
+  skipValidation?: boolean;
+}
+
+// Add to UpResult.phases:
+export interface UpResult {
+  // ... existing fields ...
+  phases: {
+    workspaceLayout?: { exitCode: number; message: string };
+    hostValidation?: { exitCode: number; message: string };
+    // ... existing phase fields ...
+  };
+}
+```
+
+### 2. `workspace-detector.ts` — Detailed Implementation
+
+File: `packages/lace/src/lib/workspace-detector.ts`
+
+#### Function signatures
+
+```typescript
+import { existsSync, readFileSync, statSync, readdirSync } from "node:fs";
+import { join, resolve, dirname, basename, isAbsolute, sep } from "node:path";
+
+/**
+ * Classify a workspace directory's git layout using filesystem-only detection.
+ * No git binary required for core detection. Supplemental warnings may use git.
+ */
+export function classifyWorkspace(workspacePath: string): ClassificationResult;
+
+/**
+ * Parse a .git file's "gitdir: <target>" content and resolve the target path.
+ * Returns the resolved absolute path of the gitdir target.
+ * Throws if the file doesn't start with "gitdir: ".
+ */
+export function resolveGitdirPointer(
+  dotGitFilePath: string,
+): { resolvedPath: string; isAbsolute: boolean; rawTarget: string };
+
+/**
+ * Walk up from a resolved worktrees path to find the bare-repo root.
+ * Given a path like /foo/project/.bare/worktrees/main, returns /foo/project.
+ * The bare-repo root is the parent of the directory containing "worktrees/".
+ */
+export function findBareRepoRoot(resolvedWorktreePath: string): string | null;
+
+/**
+ * Check all .git files in the bare-repo tree for absolute gitdir paths.
+ * Returns warnings for any worktree using absolute paths.
+ */
+export function checkAbsolutePaths(bareRepoRoot: string): ClassificationWarning[];
+```
+
+#### Core algorithm (`classifyWorkspace`)
+
+```typescript
+export function classifyWorkspace(workspacePath: string): ClassificationResult {
+  const absPath = resolve(workspacePath);
+  const dotGitPath = join(absPath, ".git");
+  const warnings: ClassificationWarning[] = [];
+
+  // Step 1: Check if .git exists at all
+  if (!existsSync(dotGitPath)) {
+    // E4: Check for non-nikitabobko standard bare repo
+    if (
+      existsSync(join(absPath, "HEAD")) &&
+      existsSync(join(absPath, "objects"))
+    ) {
+      warnings.push({
+        code: "standard-bare",
+        message:
+          "Workspace appears to be a standard bare git repo (not the nikitabobko convention). " +
+          "The nikitabobko layout (.git file -> .bare/) is recommended for devcontainer compatibility.",
+        remediation:
+          "See https://morgan.cugerone.com/blog/worktrees-step-by-step/ for migration guidance.",
+      });
+      return { classification: { type: "standard-bare" }, warnings };
+    }
+    return { classification: { type: "not-git" }, warnings };
+  }
+
+  // Step 2: Determine if .git is a file or directory
+  const stat = statSync(dotGitPath);
+
+  if (stat.isDirectory()) {
+    return { classification: { type: "normal-clone" }, warnings };
+  }
+
+  if (!stat.isFile()) {
+    return {
+      classification: { type: "malformed", reason: ".git exists but is neither file nor directory" },
+      warnings,
+    };
+  }
+
+  // Step 3: .git is a FILE — parse "gitdir: <target>"
+  let pointer;
+  try {
+    pointer = resolveGitdirPointer(dotGitPath);
+  } catch (err) {
+    return {
+      classification: { type: "malformed", reason: (err as Error).message },
+      warnings,
+    };
+  }
+
+  // Step 4: Determine if this is a worktree or the bare-root
+  const resolvedPath = pointer.resolvedPath;
+
+  if (resolvedPath.includes(`${sep}worktrees${sep}`) || resolvedPath.includes("/worktrees/")) {
+    // This is a WORKTREE
+    const bareRoot = findBareRepoRoot(resolvedPath);
+    if (!bareRoot) {
+      return {
+        classification: {
+          type: "malformed",
+          reason: `gitdir points to worktrees path but could not locate bare-repo root: ${resolvedPath}`,
+        },
+        warnings,
+      };
+    }
+
+    if (pointer.isAbsolute) {
+      warnings.push({
+        code: "absolute-gitdir",
+        message:
+          `Worktree '${basename(absPath)}' uses an absolute gitdir path (${pointer.rawTarget}) ` +
+          "that will not resolve inside the container.",
+        remediation:
+          "Run `git worktree repair --relative-paths` (requires git 2.48+) or recreate the worktree.",
+      });
+    }
+
+    // Also check other worktrees for absolute paths
+    warnings.push(...checkAbsolutePaths(bareRoot));
+
+    return {
+      classification: {
+        type: "worktree",
+        bareRepoRoot: bareRoot,
+        worktreeName: basename(absPath),
+        usesAbsolutePath: pointer.isAbsolute,
+      },
+      warnings,
+    };
+  }
+
+  // The .git file points to .bare (or similar) — this is the BARE-ROOT
+  if (existsSync(join(resolvedPath, "HEAD"))) {
+    return {
+      classification: { type: "bare-root", bareRepoRoot: absPath },
+      warnings,
+    };
+  }
+
+  return {
+    classification: {
+      type: "malformed",
+      reason: `gitdir target ${resolvedPath} does not appear to be a git directory (no HEAD found)`,
+    },
+    warnings,
+  };
+}
+```
+
+#### `resolveGitdirPointer` implementation
+
+```typescript
+export function resolveGitdirPointer(
+  dotGitFilePath: string,
+): { resolvedPath: string; isAbsolute: boolean; rawTarget: string } {
+  const content = readFileSync(dotGitFilePath, "utf-8").trim();
+
+  if (!content.startsWith("gitdir: ")) {
+    throw new Error(
+      `Unexpected .git file format at ${dotGitFilePath}: ` +
+      `expected "gitdir: <path>" but got "${content.slice(0, 50)}"`,
+    );
+  }
+
+  const rawTarget = content.slice("gitdir: ".length).trim();
+  const usesAbsolute = isAbsolute(rawTarget);
+  const resolvedPath = usesAbsolute
+    ? rawTarget
+    : resolve(dirname(dotGitFilePath), rawTarget);
+
+  return { resolvedPath, isAbsolute: usesAbsolute, rawTarget };
+}
+```
+
+#### `findBareRepoRoot` implementation
+
+```typescript
+export function findBareRepoRoot(resolvedWorktreePath: string): string | null {
+  let current = resolvedWorktreePath;
+
+  while (current !== dirname(current)) {
+    if (basename(current) === "worktrees") {
+      const bareInternals = dirname(current);
+      if (existsSync(join(bareInternals, "HEAD"))) {
+        return dirname(bareInternals);
+      }
+    }
+    current = dirname(current);
+  }
+
+  return null;
+}
+```
+
+#### `checkAbsolutePaths` implementation
+
+```typescript
+export function checkAbsolutePaths(bareRepoRoot: string): ClassificationWarning[] {
+  const warnings: ClassificationWarning[] = [];
+
+  try {
+    const entries = readdirSync(bareRepoRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+
+      const worktreeGitPath = join(bareRepoRoot, entry.name, ".git");
+      if (!existsSync(worktreeGitPath)) continue;
+
+      const stat = statSync(worktreeGitPath);
+      if (!stat.isFile()) continue;
+
+      try {
+        const pointer = resolveGitdirPointer(worktreeGitPath);
+        if (pointer.isAbsolute) {
+          warnings.push({
+            code: "absolute-gitdir",
+            message:
+              `Worktree '${entry.name}' uses an absolute gitdir path (${pointer.rawTarget}) ` +
+              "that will not resolve inside the container.",
+            remediation:
+              "Run `git worktree repair --relative-paths` (requires git 2.48+).",
+          });
+        }
+      } catch { /* skip malformed .git files in sibling worktrees */ }
+    }
+  } catch { /* if we can't read the directory, skip the supplemental check */ }
+
+  return warnings;
+}
+```
+
+### 3. Test helper: `createBareRepoWorkspace`
+
+Add to `packages/lace/src/__tests__/helpers/scenario-utils.ts`:
+
+```typescript
+export interface BareRepoWorkspace {
+  root: string;
+  worktrees: Record<string, string>;
+  bareDir: string;
+}
+
+export function createBareRepoWorkspace(
+  parentDir: string,
+  projectName: string,
+  worktreeNames: string[] = ["main"],
+  options: { useAbsolutePaths?: boolean } = {},
+): BareRepoWorkspace {
+  const root = join(parentDir, projectName);
+  const bareDir = join(root, ".bare");
+
+  mkdirSync(join(bareDir, "objects"), { recursive: true });
+  mkdirSync(join(bareDir, "refs"), { recursive: true });
+  writeFileSync(join(bareDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+  writeFileSync(join(root, ".git"), "gitdir: ./.bare\n", "utf-8");
+
+  const worktrees: Record<string, string> = {};
+  for (const name of worktreeNames) {
+    const worktreeDir = join(root, name);
+    const worktreeGitStateDir = join(bareDir, "worktrees", name);
+
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(worktreeGitStateDir, { recursive: true });
+
+    const gitdirTarget = options.useAbsolutePaths
+      ? join(bareDir, "worktrees", name)
+      : `../.bare/worktrees/${name}`;
+    writeFileSync(join(worktreeDir, ".git"), `gitdir: ${gitdirTarget}\n`, "utf-8");
+    writeFileSync(join(worktreeGitStateDir, "commondir"), "../..\n", "utf-8");
+    writeFileSync(
+      join(worktreeGitStateDir, "gitdir"),
+      join(root, name, ".git") + "\n",
+      "utf-8",
+    );
+
+    worktrees[name] = worktreeDir;
+  }
+
+  return { root, worktrees, bareDir };
+}
+
+export function createNormalCloneWorkspace(
+  parentDir: string,
+  projectName: string,
+): string {
+  const root = join(parentDir, projectName);
+  const gitDir = join(root, ".git");
+  mkdirSync(join(gitDir, "objects"), { recursive: true });
+  mkdirSync(join(gitDir, "refs"), { recursive: true });
+  writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+  return root;
+}
+```
+
+### 4. `workspace-layout.ts` — Detailed Implementation
+
+File: `packages/lace/src/lib/workspace-layout.ts`
+
+```typescript
+import { resolve } from "node:path";
+import { classifyWorkspace } from "./workspace-detector";
+import type { ClassificationResult, WorkspaceConfig, WorkspaceLayoutResult } from "./types";
+
+export function extractWorkspaceConfig(
+  config: Record<string, unknown>,
+): WorkspaceConfig | null {
+  const customizations = config.customizations as Record<string, unknown> | undefined;
+  if (!customizations) return null;
+  const lace = customizations.lace as Record<string, unknown> | undefined;
+  if (!lace) return null;
+  const workspace = lace.workspace;
+  if (!workspace || typeof workspace !== "object") return null;
+  const ws = workspace as Record<string, unknown>;
+  if (!ws.layout || ws.layout === false) return null;
+  if (ws.layout !== "bare-worktree") return null;
+  const postCreate = ws.postCreate as Record<string, unknown> | undefined;
+  return {
+    layout: "bare-worktree",
+    mountTarget: typeof ws.mountTarget === "string" ? ws.mountTarget : "/workspace",
+    postCreate: {
+      safeDirectory: postCreate && typeof postCreate.safeDirectory === "boolean"
+        ? postCreate.safeDirectory : true,
+      scanDepth: postCreate && typeof postCreate.scanDepth === "number"
+        ? postCreate.scanDepth : 2,
+    },
+  };
+}
+
+export function applyWorkspaceLayout(
+  config: Record<string, unknown>,
+  workspaceFolder: string,
+): WorkspaceLayoutResult {
+  const wsConfig = extractWorkspaceConfig(config);
+  if (!wsConfig) {
+    return { applied: false, message: "No workspace layout config", warnings: [] };
+  }
+
+  const mountTarget = wsConfig.mountTarget ?? "/workspace";
+  const warnings: string[] = [];
+  const result = classifyWorkspace(workspaceFolder);
+
+  for (const w of result.warnings) {
+    warnings.push(w.message + (w.remediation ? ` Remediation: ${w.remediation}` : ""));
+  }
+
+  const { classification } = result;
+
+  // Validate layout matches
+  if (classification.type === "normal-clone") {
+    return {
+      applied: false,
+      message: `Workspace layout "bare-worktree" declared but ${workspaceFolder} is a normal git clone. ` +
+        "Remove the workspace.layout setting or convert to the bare-worktree convention.",
+      warnings,
+    };
+  }
+  if (classification.type === "not-git" || classification.type === "standard-bare" ||
+      classification.type === "malformed") {
+    const reason = classification.type === "malformed" ? classification.reason : classification.type;
+    return {
+      applied: false,
+      message: `Workspace layout "bare-worktree" declared but detection failed: ${reason}`,
+      warnings,
+    };
+  }
+
+  let bareRepoRoot: string;
+  let worktreeName: string | null;
+
+  if (classification.type === "worktree") {
+    bareRepoRoot = classification.bareRepoRoot;
+    worktreeName = classification.worktreeName;
+  } else {
+    bareRepoRoot = classification.bareRepoRoot;
+    worktreeName = null;
+  }
+
+  const userHasWorkspaceMount = "workspaceMount" in config && config.workspaceMount != null;
+  const userHasWorkspaceFolder = "workspaceFolder" in config && config.workspaceFolder != null;
+
+  if (!userHasWorkspaceMount) {
+    config.workspaceMount =
+      `source=${bareRepoRoot},target=${mountTarget},type=bind,consistency=delegated`;
+  }
+  if (!userHasWorkspaceFolder) {
+    config.workspaceFolder = worktreeName ? `${mountTarget}/${worktreeName}` : mountTarget;
+  }
+
+  // Merge postCreateCommand
+  if (wsConfig.postCreate?.safeDirectory !== false) {
+    mergePostCreateCommand(config, "git config --global --add safe.directory '*'");
+  }
+
+  // Merge vscode settings
+  if (wsConfig.postCreate?.scanDepth != null) {
+    mergeVscodeSettings(config, { "git.repositoryScanMaxDepth": wsConfig.postCreate.scanDepth });
+  }
+
+  return {
+    applied: true,
+    message: worktreeName
+      ? `Auto-configured for worktree '${worktreeName}' in ${bareRepoRoot}`
+      : `Auto-configured for bare-repo root ${bareRepoRoot}`,
+    warnings,
+  };
+}
+```
+
+The `mergePostCreateCommand()` and `mergeVscodeSettings()` helpers follow the same patterns as `generateExtendedConfig()` in `up.ts` for postCreateCommand merging and create nested `customizations.vscode.settings` if absent.
+
+### 5. `up.ts` Modifications — Exact Insertion Points
+
+#### New imports (at top of file)
+
+```typescript
+import { applyWorkspaceLayout } from "./workspace-layout";
+import { runHostValidation } from "./host-validator";
+```
+
+#### `UpOptions` addition (after `skipMetadataValidation`)
+
+```typescript
+  /** Skip host-side validation (downgrade errors to warnings) */
+  skipValidation?: boolean;
+```
+
+#### `UpResult.phases` additions (before `portAssignment`)
+
+```typescript
+    workspaceLayout?: { exitCode: number; message: string };
+    hostValidation?: { exitCode: number; message: string };
+```
+
+#### Destructure `skipValidation` (in `runUp()` destructuring)
+
+```typescript
+    skipValidation = false,
+```
+
+#### Phase 0 insertion (after line 123 — after `configMinimal` read, before `hasPrebuildFeatures`)
+
+```typescript
+  // ── Phase 0a: Workspace layout detection + auto-configuration ──
+  {
+    const layoutResult = applyWorkspaceLayout(configMinimal.raw, workspaceFolder);
+
+    if (layoutResult.applied) {
+      result.phases.workspaceLayout = { exitCode: 0, message: layoutResult.message };
+      console.log(layoutResult.message);
+    } else if (layoutResult.message !== "No workspace layout config" && !skipValidation) {
+      result.phases.workspaceLayout = { exitCode: 1, message: layoutResult.message };
+      result.exitCode = 1;
+      result.message = `Workspace layout failed: ${layoutResult.message}`;
+      return result;
+    } else if (layoutResult.message !== "No workspace layout config" && skipValidation) {
+      console.warn(`Warning: ${layoutResult.message} (continuing due to --skip-validation)`);
+      result.phases.workspaceLayout = { exitCode: 0, message: `${layoutResult.message} (downgraded)` };
+    }
+
+    for (const warning of layoutResult.warnings) {
+      console.warn(`Warning: ${warning}`);
+    }
+  }
+
+  // ── Phase 0b: Host-side validation ──
+  {
+    const validationResult = runHostValidation(configMinimal.raw, { skipValidation });
+
+    if (validationResult.checks.length > 0) {
+      for (const check of validationResult.checks) {
+        if (!check.passed) {
+          const prefix = check.severity === "error" ? "ERROR" : "Warning";
+          console.warn(`${prefix}: ${check.message}`);
+          if (check.hint) console.warn(`  Hint: ${check.hint}`);
+        }
+      }
+
+      if (!validationResult.passed) {
+        const msg = `Host validation failed: ${validationResult.errorCount} error(s). ` +
+          "Use --skip-validation to downgrade to warnings.";
+        result.phases.hostValidation = { exitCode: 1, message: msg };
+        result.exitCode = 1;
+        result.message = msg;
+        return result;
+      }
+
+      result.phases.hostValidation = {
+        exitCode: 0,
+        message: validationResult.warnCount > 0
+          ? `Passed with ${validationResult.warnCount} warning(s)`
+          : `All ${validationResult.checks.length} check(s) passed`,
+      };
+    }
+  }
+```
+
+### 6. `commands/up.ts` Modifications
+
+Add `--skip-validation` to the `args` object following the `--skip-metadata-validation` pattern. In the `run()` function, extract the arg, add it to the filter list for devcontainerArgs passthrough, and include it in the `UpOptions`.
+
+### 7. Summary of Files to Create and Modify
+
+**New files (Phase 1):**
+- `packages/lace/src/lib/workspace-detector.ts`
+- `packages/lace/src/lib/workspace-layout.ts`
+- `packages/lace/src/lib/__tests__/workspace-detector.test.ts`
+- `packages/lace/src/lib/__tests__/workspace-layout.test.ts`
+
+**New files (Phase 2):**
+- `packages/lace/src/lib/host-validator.ts`
+- `packages/lace/src/lib/__tests__/host-validator.test.ts`
+
+**Modified files:**
+- `packages/lace/src/lib/up.ts` — add `skipValidation` to `UpOptions`, add phase fields to `UpResult.phases`, insert Phase 0a/0b
+- `packages/lace/src/commands/up.ts` — add `--skip-validation` CLI arg
+- `packages/lace/src/__tests__/helpers/scenario-utils.ts` — add `createBareRepoWorkspace()` + `createNormalCloneWorkspace()`
+- `packages/lace/src/commands/__tests__/up.integration.test.ts` — add workspace layout and host validation integration tests

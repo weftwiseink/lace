@@ -7,6 +7,11 @@ type: proposal
 state: live
 status: wip
 tags: [validation, worktree, workspaceMount, workspaceFolder, host-checks]
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6"
+  at: 2026-02-15T12:00:00-08:00
+  round: 1
 ---
 
 # Host-Side Validation and Workspace Layout Support
@@ -69,13 +74,13 @@ Two new `customizations.lace` blocks, processed as "Phase 0" in `lace up`:
 
 ```
 lace up pipeline:
-  Phase 0: Host validation + workspace layout (NEW)
+  Phase 0: Host validation + workspace layout (NEW — impl phases 1-2)
     0a. Read customizations.lace.workspace → detect layout → mutate config
     0b. Read customizations.lace.validate → run checks → fail/warn
-    0c. Infer mount source checks from mounts array → warn on missing
   Phase 1: Metadata fetch + validation (existing)
   Phase 2: Auto-inject templates (existing)
   Phase 3: Resolve templates (existing)
+  Phase 3+: Infer mount source checks from resolved mounts → warn (NEW — impl phase 3)
   Phase 4: Prebuild (existing)
   Phase 5: Resolve repo mounts (existing)
   Phase 6: Generate extended config (existing)
@@ -397,6 +402,8 @@ This helper is reusable for all worktree-related tests without requiring a real 
 
 ### Phase 4: Apply to lace's own devcontainer
 
+> NOTE: Bootstrap concern — lace's own devcontainer requires `lace up` to function, which requires lace to be built. Keep the manual `workspaceMount`/`workspaceFolder` values as comments in the config so contributors who bootstrap without lace can uncomment them. Alternatively, `devcontainer up` without lace still works — it just ignores the `customizations.lace` block and passes through any non-lace config unchanged.
+
 **Files to modify:**
 - `.devcontainer/devcontainer.json` — replace manual `workspaceMount`/`workspaceFolder`/`postCreateCommand` with `customizations.lace.workspace` block. Add `validate.fileExists` for SSH key.
 
@@ -505,8 +512,8 @@ export interface WorkspaceConfig {
 
 /** Result of applying workspace layout to a config. */
 export interface WorkspaceLayoutResult {
-  /** Whether any config mutation occurred. */
-  applied: boolean;
+  /** Outcome of the layout application. */
+  status: "skipped" | "applied" | "error";
   /** Human-readable summary message. */
   message: string;
   /** Warnings emitted during application. */
@@ -616,10 +623,18 @@ export function resolveGitdirPointer(
 export function findBareRepoRoot(resolvedWorktreePath: string): string | null;
 
 /**
- * Check all .git files in the bare-repo tree for absolute gitdir paths.
- * Returns warnings for any worktree using absolute paths.
+ * Check sibling worktrees in the bare-repo tree for absolute gitdir paths.
+ * Returns warnings for worktrees using absolute paths.
+ * Only scans immediate children of bareRepoRoot (nikitabobko convention).
+ * Worktrees outside the bare-repo root directory are not scanned.
+ *
+ * @param excludeWorktree Name of worktree to skip (avoids duplicate warnings
+ *   when the current worktree was already checked by classifyWorkspace).
  */
-export function checkAbsolutePaths(bareRepoRoot: string): ClassificationWarning[];
+export function checkAbsolutePaths(
+  bareRepoRoot: string,
+  excludeWorktree?: string,
+): ClassificationWarning[];
 ```
 
 #### Core algorithm (`classifyWorkspace`)
@@ -702,8 +717,8 @@ export function classifyWorkspace(workspacePath: string): ClassificationResult {
       });
     }
 
-    // Also check other worktrees for absolute paths
-    warnings.push(...checkAbsolutePaths(bareRoot));
+    // Also check sibling worktrees for absolute paths (excluding current to avoid duplicates)
+    warnings.push(...checkAbsolutePaths(bareRoot, basename(absPath)));
 
     return {
       classification: {
@@ -782,13 +797,18 @@ export function findBareRepoRoot(resolvedWorktreePath: string): string | null {
 #### `checkAbsolutePaths` implementation
 
 ```typescript
-export function checkAbsolutePaths(bareRepoRoot: string): ClassificationWarning[] {
+export function checkAbsolutePaths(
+  bareRepoRoot: string,
+  excludeWorktree?: string,
+): ClassificationWarning[] {
   const warnings: ClassificationWarning[] = [];
 
   try {
     const entries = readdirSync(bareRepoRoot, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      // Skip the current worktree (already checked by classifyWorkspace)
+      if (excludeWorktree && entry.name === excludeWorktree) continue;
 
       const worktreeGitPath = join(bareRepoRoot, entry.name, ".git");
       if (!existsSync(worktreeGitPath)) continue;
@@ -899,7 +919,13 @@ export function extractWorkspaceConfig(
   if (!workspace || typeof workspace !== "object") return null;
   const ws = workspace as Record<string, unknown>;
   if (!ws.layout || ws.layout === false) return null;
-  if (ws.layout !== "bare-worktree") return null;
+  if (ws.layout !== "bare-worktree") {
+    console.warn(
+      `Warning: Unrecognized workspace layout "${ws.layout}". ` +
+      `Supported values: "bare-worktree", false. Ignoring.`,
+    );
+    return null;
+  }
   const postCreate = ws.postCreate as Record<string, unknown> | undefined;
   return {
     layout: "bare-worktree",
@@ -919,7 +945,7 @@ export function applyWorkspaceLayout(
 ): WorkspaceLayoutResult {
   const wsConfig = extractWorkspaceConfig(config);
   if (!wsConfig) {
-    return { applied: false, message: "No workspace layout config", warnings: [] };
+    return { status: "skipped", message: "No workspace layout config", warnings: [] };
   }
 
   const mountTarget = wsConfig.mountTarget ?? "/workspace";
@@ -935,7 +961,7 @@ export function applyWorkspaceLayout(
   // Validate layout matches
   if (classification.type === "normal-clone") {
     return {
-      applied: false,
+      status: "error",
       message: `Workspace layout "bare-worktree" declared but ${workspaceFolder} is a normal git clone. ` +
         "Remove the workspace.layout setting or convert to the bare-worktree convention.",
       warnings,
@@ -945,7 +971,7 @@ export function applyWorkspaceLayout(
       classification.type === "malformed") {
     const reason = classification.type === "malformed" ? classification.reason : classification.type;
     return {
-      applied: false,
+      status: "error",
       message: `Workspace layout "bare-worktree" declared but detection failed: ${reason}`,
       warnings,
     };
@@ -984,7 +1010,7 @@ export function applyWorkspaceLayout(
   }
 
   return {
-    applied: true,
+    status: "applied",
     message: worktreeName
       ? `Auto-configured for worktree '${worktreeName}' in ${bareRepoRoot}`
       : `Auto-configured for bare-repo root ${bareRepoRoot}`,
@@ -993,7 +1019,69 @@ export function applyWorkspaceLayout(
 }
 ```
 
-The `mergePostCreateCommand()` and `mergeVscodeSettings()` helpers follow the same patterns as `generateExtendedConfig()` in `up.ts` for postCreateCommand merging and create nested `customizations.vscode.settings` if absent.
+The `mergePostCreateCommand()` and `mergeVscodeSettings()` are private helpers:
+
+```typescript
+/**
+ * Merge a command into postCreateCommand with idempotency.
+ * Skips injection if the command already appears in the existing value.
+ * Follows the same format handling as generateExtendedConfig() in up.ts.
+ */
+function mergePostCreateCommand(config: Record<string, unknown>, command: string): void {
+  const existing = config.postCreateCommand;
+
+  // Idempotency: check if command already present
+  if (typeof existing === "string" && existing.includes(command)) return;
+  if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+    const values = Object.values(existing as Record<string, unknown>);
+    if (values.some((v) => typeof v === "string" && v.includes(command))) return;
+  }
+
+  if (!existing) {
+    config.postCreateCommand = command;
+  } else if (typeof existing === "string") {
+    config.postCreateCommand = `${existing} && ${command}`;
+  } else if (Array.isArray(existing)) {
+    config.postCreateCommand = {
+      "lace:user-setup": existing,
+      "lace:workspace": command,
+    };
+  } else if (typeof existing === "object") {
+    const obj = existing as Record<string, unknown>;
+    if (!("lace:workspace" in obj)) {
+      obj["lace:workspace"] = command;
+      config.postCreateCommand = obj;
+    }
+  }
+}
+
+/**
+ * Deep-merge settings into customizations.vscode.settings.
+ * Creates the nested structure if absent. User-set values are never overridden.
+ */
+function mergeVscodeSettings(
+  config: Record<string, unknown>,
+  settings: Record<string, unknown>,
+): void {
+  if (!config.customizations || typeof config.customizations !== "object") {
+    config.customizations = {};
+  }
+  const customizations = config.customizations as Record<string, unknown>;
+  if (!customizations.vscode || typeof customizations.vscode !== "object") {
+    customizations.vscode = {};
+  }
+  const vscode = customizations.vscode as Record<string, unknown>;
+  if (!vscode.settings || typeof vscode.settings !== "object") {
+    vscode.settings = {};
+  }
+  const existingSettings = vscode.settings as Record<string, unknown>;
+  for (const [key, value] of Object.entries(settings)) {
+    if (!(key in existingSettings)) {
+      existingSettings[key] = value;
+    }
+  }
+}
+```
 
 ### 5. `up.ts` Modifications — Exact Insertion Points
 
@@ -1028,21 +1116,25 @@ import { runHostValidation } from "./host-validator";
 
 ```typescript
   // ── Phase 0a: Workspace layout detection + auto-configuration ──
+  // NOTE: This must run before the structuredClone at line 221 so that
+  // workspaceMount/workspaceFolder/postCreateCommand mutations propagate
+  // into configForResolution and through the rest of the pipeline.
   {
     const layoutResult = applyWorkspaceLayout(configMinimal.raw, workspaceFolder);
 
-    if (layoutResult.applied) {
+    if (layoutResult.status === "applied") {
       result.phases.workspaceLayout = { exitCode: 0, message: layoutResult.message };
       console.log(layoutResult.message);
-    } else if (layoutResult.message !== "No workspace layout config" && !skipValidation) {
+    } else if (layoutResult.status === "error" && !skipValidation) {
       result.phases.workspaceLayout = { exitCode: 1, message: layoutResult.message };
       result.exitCode = 1;
       result.message = `Workspace layout failed: ${layoutResult.message}`;
       return result;
-    } else if (layoutResult.message !== "No workspace layout config" && skipValidation) {
+    } else if (layoutResult.status === "error" && skipValidation) {
       console.warn(`Warning: ${layoutResult.message} (continuing due to --skip-validation)`);
       result.phases.workspaceLayout = { exitCode: 0, message: `${layoutResult.message} (downgraded)` };
     }
+    // status === "skipped": no workspace config present, nothing to do
 
     for (const warning of layoutResult.warnings) {
       console.warn(`Warning: ${warning}`);

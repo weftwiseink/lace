@@ -405,6 +405,40 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     return result;
   }
 
+
+  // ── Phase 3+: Inferred mount validation ──
+  // After template resolution, scan resolved mounts for missing bind-mount sources.
+  // These are warnings only — Docker auto-creates missing directory sources.
+  {
+    const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
+    const resolvedMounts = (resolvedConfig.mounts ?? []) as string[];
+    for (const mount of resolvedMounts) {
+      if (!mount.includes('type=bind')) continue;
+      const sourceMatch = mount.match(/source=([^,]+)/);
+      const targetMatch = mount.match(/target=([^,]+)/);
+      if (!sourceMatch) continue;
+      const source = sourceMatch[1];
+      if (source.includes('${')) continue; // Skip devcontainer variables
+      if (!existsSync(source)) {
+        const target = targetMatch?.[1] ?? 'unknown';
+        console.warn(`Warning: Bind mount source does not exist: ${source} (target: ${target})`);
+      }
+    }
+    // Also check workspaceMount if it's a concrete bind mount
+    const wsMount = resolvedConfig.workspaceMount;
+    if (typeof wsMount === 'string' && wsMount.includes('type=bind')) {
+      const sourceMatch = wsMount.match(/source=([^,]+)/);
+      const targetMatch = wsMount.match(/target=([^,]+)/);
+      if (sourceMatch) {
+        const source = sourceMatch[1];
+        if (!source.includes('${') && !existsSync(source)) {
+          const target = targetMatch?.[1] ?? 'unknown';
+          console.warn(`Warning: Bind mount source does not exist: ${source} (target: ${target})`);
+        }
+      }
+    }
+  }
+
   // Build feature port metadata for enriching portsAttributes labels
   featurePortMetadata = buildFeaturePortMetadata(metadataMap);
 

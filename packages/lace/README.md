@@ -24,18 +24,21 @@ lace up --workspace-folder .
 
 The main command. Runs the full orchestration pipeline:
 
-1. Fetch and validate feature metadata from OCI registries
-2. Auto-inject `${lace.port()}` and `${lace.mount()}` templates from declarations
-3. Validate mount declarations (namespaces, target conflicts)
-4. Resolve all templates (port allocation, mount path resolution)
-5. Emit guided configuration for unconfigured mounts
-6. Prebuild features (if `prebuildFeatures` configured)
-7. Resolve repo mounts (if `repoMounts` configured)
-8. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
-9. Invoke `devcontainer up`
+1. Detect workspace layout and auto-configure `workspaceMount`/`workspaceFolder` (if `workspace` configured)
+2. Run host-side validation checks (if `validate` configured)
+3. Fetch and validate feature metadata from OCI registries
+4. Auto-inject `${lace.port()}` and `${lace.mount()}` templates from declarations
+5. Validate mount declarations (namespaces, target conflicts)
+6. Resolve all templates (port allocation, mount path resolution)
+7. Warn about bind-mount sources that do not exist on the host
+8. Emit guided configuration for unconfigured mounts
+9. Prebuild features (if `prebuildFeatures` configured)
+10. Resolve repo mounts (if `repoMounts` configured)
+11. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
+12. Invoke `devcontainer up`
 
 ```sh
-lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation]
+lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation] [--skip-validation]
 ```
 
 | Flag | Effect |
@@ -43,6 +46,7 @@ lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation]
 | `--workspace-folder <path>` | Workspace folder (defaults to cwd). |
 | `--no-cache` | Bypass filesystem cache for floating feature tags (pinned versions still use cache). |
 | `--skip-metadata-validation` | Skip feature metadata fetch/validation entirely (offline/emergency). |
+| `--skip-validation` | Downgrade host-side validation errors to warnings (workspace layout mismatches and `fileExists` checks). |
 
 Any unrecognized flags are passed through to `devcontainer up`.
 
@@ -406,6 +410,150 @@ User-level settings at `~/.config/lace/settings.json` (or `$LACE_SETTINGS`) can 
 ```
 
 When `target` differs from the default (`/mnt/lace/repos/<name>`), lace generates a symlink from the default location to the custom target via `postCreateCommand`.
+
+## Workspace layout
+
+Lace can detect bare-repo worktree layouts and auto-generate the correct `workspaceMount`, `workspaceFolder`, and `postCreateCommand` settings. This eliminates the need to manually coordinate four settings when using the nikitabobko bare-worktree convention.
+
+### Configuration
+
+Add a `workspace` block to `customizations.lace`:
+
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "workspace": {
+        "layout": "bare-worktree",   // "bare-worktree" | false
+        "mountTarget": "/workspace", // container mount path (default: "/workspace")
+        "postCreate": {
+          "safeDirectory": true,     // inject safe.directory '*' (default: true)
+          "scanDepth": 2             // git.repositoryScanMaxDepth (default: 2)
+        }
+      }
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `layout` | `"bare-worktree" \| false` | required | Layout type to detect and configure. |
+| `mountTarget` | `string` | `"/workspace"` | Container mount target for the bare-repo root. |
+| `postCreate.safeDirectory` | `boolean` | `true` | Inject `git config --global --add safe.directory '*'` into `postCreateCommand`. |
+| `postCreate.scanDepth` | `number` | `2` | Set `git.repositoryScanMaxDepth` in VS Code settings. |
+
+### How it works
+
+When `layout: "bare-worktree"` is set, lace inspects the workspace directory's `.git` file to determine the layout:
+
+1. **Worktree detected**: The `.git` file points to `.bare/worktrees/<name>`. Lace sets `workspaceMount` to mount the bare-repo root and `workspaceFolder` to the worktree subdirectory.
+2. **Bare-root detected**: The `.git` file points to `.bare`. Lace sets `workspaceMount` to mount the current directory and `workspaceFolder` to the mount target root.
+3. **Normal clone detected**: `.git` is a directory (not a file). Lace returns an error — the layout declaration does not match the workspace.
+
+Detection is filesystem-only (no `git` binary required). It parses the `.git` file content and resolves relative paths.
+
+### Example
+
+For a worktree at `/home/user/code/project/main` with bare-repo root at `/home/user/code/project`:
+
+**Source `devcontainer.json`:**
+```jsonc
+{
+  "image": "node:24-bookworm",
+  "customizations": {
+    "lace": {
+      "workspace": { "layout": "bare-worktree" }
+    }
+  }
+}
+```
+
+**Generated `.lace/devcontainer.json`:**
+```jsonc
+{
+  "image": "node:24-bookworm",
+  "workspaceMount": "source=/home/user/code/project,target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace/main",
+  "postCreateCommand": "git config --global --add safe.directory '*'"
+}
+```
+
+### Overrides
+
+If you set `workspaceMount` or `workspaceFolder` explicitly in your `devcontainer.json`, lace respects your values and does not override them. The workspace detection still runs for validation but skips auto-generation of the fields you have already set.
+
+## Host-side validation
+
+Lace can check that required host resources exist before invoking `devcontainer up`, producing actionable error messages instead of cryptic Docker failures.
+
+### Configuration
+
+Add a `validate` block to `customizations.lace`:
+
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "validate": {
+        "fileExists": [
+          {
+            "path": "~/.ssh/lace_devcontainer.pub",
+            "severity": "error",
+            "hint": "Run: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ''"
+          },
+          {
+            "path": "~/.claude",
+            "severity": "warn",
+            "hint": "Claude Code config directory. Create with: mkdir -p ~/.claude"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### `fileExists` checks
+
+Each entry validates that a file or directory exists on the host before container creation.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | `string` | required | Host path. `~` is expanded to `$HOME`. |
+| `severity` | `"error" \| "warn"` | `"error"` | `error` aborts `lace up`; `warn` prints a warning and continues. |
+| `hint` | `string` | none | Remediation guidance printed alongside the error/warning. |
+
+A bare string is shorthand for `{ "path": "<string>", "severity": "error" }`:
+
+```jsonc
+{
+  "validate": {
+    "fileExists": [
+      "~/.ssh/lace_devcontainer.pub",
+      { "path": "~/.claude", "severity": "warn" }
+    ]
+  }
+}
+```
+
+### Inferred mount validation
+
+In addition to explicit `validate` checks, lace automatically scans the resolved `mounts` array and `workspaceMount` for bind-mount sources that do not exist on the host. This catches common mistakes like a missing SSH public key in a bind mount.
+
+- Mount sources containing `${` (devcontainer variables like `${localEnv:HOME}`, `${localWorkspaceFolder}`) are skipped — these are resolved by the devcontainer CLI, not lace.
+- Missing bind-mount sources produce **warnings**, not errors, because Docker auto-creates missing directory sources. Only missing file sources cause Docker failures.
+- Non-bind mounts (volume, tmpfs) are not checked.
+
+This runs automatically after template resolution with no configuration needed.
+
+### `--skip-validation`
+
+The `--skip-validation` flag downgrades all `severity: "error"` checks to warnings, allowing `lace up` to proceed despite validation failures. Workspace layout detection still runs (it generates config, not just validates) but layout mismatches become warnings instead of errors.
+
+```sh
+lace up --skip-validation
+```
 
 ## .gitignore
 

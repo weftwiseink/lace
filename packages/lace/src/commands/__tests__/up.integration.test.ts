@@ -2004,3 +2004,171 @@ describe("lace up: host validation — no validate config", () => {
     expect(result.phases.hostValidation).toBeUndefined();
   });
 });
+
+// ── Inferred mount validation integration tests ──
+
+describe("lace up: inferred mount validation — warns on missing bind-mount source", () => {
+  it("emits warning for missing source but does not fail", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          "source=/nonexistent/path/that/does/not/exist,target=/mnt/data,type=bind",
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Should have warned about the missing source
+    const warnings = warnSpy.mock.calls.map((c) => c[0]);
+    expect(
+      warnings.some(
+        (w: string) =>
+          w.includes("Bind mount source does not exist") &&
+          w.includes("/nonexistent/path/that/does/not/exist") &&
+          w.includes("target: /mnt/data"),
+      ),
+    ).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe("lace up: inferred mount validation — skips devcontainer variable sources", () => {
+  it("does not warn for mount sources containing ${", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          "source=${localEnv:HOME}/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
+          "source=${localWorkspaceFolder}/data,target=/mnt/data,type=bind",
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Should NOT have warned about any bind mount sources (they all have ${)
+    const warnings = warnSpy.mock.calls.map((c) => c[0]);
+    expect(
+      warnings.some((w: string) => typeof w === "string" && w.includes("Bind mount source does not exist")),
+    ).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe("lace up: inferred mount validation — does not warn for existing source", () => {
+  it("emits no warning when bind-mount source exists on disk", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Create the source directory so the check passes
+    const sourceDir = join(workspaceRoot, "existing-mount-source");
+    mkdirSync(sourceDir, { recursive: true });
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          `source=${sourceDir},target=/mnt/data,type=bind`,
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Should NOT have warned about the existing source
+    const warnings = warnSpy.mock.calls.map((c) => c[0]);
+    expect(
+      warnings.some((w: string) => typeof w === "string" && w.includes("Bind mount source does not exist")),
+    ).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe("lace up: inferred mount validation — skips non-bind mounts", () => {
+  it("does not warn for volume or tmpfs mounts", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          "source=my-volume,target=/mnt/vol,type=volume",
+          "target=/mnt/tmp,type=tmpfs",
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const warnings = warnSpy.mock.calls.map((c) => c[0]);
+    expect(
+      warnings.some((w: string) => typeof w === "string" && w.includes("Bind mount source does not exist")),
+    ).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+});
+
+describe("lace up: inferred mount validation — warns on missing workspaceMount source", () => {
+  it("emits warning for missing workspaceMount source", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        workspaceMount: "source=/nonexistent/workspace/root,target=/workspace,type=bind,consistency=delegated",
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const warnings = warnSpy.mock.calls.map((c) => c[0]);
+    expect(
+      warnings.some(
+        (w: string) =>
+          w.includes("Bind mount source does not exist") &&
+          w.includes("/nonexistent/workspace/root"),
+      ),
+    ).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+});

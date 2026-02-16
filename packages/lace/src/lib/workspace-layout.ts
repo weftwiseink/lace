@@ -177,7 +177,7 @@ export function applyWorkspaceLayout(
   };
 }
 
-// ── Private Helpers ──
+// ── Helpers (exported for testing) ──
 
 /**
  * Merge a command into postCreateCommand with idempotency.

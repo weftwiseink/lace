@@ -9,7 +9,6 @@ import {
   mergePostCreateCommand,
   mergeVscodeSettings,
 } from "../workspace-layout";
-import type { WorkspaceConfig } from "../workspace-layout";
 import {
   createBareRepoWorkspace,
   createNormalCloneWorkspace,

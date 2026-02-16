@@ -1,5 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { classifyWorkspace } from "./workspace-detector";
+import type { WorkspaceClassification } from "./workspace-detector";
 
 // ── Types ──
 
@@ -26,6 +27,8 @@ export interface WorkspaceLayoutResult {
   message: string;
   /** Warnings emitted during application. */
   warnings: string[];
+  /** Workspace classification, if detection was performed. */
+  classification?: WorkspaceClassification;
 }
 
 // ── Public API ──
@@ -109,6 +112,7 @@ export function applyWorkspaceLayout(
         `Workspace layout "bare-worktree" declared but ${workspaceFolder} is a normal git clone. ` +
         "Remove the workspace.layout setting or convert to the bare-worktree convention.",
       warnings,
+      classification,
     };
   }
   if (
@@ -124,6 +128,7 @@ export function applyWorkspaceLayout(
       status: "error",
       message: `Workspace layout "bare-worktree" declared but detection failed: ${reason}`,
       warnings,
+      classification,
     };
   }
 
@@ -174,6 +179,7 @@ export function applyWorkspaceLayout(
       ? `Auto-configured for worktree '${worktreeName}' in ${bareRepoRoot}`
       : `Auto-configured for bare-repo root ${bareRepoRoot}`,
     warnings,
+    classification,
   };
 }
 

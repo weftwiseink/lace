@@ -462,3 +462,51 @@ describe("mergeVscodeSettings", () => {
     expect(customizations.vscode).toBeDefined();
   });
 });
+
+// ── classification threading ──
+
+describe("applyWorkspaceLayout classification field", () => {
+  it("exposes worktree classification on applied result", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "my-project",
+      ["main"],
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    expect(result.status).toBe("applied");
+    expect(result.classification).toBeDefined();
+    expect(result.classification!.type).toBe("worktree");
+  });
+
+  it("exposes classification on error result (normal-clone)", () => {
+    const root = createNormalCloneWorkspace(testDir, "normal-clone");
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, root);
+
+    expect(result.status).toBe("error");
+    expect(result.classification).toBeDefined();
+    expect(result.classification!.type).toBe("normal-clone");
+  });
+
+  it("does not expose classification on skipped result", () => {
+    const root = createNormalCloneWorkspace(testDir, "no-config");
+    const config: Record<string, unknown> = {};
+
+    const result = applyWorkspaceLayout(config, root);
+
+    expect(result.status).toBe("skipped");
+    expect(result.classification).toBeUndefined();
+  });
+});

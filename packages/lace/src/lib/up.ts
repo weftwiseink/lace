@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   readDevcontainerConfig,
@@ -43,6 +43,7 @@ import { MountPathResolver } from "./mount-resolver";
 import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
+import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag } from "./project-name";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -133,6 +134,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // NOTE: This must run before the structuredClone so that
   // workspaceMount/workspaceFolder/postCreateCommand mutations propagate
   // into configForResolution and through the rest of the pipeline.
+  let projectName: string = basename(workspaceFolder);
   {
     const layoutResult = applyWorkspaceLayout(configMinimal.raw, workspaceFolder);
 
@@ -152,6 +154,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
     for (const warning of layoutResult.warnings) {
       console.warn(`Warning: ${warning}`);
+    }
+
+    if (layoutResult.classification) {
+      projectName = deriveProjectName(layoutResult.classification, workspaceFolder);
     }
   }
 
@@ -518,6 +524,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       resolvedConfig: templateResult?.resolvedConfig ?? configMinimal.raw,
       allocations: templateResult?.allocations ?? [],
       featurePortMetadata,
+      projectName,
     });
     result.phases.generateConfig = {
       exitCode: 0,
@@ -567,6 +574,7 @@ interface GenerateExtendedConfigOptions {
   resolvedConfig: Record<string, unknown>;
   allocations: PortAllocation[];
   featurePortMetadata: Map<string, FeaturePortDeclaration> | null;
+  projectName?: string;
 }
 
 /**
@@ -659,6 +667,17 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
         "lace-symlinks": ["sh", "-c", symlinkCommand],
       };
     }
+  }
+
+  // Inject project name as Docker label and container name
+  if (options.projectName) {
+    const runArgs = (extended.runArgs ?? []) as string[];
+    runArgs.push("--label", `lace.project_name=${options.projectName}`);
+    const sanitized = sanitizeContainerName(options.projectName);
+    if (!hasRunArgsFlag(runArgs, "--name")) {
+      runArgs.push("--name", sanitized);
+    }
+    extended.runArgs = runArgs;
   }
 
   // Write extended config

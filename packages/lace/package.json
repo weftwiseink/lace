@@ -7,7 +7,7 @@
     "lace": "./dist/index.js"
   },
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && chmod +x dist/index.js",
     "dev": "vite build --watch",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",

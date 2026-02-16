@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/workspace-validation
 type: devlog
 state: live
-status: wip
+status: done
 tags: [validation, worktree, workspaceMount, proposal]
 ---
 
@@ -54,9 +54,23 @@ This is a proposal/design session — no code will be written. Testing strategy 
 5. **No "auto" layout mode yet** — explicit `layout: "bare-worktree"` avoids surprising behavior; can add later
 6. **Baked-in over feature** — workspace logic runs on host before container, modifies host-side config, needs no network
 
+### Review iteration
+
+**R1**: 3 blocking, 6 non-blocking findings. All blocking fixed:
+- F1: `WorkspaceLayoutResult.status` discriminated field replaces string-matching
+- F2: `mergePostCreateCommand` idempotency guard + `structuredClone` ordering note
+- F3: `checkAbsolutePaths` `excludeWorktree` parameter avoids duplicate warnings
+
+**R2**: **Accepted**. 4 non-blocking items noted for implementor (expandPath deferral, commands/up.ts detail, array-format idempotency, skip-validation scope).
+
 ## Changes Made
 
 | File | Description |
 |------|-------------|
 | `cdocs/devlogs/2026-02-15-workspace-validation-proposal.md` | This devlog |
 | `cdocs/proposals/2026-02-15-workspace-validation-and-layout.md` | Main proposal |
+| `cdocs/reviews/2026-02-15-review-of-workspace-validation-and-layout.md` | R1 + R2 review |
+
+## Verification
+
+Proposal accepted after 2 review rounds. All blocking findings resolved. Ready for implementation.

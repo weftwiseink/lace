@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/workspace-validation
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [testing, smoke-test, workspace, validation, acceptance, e2e]
 last_reviewed:
   status: accepted

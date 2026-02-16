@@ -1,6 +1,6 @@
 # lace
 
-Devcontainer orchestration CLI. Manages port allocation, feature prebuilds, repo mounts, and template resolution on top of the standard `devcontainer` CLI.
+Devcontainer orchestration CLI. Manages port allocation, feature prebuilds, repo mounts, template resolution, workspace layout detection, and host-side validation on top of the standard `devcontainer` CLI.
 
 ## Install
 

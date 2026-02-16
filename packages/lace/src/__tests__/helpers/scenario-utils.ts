@@ -376,3 +376,85 @@ export function prepareGeneratedConfigForDocker(
     "utf-8",
   );
 }
+
+// ── Bare-repo workspace helpers ──
+
+export interface BareRepoWorkspace {
+  root: string;
+  worktrees: Record<string, string>;
+  bareDir: string;
+}
+
+/**
+ * Create a fake bare-repo workspace following the nikitabobko convention.
+ *
+ * Layout:
+ *   <parentDir>/<projectName>/
+ *     .git          (file, gitdir: ./.bare)
+ *     .bare/        (dir with HEAD, objects/, refs/)
+ *       worktrees/
+ *         <name>/   (commondir + gitdir back-pointers)
+ *     <name>/       (worktree directories with .git file pointers)
+ */
+export function createBareRepoWorkspace(
+  parentDir: string,
+  projectName: string,
+  worktreeNames: string[] = ["main"],
+  options: { useAbsolutePaths?: boolean } = {},
+): BareRepoWorkspace {
+  const root = join(parentDir, projectName);
+  const bareDir = join(root, ".bare");
+
+  mkdirSync(join(bareDir, "objects"), { recursive: true });
+  mkdirSync(join(bareDir, "refs"), { recursive: true });
+  writeFileSync(join(bareDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+  writeFileSync(join(root, ".git"), "gitdir: ./.bare\n", "utf-8");
+
+  const worktrees: Record<string, string> = {};
+  for (const name of worktreeNames) {
+    const worktreeDir = join(root, name);
+    const worktreeGitStateDir = join(bareDir, "worktrees", name);
+
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(worktreeGitStateDir, { recursive: true });
+
+    const gitdirTarget = options.useAbsolutePaths
+      ? join(bareDir, "worktrees", name)
+      : `../.bare/worktrees/${name}`;
+    writeFileSync(
+      join(worktreeDir, ".git"),
+      `gitdir: ${gitdirTarget}\n`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(worktreeGitStateDir, "commondir"),
+      "../..\n",
+      "utf-8",
+    );
+    writeFileSync(
+      join(worktreeGitStateDir, "gitdir"),
+      join(root, name, ".git") + "\n",
+      "utf-8",
+    );
+
+    worktrees[name] = worktreeDir;
+  }
+
+  return { root, worktrees, bareDir };
+}
+
+/**
+ * Create a fake normal git clone workspace.
+ * Creates a .git directory (not file) with HEAD, objects/, refs/.
+ */
+export function createNormalCloneWorkspace(
+  parentDir: string,
+  projectName: string,
+): string {
+  const root = join(parentDir, projectName);
+  const gitDir = join(root, ".git");
+  mkdirSync(join(gitDir, "objects"), { recursive: true });
+  mkdirSync(join(gitDir, "refs"), { recursive: true });
+  writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+  return root;
+}

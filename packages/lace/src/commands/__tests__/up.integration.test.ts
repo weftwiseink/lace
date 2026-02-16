@@ -1725,3 +1725,151 @@ describe("lace up: mixed features with blob fallback", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// ── Workspace layout integration tests ──
+
+describe("lace up: workspace layout — worktree auto-generation", () => {
+  it("auto-generates workspaceMount and workspaceFolder for worktree workspace", async () => {
+    // Create bare-repo layout in the test workspace
+    const bareDir = join(workspaceRoot, ".bare");
+    mkdirSync(join(bareDir, "objects"), { recursive: true });
+    mkdirSync(join(bareDir, "refs"), { recursive: true });
+    writeFileSync(join(bareDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+    writeFileSync(join(workspaceRoot, ".git"), "gitdir: ./.bare\n", "utf-8");
+
+    // Create a worktree directory
+    const worktreeDir = join(workspaceRoot, "main");
+    const worktreeGitStateDir = join(bareDir, "worktrees", "main");
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(worktreeGitStateDir, { recursive: true });
+    writeFileSync(join(worktreeDir, ".git"), "gitdir: ../.bare/worktrees/main\n", "utf-8");
+    writeFileSync(join(worktreeGitStateDir, "commondir"), "../..\n", "utf-8");
+    writeFileSync(join(worktreeGitStateDir, "gitdir"), join(worktreeDir, ".git") + "\n", "utf-8");
+
+    // Create devcontainer.json inside the worktree
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            workspace: { layout: "bare-worktree" },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.workspaceLayout).toBeDefined();
+    expect(result.phases.workspaceLayout?.exitCode).toBe(0);
+    expect(result.phases.workspaceLayout?.message).toContain("worktree");
+
+    // Check generated config has auto-generated fields
+    const generatedConfig = JSON.parse(
+      readFileSync(join(worktreeDir, ".lace", "devcontainer.json"), "utf-8"),
+    );
+    expect(generatedConfig.workspaceMount).toBe(
+      `source=${workspaceRoot},target=/workspace,type=bind,consistency=delegated`,
+    );
+    expect(generatedConfig.workspaceFolder).toBe("/workspace/main");
+    // postCreateCommand should have safe.directory
+    expect(generatedConfig.postCreateCommand).toContain("safe.directory");
+  });
+});
+
+describe("lace up: workspace layout — normal clone with no workspace config", () => {
+  it("skips workspace phase when no workspace config present", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // workspaceLayout phase should not be present (skipped)
+    expect(result.phases.workspaceLayout).toBeUndefined();
+  });
+});
+
+describe("lace up: workspace layout — normal clone with workspace declared", () => {
+  it("returns error when bare-worktree declared but workspace is normal clone", async () => {
+    // Create a normal .git directory
+    const gitDir = join(workspaceRoot, ".git");
+    mkdirSync(join(gitDir, "objects"), { recursive: true });
+    mkdirSync(join(gitDir, "refs"), { recursive: true });
+    writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+
+    setupWorkspace(
+      JSON.stringify({
+        build: { dockerfile: "Dockerfile" },
+        customizations: {
+          lace: {
+            workspace: { layout: "bare-worktree" },
+          },
+        },
+      }),
+      STANDARD_DOCKERFILE,
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.phases.workspaceLayout).toBeDefined();
+    expect(result.phases.workspaceLayout?.exitCode).toBe(1);
+    expect(result.phases.workspaceLayout?.message).toContain("normal git clone");
+  });
+});
+
+describe("lace up: workspace layout — skip-validation downgrades error", () => {
+  it("downgrades workspace error to warning with --skip-validation", async () => {
+    // Create a normal .git directory (mismatch)
+    const gitDir = join(workspaceRoot, ".git");
+    mkdirSync(join(gitDir, "objects"), { recursive: true });
+    mkdirSync(join(gitDir, "refs"), { recursive: true });
+    writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+
+    setupWorkspace(
+      JSON.stringify({
+        build: { dockerfile: "Dockerfile" },
+        customizations: {
+          lace: {
+            workspace: { layout: "bare-worktree" },
+          },
+        },
+      }),
+      STANDARD_DOCKERFILE,
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      skipValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    // Should succeed due to skip-validation
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.workspaceLayout).toBeDefined();
+    expect(result.phases.workspaceLayout?.exitCode).toBe(0);
+    expect(result.phases.workspaceLayout?.message).toContain("downgraded");
+  });
+});

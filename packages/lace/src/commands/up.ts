@@ -24,12 +24,18 @@ export const upCommand = defineCommand({
       description: "Skip feature metadata validation (offline/emergency use)",
       required: false,
     },
+    "skip-validation": {
+      type: "boolean",
+      description: "Skip host-side validation (downgrade errors to warnings)",
+      required: false,
+    },
   },
   async run({ args, rawArgs }) {
     // Extract workspace-folder if provided
     const workspaceFolder = args["workspace-folder"] || process.cwd();
     const noCache = args["no-cache"] ?? false;
     const skipMetadataValidation = args["skip-metadata-validation"] ?? false;
+    const skipValidation = args["skip-validation"] ?? false;
 
     // Pass remaining args to devcontainer
     // Filter out our own args
@@ -40,7 +46,7 @@ export const upCommand = defineCommand({
         skipNext = false;
         continue;
       }
-      if (arg === "--workspace-folder" || arg === "--no-cache" || arg === "--skip-metadata-validation") {
+      if (arg === "--workspace-folder" || arg === "--no-cache" || arg === "--skip-metadata-validation" || arg === "--skip-validation") {
         if (arg === "--workspace-folder") {
           skipNext = true;
         }
@@ -57,6 +63,7 @@ export const upCommand = defineCommand({
       devcontainerArgs,
       noCache,
       skipMetadataValidation,
+      skipValidation,
     };
 
     const result = await runUp(options);

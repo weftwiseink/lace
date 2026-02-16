@@ -41,6 +41,7 @@ import {
 } from "./template-resolver";
 import { MountPathResolver } from "./mount-resolver";
 import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
+import { applyWorkspaceLayout } from "./workspace-layout";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -57,12 +58,16 @@ export interface UpOptions {
   skipMetadataValidation?: boolean;
   /** Override cache directory (for testing) */
   cacheDir?: string;
+  /** Skip host-side validation (downgrade errors to warnings) */
+  skipValidation?: boolean;
 }
 
 export interface UpResult {
   exitCode: number;
   message: string;
   phases: {
+    workspaceLayout?: { exitCode: number; message: string };
+    hostValidation?: { exitCode: number; message: string };
     portAssignment?: { exitCode: number; message: string; port?: number };
     metadataValidation?: { exitCode: number; message: string };
     templateResolution?: { exitCode: number; message: string };
@@ -92,6 +97,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     noCache = false,
     skipMetadataValidation = false,
     cacheDir,
+    skipValidation = false,
   } = options;
 
   const result: UpResult = {
@@ -120,6 +126,32 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       };
     }
     throw err;
+  }
+
+  // ── Phase 0a: Workspace layout detection + auto-configuration ──
+  // NOTE: This must run before the structuredClone so that
+  // workspaceMount/workspaceFolder/postCreateCommand mutations propagate
+  // into configForResolution and through the rest of the pipeline.
+  {
+    const layoutResult = applyWorkspaceLayout(configMinimal.raw, workspaceFolder);
+
+    if (layoutResult.status === "applied") {
+      result.phases.workspaceLayout = { exitCode: 0, message: layoutResult.message };
+      console.log(layoutResult.message);
+    } else if (layoutResult.status === "error" && !skipValidation) {
+      result.phases.workspaceLayout = { exitCode: 1, message: layoutResult.message };
+      result.exitCode = 1;
+      result.message = `Workspace layout failed: ${layoutResult.message}`;
+      return result;
+    } else if (layoutResult.status === "error" && skipValidation) {
+      console.warn(`Warning: ${layoutResult.message} (continuing due to --skip-validation)`);
+      result.phases.workspaceLayout = { exitCode: 0, message: `${layoutResult.message} (downgraded)` };
+    }
+    // status === "skipped": no workspace config present, nothing to do
+
+    for (const warning of layoutResult.warnings) {
+      console.warn(`Warning: ${warning}`);
+    }
   }
 
   const hasPrebuildFeatures =

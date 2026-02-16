@@ -203,6 +203,58 @@ describe("lace up: project name injection", () => {
     expect(projectLabelIdx).toBeGreaterThan(-1);
   });
 
+  it("sanitized name differs from label when project name has special chars", async () => {
+    // Create a workspace with special chars in the name
+    const specialRoot = join(
+      tmpdir(),
+      `lace-test-up-project-name-${Date.now()}-special`,
+      "my project!",
+    );
+    const specialDevcontainerDir = join(specialRoot, ".devcontainer");
+    const specialLaceDir = join(specialRoot, ".lace");
+    mkdirSync(specialDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(specialDevcontainerDir, "devcontainer.json"),
+      JSON.stringify(
+        { image: "mcr.microsoft.com/devcontainers/base:ubuntu" },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    trackProjectMountsDir(specialRoot);
+    process.env.LACE_SETTINGS = join(
+      specialRoot,
+      ".config",
+      "lace",
+      "settings.json",
+    );
+
+    const result = await runUp({
+      workspaceFolder: specialRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const generated = JSON.parse(
+      readFileSync(join(specialLaceDir, "devcontainer.json"), "utf-8"),
+    ) as Record<string, unknown>;
+    const runArgs = generated.runArgs as string[];
+
+    // Label uses raw project name (unsanitized)
+    const labelIdx = runArgs.indexOf("--label");
+    expect(runArgs[labelIdx + 1]).toBe("lace.project_name=my project!");
+
+    // --name uses sanitized version
+    const nameIdx = runArgs.indexOf("--name");
+    expect(runArgs[nameIdx + 1]).toBe("my-project");
+
+    // Cleanup
+    rmSync(specialRoot, { recursive: true, force: true });
+  });
+
   it("uses repo name (not worktree name) for worktree workspace", async () => {
     // Create a bare-repo workspace with worktree
     const bareWorkspace = createBareRepoWorkspace(

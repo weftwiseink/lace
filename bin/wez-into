@@ -33,8 +33,8 @@ else
   # Check known locations
   for candidate in \
     "$SCRIPT_DIR/lace-discover" \
-    "$HOME/code/weft/lace/bin/lace-discover" \
-    "/var/home/$(whoami)/code/weft/lace/bin/lace-discover"; do
+    "$HOME/code/weft/lace/main/bin/lace-discover" \
+    "/var/home/$(whoami)/code/weft/lace/main/bin/lace-discover"; do
     if [[ -x "$candidate" ]]; then
       LACE_DISCOVER="$candidate"
       break
@@ -60,8 +60,8 @@ locate_lace_cli() {
   local candidate
   for candidate in \
     "$SCRIPT_DIR/../packages/lace/bin/lace" \
-    "$HOME/code/weft/lace/packages/lace/bin/lace" \
-    "/var/home/$(whoami)/code/weft/lace/packages/lace/bin/lace"; do
+    "$HOME/code/weft/lace/main/packages/lace/bin/lace" \
+    "/var/home/$(whoami)/code/weft/lace/main/packages/lace/bin/lace"; do
     if [[ -x "$candidate" ]]; then
       echo "$candidate"
       return 0
@@ -182,9 +182,21 @@ start_and_connect() {
     exit 1
   elif [[ $up_exit -ne 0 ]]; then
     # Non-zero but not 126/127: lace ran but reported failure.
-    # The container may still have started (e.g. postStartCommand failure).
-    # Don't dump the stack trace yet -- wait to see if the container is discoverable.
-    # If discovery succeeds, it was just a lifecycle hook failure (common, harmless).
+    # Distinguish between "lace failed before starting container" (definitive)
+    # vs "container may have started but a lifecycle hook failed" (recoverable).
+    #
+    # Heuristic: lace prints "Starting devcontainer..." immediately before
+    # invoking `devcontainer up`. If that line is absent, lace failed in an
+    # early phase (config read, validation, template resolution, etc.) and
+    # the container was never started -- no point retrying discovery.
+    if ! grep -q "Starting devcontainer" <<< "$up_output"; then
+      err "lace up failed before starting container (exit $up_exit)"
+      err "lace up output:"
+      echo "$up_output" | tail -15 >&2
+      exit 1
+    fi
+    # lace reached the devcontainer up phase but something failed afterward.
+    # The container may still be running — check discovery.
     info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
   else
     info "container started successfully"

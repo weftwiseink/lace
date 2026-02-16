@@ -118,11 +118,11 @@ discover_stopped() {
   docker ps -a \
     --filter "label=devcontainer.local_folder" \
     --filter "status=exited" \
-    --format '{{.Label "devcontainer.local_folder"}}' 2>/dev/null \
-  | while IFS= read -r local_folder; do
+    --format '{{.Label "devcontainer.local_folder"}}\t{{.Label "lace.project_name"}}' 2>/dev/null \
+  | while IFS=$'\t' read -r local_folder project_name; do
     [[ -z "$local_folder" ]] && continue
     local name
-    name=$(basename "$local_folder")
+    name="${project_name:-$(basename "$local_folder")}"
     printf '%s\t%s\n' "$name" "$local_folder"
   done
 }

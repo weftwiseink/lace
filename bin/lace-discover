@@ -57,20 +57,20 @@ if ! docker info &>/dev/null 2>&1; then
 fi
 
 # Get all devcontainers with their local folders and ports
-# Format: container_id \t local_folder \t ports
+# Format: container_id \t local_folder \t ports \t project_name
 discover_raw() {
   docker ps --filter "label=devcontainer.local_folder" \
-    --format '{{.ID}}\t{{.Label "devcontainer.local_folder"}}\t{{.Ports}}' 2>/dev/null || true
+    --format '{{.ID}}\t{{.Label "devcontainer.local_folder"}}\t{{.Ports}}\t{{.Label "lace.project_name"}}' 2>/dev/null || true
 }
 
 # Parse the raw output and extract projects
 discover_projects() {
-  while IFS=$'\t' read -r container_id local_folder ports; do
+  while IFS=$'\t' read -r container_id local_folder ports project_name; do
     # Skip empty lines
     [[ -z "$container_id" ]] && continue
 
-    # Extract project name from path
-    name=$(basename "$local_folder")
+    # Use label-based name if available, fall back to basename for pre-label containers
+    name="${project_name:-$(basename "$local_folder")}"
 
     # Find SSH port in expected range (22425-22499 -> 2222)
     # Port format varies: "0.0.0.0:22425->2222/tcp" or ":::22425->2222/tcp"

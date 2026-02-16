@@ -5,13 +5,13 @@ first_authored:
 task_list: worktrunk/project-naming
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [worktrunk, lace-discover, wez-into, naming, container-naming, docker, workspace-detector]
 last_reviewed:
-  status: revision_requested
+  status: accepted
   by: "@claude-opus-4-6"
-  at: 2026-02-16T17:00:00-06:00
-  round: 2
+  at: 2026-02-16T21:30:00-06:00
+  round: 6
 ---
 
 # Worktrunk-Aware Project Naming and Container Identity

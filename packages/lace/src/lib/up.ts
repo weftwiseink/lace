@@ -42,6 +42,7 @@ import {
 import { MountPathResolver } from "./mount-resolver";
 import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
 import { applyWorkspaceLayout } from "./workspace-layout";
+import { runHostValidation } from "./host-validator";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -151,6 +152,37 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
     for (const warning of layoutResult.warnings) {
       console.warn(`Warning: ${warning}`);
+    }
+  }
+
+  // ── Phase 0b: Host-side validation ──
+  {
+    const validationResult = runHostValidation(configMinimal.raw, { skipValidation });
+
+    if (validationResult.checks.length > 0) {
+      for (const check of validationResult.checks) {
+        if (!check.passed) {
+          const prefix = check.severity === "error" ? "ERROR" : "Warning";
+          console.warn(`${prefix}: ${check.message}`);
+          if (check.hint) console.warn(`  Hint: ${check.hint}`);
+        }
+      }
+
+      if (!validationResult.passed) {
+        const msg = `Host validation failed: ${validationResult.errorCount} error(s). ` +
+          "Use --skip-validation to downgrade to warnings.";
+        result.phases.hostValidation = { exitCode: 1, message: msg };
+        result.exitCode = 1;
+        result.message = msg;
+        return result;
+      }
+
+      result.phases.hostValidation = {
+        exitCode: 0,
+        message: validationResult.warnCount > 0
+          ? `Passed with ${validationResult.warnCount} warning(s)`
+          : `All ${validationResult.checks.length} check(s) passed`,
+      };
     }
   }
 

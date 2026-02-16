@@ -1873,3 +1873,134 @@ describe("lace up: workspace layout — skip-validation downgrades error", () =>
     expect(result.phases.workspaceLayout?.message).toContain("downgraded");
   });
 });
+
+// ── Host validation integration tests ──
+
+describe("lace up: host validation — fileExists blocks lace up", () => {
+  it("returns error when required file is missing with severity error", async () => {
+    const missingFile = join(workspaceRoot, "does-not-exist.key");
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            validate: {
+              fileExists: [
+                {
+                  path: missingFile,
+                  severity: "error",
+                  hint: "Create the key file first",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.phases.hostValidation).toBeDefined();
+    expect(result.phases.hostValidation?.exitCode).toBe(1);
+    expect(result.phases.hostValidation?.message).toContain("Host validation failed");
+    expect(result.phases.hostValidation?.message).toContain("1 error(s)");
+  });
+});
+
+describe("lace up: host validation — fileExists warns on missing file", () => {
+  it("passes with warning when missing file has severity warn", async () => {
+    const missingFile = join(workspaceRoot, "optional-config.txt");
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            validate: {
+              fileExists: [
+                {
+                  path: missingFile,
+                  severity: "warn",
+                  hint: "This is optional",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.hostValidation).toBeDefined();
+    expect(result.phases.hostValidation?.exitCode).toBe(0);
+    expect(result.phases.hostValidation?.message).toContain("1 warning(s)");
+  });
+});
+
+describe("lace up: host validation — skip-validation downgrades errors", () => {
+  it("downgrades error-severity check to warning with --skip-validation", async () => {
+    const missingFile = join(workspaceRoot, "required-but-skipped.key");
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            validate: {
+              fileExists: [
+                {
+                  path: missingFile,
+                  severity: "error",
+                  hint: "Create the key file",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      skipValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.hostValidation).toBeDefined();
+    expect(result.phases.hostValidation?.exitCode).toBe(0);
+    expect(result.phases.hostValidation?.message).toContain("1 warning(s)");
+  });
+});
+
+describe("lace up: host validation — no validate config", () => {
+  it("does not produce hostValidation phase when no validate config present", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.hostValidation).toBeUndefined();
+  });
+});

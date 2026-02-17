@@ -91,11 +91,47 @@ Each phase: implement → test → commit → `/review` subagent → apply feedb
 - Updated 2 existing integration test assertions to verify new context messages
 - Commit: `069e24a`
 
+### Phase 6: End-to-End Verification Against Lace Project
+
+Ran `lace up` against the lace project itself to verify the full pipeline. Discovered and
+fixed three issues:
+
+1. **Prebuild image existence check** (`prebuild.ts`): The cache check only compared file
+   contents, not whether the Docker image actually existed. If the image was deleted
+   (docker prune, etc.), prebuild said "up to date" but `devcontainer up` failed. Fixed by
+   adding `docker image inspect` check before declaring cache freshness. When cache is
+   fresh but image is missing, falls through to full rebuild.
+   - Updated test mocks to handle non-devcontainer subprocess calls
+   - Updated test assertions to account for the docker image check call
+   - Commit: `76c43bb`
+
+2. **Duplicate appPort injection** (`template-resolver.ts`): When a user already had an
+   `appPort` entry with a `lace.port()` template (e.g., for wezterm-server), the
+   auto-injection from `injectForPrebuildBlock()` added a duplicate. This caused `docker
+   run` to fail with "address already in use" because the same port mapping appeared twice.
+   Fixed by checking if appPort already contains a reference to the port label.
+   - Commit: `6012edf`
+
+3. **Feature consolidation** (`.devcontainer/devcontainer.json`): Moved all features from
+   the runtime `features` block into `prebuildFeatures`. The port auto-injection now
+   correctly handles features in `prebuildFeatures`, so the previous workaround of keeping
+   wezterm-server in the features block is no longer needed.
+   - Commit: `a2dba0c`
+
+#### E2E Verification Results
+- Container launches successfully with correct project ID "lace"
+- `lace.project_name` label correctly set to "lace"
+- Workspace mount: bare repo root → `/workspace` (correct for worktree layout)
+- Mount paths: `/home/mjr/.config/lace/lace/mounts/...` (correct project ID)
+- Claude config override preserved: `/home/mjr/.claude`
+- Port mapping: single `22425→2222` (no duplicate)
+- SSH connectivity verified via `ssh -p 22425 node@localhost`
+- Idempotency verified: second `lace up` correctly says "Prebuild is up to date"
+
 ## Verification
 
 ### Final Test Suite
-- 750 tests passing across 29 test files
-- 6 new tests added in Phase 5 (750 - 744 = 6)
+- 751 tests passing across 29 test files
 - `tsc --noEmit` clean — no type errors
 - No test coverage reduction — all existing assertions preserved
 
@@ -105,6 +141,12 @@ Each phase: implement → test → commit → `/review` subagent → apply feedb
 3. `d95c5f6` — feat(mounts): add staleness detection for persisted mount assignments
 4. `cabc2ee` — test: add clearClassificationCache to test beforeEach blocks
 5. `069e24a` — feat(mounts): improve mount guidance UX with context-aware messaging
+6. `0f056e2` — fix(project-id): strip leading hyphens in sanitizeProjectId
+7. `76c43bb` — fix(prebuild): verify Docker image exists before skipping rebuild
+8. `6012edf` — fix(ports): prevent duplicate appPort injection for user-defined entries
+9. `a2dba0c` — refactor(devcontainer): consolidate all features into prebuildFeatures
 
 ### No Deviations from Proposal
-All phases implemented as specified. No design changes needed.
+All phases implemented as specified. No design changes needed. Phase 6 (E2E verification)
+was added beyond the proposal's scope to validate the full pipeline against the lace
+project itself, which uncovered two bugs in adjacent subsystems.

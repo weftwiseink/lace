@@ -15,6 +15,7 @@ import type { FeatureMetadata } from "@/lib/feature-metadata";
 import { clearMetadataCache } from "@/lib/feature-metadata";
 import type { MountAssignmentsFile } from "@/lib/mount-resolver";
 import { deriveProjectId } from "@/lib/repo-clones";
+import { clearClassificationCache } from "@/lib/workspace-detector";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -137,6 +138,7 @@ beforeEach(() => {
   createdMountDirs = [];
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
+  clearClassificationCache();
 
   // Set LACE_SETTINGS to point to our test settings location
   process.env.LACE_SETTINGS = join(

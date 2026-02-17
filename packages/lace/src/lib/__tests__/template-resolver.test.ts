@@ -24,6 +24,7 @@ import type { PortAllocation } from "../port-allocator";
 import type { FeatureMetadata } from "../feature-metadata";
 import { MountPathResolver } from "../mount-resolver";
 import { deriveProjectId } from "../repo-clones";
+import { clearClassificationCache } from "../workspace-detector";
 
 // ── Helpers ──
 
@@ -32,6 +33,7 @@ let workspaceRoot: string;
 let createdMountDirs: string[];
 
 beforeEach(() => {
+  clearClassificationCache();
   workspaceRoot = join(
     tmpdir(),
     `lace-test-resolver-${Date.now()}-${Math.random().toString(36).slice(2)}`,

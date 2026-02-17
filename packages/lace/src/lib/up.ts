@@ -433,7 +433,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       if (source.includes('${')) continue; // Skip devcontainer variables
       if (!existsSync(source)) {
         const target = targetMatch?.[1] ?? 'unknown';
-        console.warn(`Warning: Bind mount source does not exist: ${source} (target: ${target})`);
+        console.warn(
+          `Warning: Bind mount source does not exist: ${source} (target: ${target})\n` +
+          `  → Docker will auto-create this as a root-owned directory, which may cause permission issues.`,
+        );
       }
     }
     // Also check workspaceMount if it's a concrete bind mount
@@ -445,7 +448,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         const source = sourceMatch[1];
         if (!source.includes('${') && !existsSync(source)) {
           const target = targetMatch?.[1] ?? 'unknown';
-          console.warn(`Warning: Bind mount source does not exist: ${source} (target: ${target})`);
+          console.warn(
+            `Warning: Bind mount source does not exist: ${source} (target: ${target})\n` +
+            `  → This is the workspace mount. The container may not function properly without it.`,
+          );
         }
       }
     }

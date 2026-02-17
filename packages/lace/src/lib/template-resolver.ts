@@ -1,4 +1,5 @@
 // IMPLEMENTATION_VALIDATION
+import { existsSync } from "node:fs";
 import type { PortAllocator, PortAllocation } from "./port-allocator";
 import type { FeatureMetadata, LaceMountDeclaration } from "./feature-metadata";
 import { extractLaceCustomizations, parseMountDeclarationEntry } from "./feature-metadata";
@@ -8,6 +9,7 @@ import type {
   PortAttributes,
 } from "./port-allocator";
 import type { MountPathResolver, MountAssignment } from "./mount-resolver";
+import { expandPath } from "./settings";
 
 // ── Types ──
 
@@ -362,6 +364,11 @@ export function validateMountTargetConflicts(
 /**
  * Emit guided configuration messages for mount paths.
  * Called after resolution to inform users about default paths and recommended overrides.
+ *
+ * When a default-path mount has a `recommendedSource`, checks whether that path
+ * exists on the host to provide context-aware guidance:
+ * - If it exists: suggests configuring it as an override (actionable)
+ * - If it doesn't: shows as optional configuration (informational)
  */
 export function emitMountGuidance(
   declarations: Record<string, LaceMountDeclaration>,
@@ -380,29 +387,35 @@ export function emitMountGuidance(
     } else {
       lines.push(`  ${assignment.label}: using default path ${assignment.resolvedSource}`);
       if (decl?.recommendedSource) {
-        lines.push(`    → Recommended: configure source to ${decl.recommendedSource} in settings.json`);
+        const expandedRecommended = expandPath(decl.recommendedSource);
+        if (existsSync(expandedRecommended)) {
+          lines.push(`    → ${decl.recommendedSource} exists on host. Configure in settings.json to use it.`);
+        } else {
+          lines.push(`    → Optional: configure source to ${decl.recommendedSource} in settings.json`);
+        }
       }
     }
   }
 
-  // Only show settings hint if there are default-path mounts
-  const hasRecommendations = defaultAssignments.some(
-    (a) => declarations[a.label]?.recommendedSource,
+  // Only show settings hint if there are default-path mounts with recommendations
+  // where the recommended source does NOT exist (actionable guidance)
+  const unresolvedRecommendations = defaultAssignments.filter(
+    (a) => {
+      const decl = declarations[a.label];
+      if (!decl?.recommendedSource) return false;
+      return !existsSync(expandPath(decl.recommendedSource));
+    },
   );
-  if (hasRecommendations) {
-    const exampleLabel = defaultAssignments.find(
-      (a) => declarations[a.label]?.recommendedSource,
-    );
-    if (exampleLabel) {
-      const decl = declarations[exampleLabel.label];
-      lines.push("");
-      lines.push("To configure custom mount sources, add to ~/.config/lace/settings.json:");
-      lines.push("{");
-      lines.push('  "mounts": {');
-      lines.push(`    "${exampleLabel.label}": { "source": "${decl!.recommendedSource}" }`);
-      lines.push("  }");
-      lines.push("}");
-    }
+  if (unresolvedRecommendations.length > 0) {
+    const exampleLabel = unresolvedRecommendations[0];
+    const decl = declarations[exampleLabel.label];
+    lines.push("");
+    lines.push("To configure custom mount sources, add to ~/.config/lace/settings.json:");
+    lines.push("{");
+    lines.push('  "mounts": {');
+    lines.push(`    "${exampleLabel.label}": { "source": "${decl!.recommendedSource}" }`);
+    lines.push("  }");
+    lines.push("}");
   }
 
   console.log(lines.join("\n"));

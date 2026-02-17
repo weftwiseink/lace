@@ -2028,14 +2028,15 @@ describe("lace up: inferred mount validation — warns on missing bind-mount sou
     });
 
     expect(result.exitCode).toBe(0);
-    // Should have warned about the missing source
+    // Should have warned about the missing source with Docker auto-create context
     const warnings = warnSpy.mock.calls.map((c) => c[0]);
     expect(
       warnings.some(
         (w: string) =>
           w.includes("Bind mount source does not exist") &&
           w.includes("/nonexistent/path/that/does/not/exist") &&
-          w.includes("target: /mnt/data"),
+          w.includes("target: /mnt/data") &&
+          w.includes("Docker will auto-create this as a root-owned directory"),
       ),
     ).toBe(true);
 
@@ -2165,7 +2166,9 @@ describe("lace up: inferred mount validation — warns on missing workspaceMount
       warnings.some(
         (w: string) =>
           w.includes("Bind mount source does not exist") &&
-          w.includes("/nonexistent/workspace/root"),
+          w.includes("/nonexistent/workspace/root") &&
+          w.includes("workspace mount") &&
+          w.includes("may not function properly"),
       ),
     ).toBe(true);
 

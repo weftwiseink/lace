@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import {
@@ -17,6 +17,7 @@ import {
   buildFeaturePortMetadata,
   warnPrebuildPortTemplates,
   warnPrebuildPortFeaturesStaticPort,
+  emitMountGuidance,
 } from "../template-resolver";
 import type { LaceMountDeclaration } from "../feature-metadata";
 import { PortAllocator } from "../port-allocator";
@@ -2468,5 +2469,95 @@ describe("validateMountTargetConflicts", () => {
     expect(() => validateMountTargetConflicts(declarations)).toThrow(
       /Mount target conflict.*\/mnt\/data/,
     );
+  });
+});
+
+describe("emitMountGuidance", () => {
+  it("does nothing when assignments is empty", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    emitMountGuidance({}, []);
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it("does nothing when all assignments are overrides", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    emitMountGuidance(declarations, [
+      { label: "project/data", resolvedSource: "/custom/path", isOverride: true },
+    ]);
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it("shows override and default assignments", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+      "project/other": { target: "/other" },
+    };
+    emitMountGuidance(declarations, [
+      { label: "project/data", resolvedSource: "/custom/path", isOverride: true },
+      { label: "project/other", resolvedSource: "/default/path", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain("project/data: /custom/path (override)");
+    expect(output).toContain("project/other: using default path /default/path");
+    logSpy.mockRestore();
+  });
+
+  it("shows 'exists on host' message when recommendedSource exists", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // Use a path that exists — the test's own workspaceRoot
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data", recommendedSource: workspaceRoot },
+    };
+    emitMountGuidance(declarations, [
+      { label: "project/data", resolvedSource: "/default/path", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain(`${workspaceRoot} exists on host. Configure in settings.json to use it.`);
+    expect(output).not.toContain("Optional:");
+    // Settings hint should NOT be shown when recommended source exists
+    expect(output).not.toContain("To configure custom mount sources");
+    logSpy.mockRestore();
+  });
+
+  it("shows 'optional' message when recommendedSource does not exist", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const nonexistentPath = join(workspaceRoot, "does-not-exist-12345");
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data", recommendedSource: nonexistentPath },
+    };
+    emitMountGuidance(declarations, [
+      { label: "project/data", resolvedSource: "/default/path", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain(`Optional: configure source to ${nonexistentPath} in settings.json`);
+    expect(output).not.toContain("exists on host");
+    // Settings hint should be shown when recommended source doesn't exist
+    expect(output).toContain("To configure custom mount sources");
+    logSpy.mockRestore();
+  });
+
+  it("handles tilde in recommendedSource via expandPath", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    // ~ always resolves to $HOME which should exist
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/home-data": { target: "/data", recommendedSource: "~" },
+    };
+    emitMountGuidance(declarations, [
+      { label: "project/home-data", resolvedSource: "/default/path", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    // ~ expands to homedir which exists, so should get the "exists on host" message
+    expect(output).toContain("~ exists on host. Configure in settings.json to use it.");
+    logSpy.mockRestore();
   });
 });

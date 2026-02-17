@@ -252,7 +252,12 @@ function injectForPrebuildBlock(
 
       // Inject asymmetric appPort entry: ${lace.port(...)}:DEFAULT_PORT
       const appPort = (config.appPort ?? []) as (string | number)[];
-      const template = `\${lace.port(${shortId}/${optionName})}:${defaultPort}`;
+      const portLabel = `\${lace.port(${shortId}/${optionName})}`;
+      // Skip if user already has an appPort entry referencing this port label
+      if (appPort.some((entry) => String(entry).includes(portLabel))) {
+        continue;
+      }
+      const template = `${portLabel}:${defaultPort}`;
       appPort.push(template);
       config.appPort = appPort;
 

@@ -84,6 +84,11 @@ describe("sanitizeProjectId", () => {
     expect(sanitizeProjectId("project---")).toBe("project");
   });
 
+  it("strips leading hyphens", () => {
+    expect(sanitizeProjectId("!project")).toBe("project");
+    expect(sanitizeProjectId("---project")).toBe("project");
+  });
+
   it("collapses consecutive hyphens", () => {
     expect(sanitizeProjectId("my--project")).toBe("my-project");
   });

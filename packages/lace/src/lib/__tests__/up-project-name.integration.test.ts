@@ -12,6 +12,7 @@ import { runUp } from "@/lib/up";
 import type { RunSubprocess } from "@/lib/subprocess";
 import { clearMetadataCache } from "@/lib/feature-metadata";
 import { deriveProjectId } from "@/lib/repo-clones";
+import { clearClassificationCache } from "@/lib/workspace-detector";
 import {
   createBareRepoWorkspace,
 } from "../../__tests__/helpers/scenario-utils";
@@ -70,6 +71,7 @@ beforeEach(() => {
   createdMountDirs = [];
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
+  clearClassificationCache();
 
   process.env.LACE_SETTINGS = join(
     workspaceRoot,
@@ -253,6 +255,59 @@ describe("lace up: project name injection", () => {
 
     // Cleanup
     rmSync(specialRoot, { recursive: true, force: true });
+  });
+
+  it("uses repo name for worktree workspace WITHOUT layout config (fallback)", async () => {
+    // Create a bare-repo workspace with worktree but no customizations.lace.workspace
+    const bareWorkspace = createBareRepoWorkspace(
+      workspaceRoot,
+      "my-project",
+      ["main"],
+    );
+    const worktreeDir = bareWorkspace.worktrees.main;
+
+    // Write devcontainer.json WITHOUT workspace layout config
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify(
+        {
+          image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    trackProjectMountsDir(worktreeDir);
+    process.env.LACE_SETTINGS = join(
+      worktreeDir,
+      ".config",
+      "lace",
+      "settings.json",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const generatedPath = join(worktreeDir, ".lace", "devcontainer.json");
+    const generated = JSON.parse(
+      readFileSync(generatedPath, "utf-8"),
+    ) as Record<string, unknown>;
+    const runArgs = generated.runArgs as string[];
+
+    // Even without layout config, project name should be "my-project" (repo name)
+    // via the classifyWorkspace fallback, not "main" (worktree name)
+    const labelIdx = runArgs.indexOf("--label");
+    expect(runArgs[labelIdx + 1]).toBe("lace.project_name=my-project");
+    const nameIdx = runArgs.indexOf("--name");
+    expect(runArgs[nameIdx + 1]).toBe("my-project");
   });
 
   it("uses repo name (not worktree name) for worktree workspace", async () => {

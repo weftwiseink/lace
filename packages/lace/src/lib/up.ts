@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
   readDevcontainerConfig,
@@ -44,6 +44,7 @@ import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
 import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag } from "./project-name";
+import { classifyWorkspace } from "./workspace-detector";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -134,7 +135,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // NOTE: This must run before the structuredClone so that
   // workspaceMount/workspaceFolder/postCreateCommand mutations propagate
   // into configForResolution and through the rest of the pipeline.
-  let projectName: string = basename(workspaceFolder);
+  let projectName: string;
   {
     const layoutResult = applyWorkspaceLayout(configMinimal.raw, workspaceFolder);
 
@@ -158,6 +159,11 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
     if (layoutResult.classification) {
       projectName = deriveProjectName(layoutResult.classification, workspaceFolder);
+    } else {
+      // Fallback: classify even without layout config. The cache ensures
+      // this is free if classifyWorkspace was already called upstream.
+      const { classification } = classifyWorkspace(workspaceFolder);
+      projectName = deriveProjectName(classification, workspaceFolder);
     }
   }
 

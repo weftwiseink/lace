@@ -48,14 +48,45 @@ export interface ClassificationResult {
   warnings: ClassificationWarning[];
 }
 
+// ── Classification Cache ──
+
+/**
+ * Module-level cache for classification results. Keyed by resolved absolute path.
+ * Valid for process lifetime — lace is a short-lived CLI, so no invalidation needed.
+ * Eliminates redundant filesystem probes when the same workspace is classified
+ * multiple times per pipeline run (e.g., applyWorkspaceLayout, then deriveProjectId
+ * inside MountPathResolver, then again inside runResolveMounts).
+ */
+const classificationCache = new Map<string, ClassificationResult>();
+
+/**
+ * Clear the classification cache. Exported for tests that create filesystem
+ * fixtures and need a clean slate to avoid cross-test contamination.
+ */
+export function clearClassificationCache(): void {
+  classificationCache.clear();
+}
+
 // ── Public API ──
 
 /**
  * Classify a workspace directory's git layout using filesystem-only detection.
  * No git binary required for core detection. Supplemental warnings may use git.
+ * Results are cached per resolved absolute path for the process lifetime.
  */
 export function classifyWorkspace(workspacePath: string): ClassificationResult {
   const absPath = resolve(workspacePath);
+
+  const cached = classificationCache.get(absPath);
+  if (cached) return cached;
+
+  const result = classifyWorkspaceUncached(absPath);
+  classificationCache.set(absPath, result);
+  return result;
+}
+
+/** Core classification logic — called once per unique path, result is cached. */
+function classifyWorkspaceUncached(absPath: string): ClassificationResult {
   const dotGitPath = join(absPath, ".git");
   const warnings: ClassificationWarning[] = [];
 

@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import type { RunSubprocess, SubprocessResult } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 import { parseRepoId } from "./devcontainer";
+import { classifyWorkspace } from "./workspace-detector";
+import { deriveProjectName } from "./project-name";
 
 export class RepoCloneError extends Error {
   constructor(message: string) {
@@ -14,27 +16,40 @@ export class RepoCloneError extends Error {
 }
 
 /**
- * Derive the project identifier from a workspace folder path.
+ * Pure sanitization: lowercase, replace non-alphanumeric with hyphens,
+ * collapse consecutive hyphens, strip trailing hyphens.
  *
- * Algorithm:
- * 1. Extract the basename (final directory name)
- * 2. Sanitize: lowercase, replace non-alphanumeric characters with `-`, collapse consecutive `-`
+ * Exported for direct unit testing of the string munging logic.
  *
  * Examples:
- * - /home/user/code/weft/lace -> lace
- * - /home/user/code/My Project! -> my-project-
- * - /home/user/code/foo/bar -> bar
+ * - "lace" -> "lace"
+ * - "My Project!" -> "my-project-" -> "my-project" (trailing dash stripped)
+ * - "foo--bar" -> "foo-bar"
  */
-export function deriveProjectId(workspaceFolder: string): string {
-  // Remove trailing slash if present
-  const cleanPath = workspaceFolder.replace(/\/+$/, "");
-  const name = basename(cleanPath);
-
-  // Sanitize: lowercase, replace non-alphanumeric with -, collapse consecutive -
+export function sanitizeProjectId(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "-")
-    .replace(/-+/g, "-");
+    .replace(/-+/g, "-")
+    .replace(/-$/, "");
+}
+
+/**
+ * Derive a filesystem-safe project identifier from a workspace path.
+ *
+ * Classifies the workspace to handle worktree layouts — for a worktree at
+ * /code/weft/lace/main/, returns "lace" (the bare-repo root name), not "main".
+ * Classification results are cached per-process (see workspace-detector.ts).
+ *
+ * Examples:
+ * - /home/user/code/weft/lace (normal clone) -> "lace"
+ * - /home/user/code/weft/lace/main/ (worktree) -> "lace"
+ * - /home/user/code/My Project! -> "my-project"
+ */
+export function deriveProjectId(workspaceFolder: string): string {
+  const cleanPath = workspaceFolder.replace(/\/+$/, "");
+  const { classification } = classifyWorkspace(cleanPath);
+  return sanitizeProjectId(deriveProjectName(classification, cleanPath));
 }
 
 /**

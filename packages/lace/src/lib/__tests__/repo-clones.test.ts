@@ -6,6 +6,7 @@ import { tmpdir, homedir } from "node:os";
 import type { RunSubprocess } from "@/lib/subprocess";
 import {
   deriveProjectId,
+  sanitizeProjectId,
   getClonePath,
   getReposDir,
   cloneRepo,
@@ -14,10 +15,16 @@ import {
   getRepoSourcePath,
   RepoCloneError,
 } from "@/lib/repo-clones";
+import { classifyWorkspace, clearClassificationCache } from "@/lib/workspace-detector";
+import {
+  createBareRepoWorkspace,
+  createNormalCloneWorkspace,
+} from "../../__tests__/helpers/scenario-utils";
 
 let testDir: string;
 
 beforeEach(() => {
+  clearClassificationCache();
   testDir = join(
     tmpdir(),
     `lace-test-clones-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -37,7 +44,7 @@ describe("deriveProjectId", () => {
   });
 
   it("sanitizes special characters", () => {
-    expect(deriveProjectId("/home/user/code/My Project!")).toBe("my-project-");
+    expect(deriveProjectId("/home/user/code/My Project!")).toBe("my-project");
   });
 
   it("uses last segment of nested path", () => {
@@ -58,6 +65,96 @@ describe("deriveProjectId", () => {
 
   it("handles numbers", () => {
     expect(deriveProjectId("/home/user/code/project123")).toBe("project123");
+  });
+});
+
+// --- sanitizeProjectId (pure function) ---
+
+describe("sanitizeProjectId", () => {
+  it("lowercases input", () => {
+    expect(sanitizeProjectId("MyProject")).toBe("myproject");
+  });
+
+  it("replaces non-alphanumeric with hyphens and strips trailing dash", () => {
+    expect(sanitizeProjectId("my project!")).toBe("my-project");
+  });
+
+  it("strips trailing hyphens", () => {
+    expect(sanitizeProjectId("project!")).toBe("project");
+    expect(sanitizeProjectId("project---")).toBe("project");
+  });
+
+  it("collapses consecutive hyphens", () => {
+    expect(sanitizeProjectId("my--project")).toBe("my-project");
+  });
+
+  it("handles already-clean input", () => {
+    expect(sanitizeProjectId("lace")).toBe("lace");
+  });
+
+  it("handles numbers", () => {
+    expect(sanitizeProjectId("project123")).toBe("project123");
+  });
+
+  it("is idempotent", () => {
+    const once = sanitizeProjectId("My Project!");
+    expect(sanitizeProjectId(once)).toBe(once);
+  });
+});
+
+// --- deriveProjectId with worktree awareness ---
+
+describe("deriveProjectId worktree awareness", () => {
+  it("returns bare-repo basename for worktree workspace", () => {
+    const { worktrees } = createBareRepoWorkspace(testDir, "lace", ["main", "feature-x"]);
+    expect(deriveProjectId(worktrees.main)).toBe("lace");
+    expect(deriveProjectId(worktrees["feature-x"])).toBe("lace");
+  });
+
+  it("returns basename for normal clone", () => {
+    const root = createNormalCloneWorkspace(testDir, "my-project");
+    expect(deriveProjectId(root)).toBe("my-project");
+  });
+
+  it("returns basename for non-git directory", () => {
+    const dir = join(testDir, "some-folder");
+    mkdirSync(dir, { recursive: true });
+    expect(deriveProjectId(dir)).toBe("some-folder");
+  });
+
+  it("handles trailing slash on worktree path", () => {
+    const { worktrees } = createBareRepoWorkspace(testDir, "lace", ["main"]);
+    expect(deriveProjectId(worktrees.main + "/")).toBe("lace");
+  });
+});
+
+// --- Classification cache ---
+
+describe("classification cache", () => {
+  it("returns identical object reference on repeated calls", () => {
+    const dir = join(testDir, "cached-test");
+    mkdirSync(dir, { recursive: true });
+    const first = classifyWorkspace(dir);
+    const second = classifyWorkspace(dir);
+    expect(first).toBe(second); // same reference
+  });
+
+  it("normalizes trailing slashes for cache key", () => {
+    const dir = join(testDir, "slash-test");
+    mkdirSync(dir, { recursive: true });
+    const withoutSlash = classifyWorkspace(dir);
+    const withSlash = classifyWorkspace(dir + "/");
+    expect(withoutSlash).toBe(withSlash);
+  });
+
+  it("clears with clearClassificationCache", () => {
+    const dir = join(testDir, "clear-test");
+    mkdirSync(dir, { recursive: true });
+    const first = classifyWorkspace(dir);
+    clearClassificationCache();
+    const second = classifyWorkspace(dir);
+    expect(first).not.toBe(second); // different reference
+    expect(first).toEqual(second); // same content
   });
 });
 

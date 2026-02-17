@@ -1,10 +1,11 @@
 // IMPLEMENTATION_VALIDATION
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdirSync,
   rmSync,
   existsSync,
   readFileSync,
+  writeFileSync,
 } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -13,6 +14,7 @@ import type { MountAssignmentsFile } from "../mount-resolver";
 import type { LaceSettings } from "../settings";
 import type { LaceMountDeclaration } from "../feature-metadata";
 import { deriveProjectId } from "../repo-clones";
+import { clearClassificationCache } from "../workspace-detector";
 
 let testDir: string;
 let workspaceFolder: string;
@@ -20,6 +22,7 @@ let workspaceFolder: string;
 let createdMountDirs: string[];
 
 beforeEach(() => {
+  clearClassificationCache();
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   testDir = join(tmpdir(), `lace-test-mount-resolver-${suffix}`);
   workspaceFolder = join(testDir, "workspace");
@@ -483,5 +486,131 @@ describe("MountPathResolver — hasDeclarations", () => {
     };
     const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
     expect(resolver.hasDeclarations()).toBe(true);
+  });
+});
+
+// ── Staleness detection ──
+
+describe("MountPathResolver — staleness detection", () => {
+  it("discards stale default-path assignments from old project ID", () => {
+    const currentProjectId = deriveProjectId(workspaceFolder);
+    const oldProjectId = "old-wrong-name";
+
+    // Write a persistence file with an assignment using the old project ID
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const staleAssignments: MountAssignmentsFile = {
+      assignments: {
+        "project/bash-history": {
+          label: "project/bash-history",
+          resolvedSource: join(
+            homedir(),
+            ".config",
+            "lace",
+            oldProjectId,
+            "mounts",
+            "project",
+            "bash-history",
+          ),
+          isOverride: false,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(staleAssignments, null, 2),
+      "utf-8",
+    );
+
+    // Capture console.warn
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Create resolver — should detect and discard the stale entry
+    const resolver = new MountPathResolver(workspaceFolder, {});
+
+    // Stale entry should have been discarded
+    expect(resolver.getAssignments()).toHaveLength(0);
+
+    // Warning should have been emitted
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("stale path"),
+    );
+
+    warnSpy.mockRestore();
+
+    // Re-resolve should use current project ID
+    trackProjectMountsDir(workspaceFolder);
+    const freshPath = resolver.resolveSource("project/bash-history");
+    expect(freshPath).toContain(`/${currentProjectId}/mounts/`);
+    expect(freshPath).not.toContain(`/${oldProjectId}/`);
+  });
+
+  it("preserves override assignments even when default paths would be stale", () => {
+    const overrideDir = join(testDir, "my-claude-config");
+    mkdirSync(overrideDir, { recursive: true });
+
+    // Write a persistence file with an override assignment (path doesn't contain project ID)
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const assignments: MountAssignmentsFile = {
+      assignments: {
+        "project/claude-config": {
+          label: "project/claude-config",
+          resolvedSource: overrideDir,
+          isOverride: true,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(assignments, null, 2),
+      "utf-8",
+    );
+
+    // Create resolver — override should be preserved
+    const resolver = new MountPathResolver(workspaceFolder, {});
+    expect(resolver.getAssignments()).toHaveLength(1);
+    expect(resolver.getAssignments()[0].resolvedSource).toBe(overrideDir);
+  });
+
+  it("preserves non-stale default-path assignments", () => {
+    const currentProjectId = deriveProjectId(workspaceFolder);
+    const correctPath = join(
+      homedir(),
+      ".config",
+      "lace",
+      currentProjectId,
+      "mounts",
+      "project",
+      "data",
+    );
+    mkdirSync(correctPath, { recursive: true });
+    createdMountDirs.push(join(homedir(), ".config", "lace", currentProjectId, "mounts"));
+
+    // Write a persistence file with a correct project ID
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const assignments: MountAssignmentsFile = {
+      assignments: {
+        "project/data": {
+          label: "project/data",
+          resolvedSource: correctPath,
+          isOverride: false,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(assignments, null, 2),
+      "utf-8",
+    );
+
+    // Create resolver — correct assignment should be preserved
+    const resolver = new MountPathResolver(workspaceFolder, {});
+    expect(resolver.getAssignments()).toHaveLength(1);
+    expect(resolver.getAssignments()[0].resolvedSource).toBe(correctPath);
   });
 });

@@ -87,7 +87,7 @@ export class MountPathResolver {
     return Object.keys(this.declarations).length > 0;
   }
 
-  /** Load persisted assignments from disk. */
+  /** Load persisted assignments from disk, discarding stale entries. */
   private load(): void {
     if (!existsSync(this.persistPath)) return;
     try {
@@ -97,11 +97,37 @@ export class MountPathResolver {
       for (const [label, assignment] of Object.entries(
         raw.assignments ?? {},
       )) {
+        // Staleness detection: non-override assignments use default paths
+        // like ~/.config/lace/<projectId>/mounts/... — if the projectId
+        // segment doesn't match the current one, the path is stale
+        // (e.g., from before worktree-aware project identification).
+        if (!assignment.isOverride && this.isStaleDefaultPath(assignment.resolvedSource)) {
+          console.warn(
+            `Warning: Mount "${label}" has stale path from old project ID. ` +
+              `Re-deriving with current project ID "${this.projectId}".`,
+          );
+          continue; // Skip stale entry — will be re-resolved on next resolveSource()
+        }
         this.assignments.set(label, assignment);
       }
     } catch {
       // Corrupt file -- start fresh, will be overwritten on save
     }
+  }
+
+  /**
+   * Check if a default mount path is stale (uses a different project ID).
+   * Default paths follow the pattern: ~/.config/lace/<projectId>/mounts/...
+   */
+  private isStaleDefaultPath(resolvedSource: string): boolean {
+    const mountsSegment = `/mounts/`;
+    const idx = resolvedSource.indexOf(mountsSegment);
+    if (idx === -1) return false;
+
+    // Expected pattern: .../<projectId>/mounts/...
+    // Check if the path contains /<currentProjectId>/mounts/
+    const expectedSegment = `/${this.projectId}/mounts/`;
+    return !resolvedSource.includes(expectedSegment);
   }
 
   /** Persist current assignments to disk. */

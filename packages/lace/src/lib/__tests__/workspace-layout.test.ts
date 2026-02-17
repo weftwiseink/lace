@@ -310,6 +310,47 @@ describe("applyWorkspaceLayout", () => {
     expect(config.workspaceFolder).toBe("/src/main");
   });
 
+  it("returns error when worktree uses absolute gitdir path", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "abs-project",
+      ["main"],
+      { useAbsolutePaths: true },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("absolute gitdir path");
+    expect(result.message).toContain("git worktree repair");
+    expect(result.classification).toBeDefined();
+    expect(result.classification!.type).toBe("worktree");
+  });
+
+  it("succeeds when worktree uses relative gitdir path", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "rel-project",
+      ["main"],
+      { useAbsolutePaths: false },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    expect(result.status).toBe("applied");
+    expect(result.warnings).toHaveLength(0);
+  });
+
   it("does not inject safe.directory when safeDirectory is false", () => {
     const { worktrees } = createBareRepoWorkspace(
       testDir,

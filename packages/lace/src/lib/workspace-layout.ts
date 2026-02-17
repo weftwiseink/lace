@@ -104,6 +104,22 @@ export function applyWorkspaceLayout(
 
   const { classification } = result;
 
+  // Absolute gitdir paths will not resolve inside the container — fatal error
+  const absoluteGitdirWarnings = result.warnings.filter(
+    (w) => w.code === "absolute-gitdir",
+  );
+  if (absoluteGitdirWarnings.length > 0) {
+    const names = absoluteGitdirWarnings.map((w) => w.message).join("\n  ");
+    return {
+      status: "error",
+      message:
+        `Worktree(s) use absolute gitdir paths that will not resolve inside the container:\n  ${names}\n` +
+        "Run `git worktree repair --relative-paths` (requires git 2.48+) or recreate the worktree(s).",
+      warnings,
+      classification,
+    };
+  }
+
   // Validate layout matches
   if (classification.type === "normal-clone") {
     return {

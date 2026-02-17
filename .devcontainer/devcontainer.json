@@ -96,7 +96,13 @@
       },
       "prebuildFeatures": {
         "ghcr.io/devcontainers/features/git:1": {},
-        "ghcr.io/devcontainers/features/sshd:1": {}
+        "ghcr.io/devcontainers/features/sshd:1": {},
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+        "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
+        "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
+          "version": "20240203-110809-5046fc22"
+        }
       }
     }
   },
@@ -125,16 +131,5 @@
   // "workspaceFolder": "/workspace/main",
   // "postCreateCommand": "git config --global --add safe.directory '*'",
   // Start wezterm mux daemon for SSH domain multiplexing (sshd is started by the sshd feature)
-  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true",
-  // Project-specific features installed at container build time.
-  // wezterm-server MUST be here (not in prebuildFeatures) because
-  // lace up auto-injection reads port metadata only from the features block.
-  "features": {
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-    "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
-    "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
-    "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-      "version": "20240203-110809-5046fc22"
-    }
-  }
+  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true"
 }

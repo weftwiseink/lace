@@ -197,40 +197,49 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     !options.dryRun &&
     !contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)
   ) {
-    // Cache is fresh — check if source needs reactivation (e.g., after restore)
-    if (config.buildSource.kind === "dockerfile") {
-      const currentContent = readFileSync(config.buildSource.path, "utf-8");
-      if (currentContent.includes("lace.local/")) {
-        const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
-        console.log(msg);
-        return { exitCode: 0, message: msg };
-      }
-      // Dockerfile was restored but cache is fresh — rewrite FROM without rebuilding
-      const reactivated = rewriteFrom(dockerfileContent!, prebuildTag);
-      writeFileSync(config.buildSource.path, reactivated, "utf-8");
+    // Cache is fresh — but verify the Docker image actually exists before skipping.
+    const imageCheck = run("docker", ["image", "inspect", "--format", "{{.Id}}", prebuildTag]);
+    const imageExists = imageCheck.exitCode === 0;
+
+    if (!imageExists) {
+      // Cache is fresh but image was deleted — fall through to full rebuild
+      console.log(`Prebuild image missing (${prebuildTag}). Rebuilding...`);
     } else {
-      // Image-based config
-      const currentImage = config.buildSource.image;
-      if (currentImage.startsWith("lace.local/")) {
-        const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
-        console.log(msg);
-        return { exitCode: 0, message: msg };
+      // Cache is fresh AND image exists — check if source needs reactivation
+      if (config.buildSource.kind === "dockerfile") {
+        const currentContent = readFileSync(config.buildSource.path, "utf-8");
+        if (currentContent.includes("lace.local/")) {
+          const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+          console.log(msg);
+          return { exitCode: 0, message: msg };
+        }
+        // Dockerfile was restored but cache is fresh — rewrite FROM without rebuilding
+        const reactivated = rewriteFrom(dockerfileContent!, prebuildTag);
+        writeFileSync(config.buildSource.path, reactivated, "utf-8");
+      } else {
+        // Image-based config
+        const currentImage = config.buildSource.image;
+        if (currentImage.startsWith("lace.local/")) {
+          const msg = `Prebuild is up to date (${prebuildTag}). Use --force to rebuild.`;
+          console.log(msg);
+          return { exitCode: 0, message: msg };
+        }
+        // Image was restored but cache is fresh — rewrite image field without rebuilding
+        const configContent = readFileSync(config.configPath, "utf-8");
+        const reactivated = rewriteImageField(configContent, prebuildTag);
+        writeFileSync(config.configPath, reactivated, "utf-8");
       }
-      // Image was restored but cache is fresh — rewrite image field without rebuilding
-      const configContent = readFileSync(config.configPath, "utf-8");
-      const reactivated = rewriteImageField(configContent, prebuildTag);
-      writeFileSync(config.configPath, reactivated, "utf-8");
+      writeMetadata(prebuildDir, {
+        originalFrom: parsed.image,
+        timestamp: new Date().toISOString(),
+        prebuildTag,
+        configType: config.buildSource.kind,
+      });
+      const targetDesc = config.buildSource.kind === "dockerfile" ? "Dockerfile FROM" : "devcontainer.json image";
+      const msg = `Prebuild reactivated from cache. ${targetDesc} rewritten to: ${prebuildTag}`;
+      console.log(msg);
+      return { exitCode: 0, message: msg };
     }
-    writeMetadata(prebuildDir, {
-      originalFrom: parsed.image,
-      timestamp: new Date().toISOString(),
-      prebuildTag,
-      configType: config.buildSource.kind,
-    });
-    const targetDesc = config.buildSource.kind === "dockerfile" ? "Dockerfile FROM" : "devcontainer.json image";
-    const msg = `Prebuild reactivated from cache. ${targetDesc} rewritten to: ${prebuildTag}`;
-    console.log(msg);
-    return { exitCode: 0, message: msg };
   }
 
   // Dry-run: report planned actions and exit

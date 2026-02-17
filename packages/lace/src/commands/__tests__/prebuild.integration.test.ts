@@ -24,6 +24,10 @@ function createMock(options?: {
 }): RunSubprocess {
   return (command, args, opts) => {
     mockCalls.push({ command, args });
+    // Non-devcontainer commands (e.g. docker image inspect) — return success without side effects
+    if (command !== "devcontainer") {
+      return { exitCode: options?.exitCode ?? 0, stdout: "", stderr: options?.stderr ?? "" };
+    }
     // Simulate devcontainer build writing a lock file in the prebuild dir
     const wsFolder = args[args.indexOf("--workspace-folder") + 1];
     if (wsFolder && (options?.exitCode ?? 0) === 0) {
@@ -132,11 +136,12 @@ describe("prebuild: idempotency", () => {
     expect(result1.exitCode).toBe(0);
     expect(mockCalls).toHaveLength(1);
 
-    // Second run — should be a no-op
+    // Second run — should be a no-op (docker image inspect is called but not devcontainer build)
     const result2 = runPrebuild({ workspaceRoot, subprocess: mock });
     expect(result2.exitCode).toBe(0);
     expect(result2.message).toContain("up to date");
-    expect(mockCalls).toHaveLength(1); // Not called again
+    const devcontainerCalls = mockCalls.filter((c) => c.command === "devcontainer");
+    expect(devcontainerCalls).toHaveLength(1); // No second build
   });
 });
 
@@ -401,10 +406,12 @@ describe("prebuild: image-based idempotency", () => {
     runPrebuild({ workspaceRoot, subprocess: mock });
     expect(mockCalls).toHaveLength(1);
 
+    // Second run — should be a no-op (docker image inspect is called but not devcontainer build)
     const result = runPrebuild({ workspaceRoot, subprocess: mock });
     expect(result.exitCode).toBe(0);
     expect(result.message).toContain("up to date");
-    expect(mockCalls).toHaveLength(1);  // Not called again
+    const devcontainerCalls = mockCalls.filter((c) => c.command === "devcontainer");
+    expect(devcontainerCalls).toHaveLength(1);  // No second build
   });
 });
 

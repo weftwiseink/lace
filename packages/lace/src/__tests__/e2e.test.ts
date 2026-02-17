@@ -19,6 +19,10 @@ let devcontainerDir: string;
 
 function createMock(): RunSubprocess {
   return (command, args) => {
+    // Non-devcontainer commands (e.g. docker image inspect) — return success without side effects
+    if (command !== "devcontainer") {
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
     const wsFolder = args[args.indexOf("--workspace-folder") + 1];
     if (wsFolder) {
       writeFileSync(
@@ -174,10 +178,11 @@ describe("e2e: prebuild → restore → prebuild (cache reactivation)", () => {
     expect(dockerfile).toBe(STANDARD_DOCKERFILE);
 
     // Re-prebuild — should reactivate from cache, NOT call Docker build
+    // (docker image inspect is called but not devcontainer build, so count is 2 not 1)
     const result = runPrebuild({ workspaceRoot, subprocess: countingMock });
     expect(result.exitCode).toBe(0);
     expect(result.message).toContain("reactivated from cache");
-    expect(mockCallCount).toBe(1); // Still only 1 — no second Docker build
+    expect(mockCallCount).toBe(2); // docker image inspect + no second Docker build
     dockerfile = readFileSync(join(devcontainerDir, "Dockerfile"), "utf-8");
     expect(dockerfile).toContain("FROM lace.local/node:24-bookworm");
   });

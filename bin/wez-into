@@ -251,6 +251,9 @@ start_and_connect() {
       fi
       info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
     fi
+    # Show error context excerpt for the paths that proceed to the retry loop:
+    # - Structured: container may be running (didn't exit above)
+    # - Legacy: "Starting devcontainer" found (didn't exit above)
     info ""
     info "lace up error context (last 5 lines):"
     echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -5 >&2

@@ -1,6 +1,25 @@
 // IMPLEMENTATION_VALIDATION
 import { defineCommand } from "citty";
 import { runUp, type UpOptions } from "@/lib/up";
+import { runSubprocess as defaultRunSubprocess } from "@/lib/subprocess";
+
+/**
+ * Quick check: is a Docker container running for this workspace folder?
+ * Used to annotate failure results for callers (e.g., wez-into) that need
+ * to decide whether to retry discovery.
+ */
+function isContainerRunning(workspaceFolder: string): boolean {
+  try {
+    const result = defaultRunSubprocess("docker", [
+      "ps",
+      "--filter", `label=devcontainer.local_folder=${workspaceFolder}`,
+      "--format", "{{.ID}}",
+    ]);
+    return result.exitCode === 0 && result.stdout.trim() !== "";
+  } catch {
+    return false;
+  }
+}
 
 export const upCommand = defineCommand({
   meta: {
@@ -71,6 +90,20 @@ export const upCommand = defineCommand({
     if (result.message) {
       console.log(result.message);
     }
+
+    // Emit machine-readable result line for callers (e.g., wez-into).
+    // Goes to stderr so it doesn't interfere with stdout-based parsing.
+    const failedPhase = result.exitCode !== 0
+      ? Object.entries(result.phases).find(([, v]) => v && v.exitCode !== 0)?.[0] ?? "unknown"
+      : null;
+    const containerMayBeRunning = result.exitCode !== 0
+      && isContainerRunning(workspaceFolder);
+    const laceResult = {
+      exitCode: result.exitCode,
+      failedPhase,
+      containerMayBeRunning,
+    };
+    console.error(`LACE_RESULT: ${JSON.stringify(laceResult)}`);
 
     process.exitCode = result.exitCode;
   },

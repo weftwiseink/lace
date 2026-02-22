@@ -200,22 +200,57 @@ start_and_connect() {
     exit 1
   elif [[ $up_exit -ne 0 ]]; then
     # Non-zero but not 126/127: lace ran but reported failure.
-    # Distinguish between "lace failed before starting container" (definitive)
-    # vs "container may have started but a lifecycle hook failed" (recoverable).
-    #
-    # Heuristic: lace prints "Starting devcontainer..." immediately before
-    # invoking `devcontainer up`. If that line is absent, lace failed in an
-    # early phase (config read, validation, template resolution, etc.) and
-    # the container was never started -- no point retrying discovery.
-    if ! grep -q "Starting devcontainer" <<< "$up_output"; then
-      err "lace up failed before starting container (exit $up_exit)"
-      err "lace up output:"
-      echo "$up_output" | tail -15 >&2
-      exit 1
+    # Parse structured LACE_RESULT line if available (Phase 2), falling back
+    # to the "Starting devcontainer" text heuristic for older lace versions.
+    local lace_result_line container_may_be_running failed_phase
+    lace_result_line=$(grep '^LACE_RESULT: ' <<< "$up_output" | tail -1 || true)
+
+    if [[ -n "$lace_result_line" ]]; then
+      # Structured result available -- use it.
+      local result_json="${lace_result_line#LACE_RESULT: }"
+
+      # Extract containerMayBeRunning via glob match (no jq dependency).
+      container_may_be_running="false"
+      if [[ "$result_json" == *'"containerMayBeRunning":true'* ]]; then
+        container_may_be_running="true"
+      fi
+
+      # Extract failedPhase via bash parameter expansion.
+      local phase_fragment="${result_json#*\"failedPhase\":\"}"
+      if [[ "$phase_fragment" != "$result_json" ]]; then
+        failed_phase="${phase_fragment%%\"*}"
+      else
+        failed_phase="unknown"
+      fi
+
+      if [[ "$container_may_be_running" != "true" ]]; then
+        err "lace up failed in phase '$failed_phase' (exit $up_exit)"
+        err "container is not running -- no point retrying discovery"
+        err ""
+        err "error context (last 10 lines):"
+        echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -10 >&2
+        err ""
+        err "to debug, run lace up directly:"
+        err "  lace up --workspace-folder \"$workspace_path\""
+        exit 1
+      fi
+
+      info "warning: lace up failed in phase '$failed_phase' (exit $up_exit) but container may be running"
+      info "checking if container is discoverable..."
+    else
+      # Fallback: legacy heuristic for older lace versions without LACE_RESULT.
+      if ! grep -q "Starting devcontainer" <<< "$up_output"; then
+        err "lace up failed before starting container (exit $up_exit)"
+        err ""
+        err "error context (last 10 lines):"
+        echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -10 >&2
+        err ""
+        err "to debug, run lace up directly:"
+        err "  lace up --workspace-folder \"$workspace_path\""
+        exit 1
+      fi
+      info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
     fi
-    # lace reached the devcontainer up phase but something failed afterward.
-    # The container may still be running — check discovery.
-    info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
     info ""
     info "lace up error context (last 5 lines):"
     echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -5 >&2

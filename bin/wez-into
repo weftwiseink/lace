@@ -154,16 +154,34 @@ start_and_connect() {
     exit 0
   fi
 
-  # Run lace up and capture output.
+  # Run lace up, streaming output to the user in real time via tee.
   #
   # Note: lace up may exit non-zero even when the container starts successfully,
   # e.g. if postStartCommand fails (CWD mismatch, transient error). In that case
   # the container is running but lace up reports failure. We log the warning and
   # proceed to discovery -- if the container is actually running and discoverable,
   # we connect anyway.
-  local up_output up_exit
-  up_output=$("$lace_cli" up --workspace-folder "$workspace_path" 2>&1) || up_exit=$?
-  up_exit=${up_exit:-0}
+  #
+  # The tee-based pattern shows lace up output as it happens (to stderr) while
+  # capturing it for heuristic checks. With set -euo pipefail (line 16), the
+  # pipeline exit status reflects lace's exit code (tee almost never fails).
+  local up_logfile
+  up_logfile=$(mktemp /tmp/lace-up-XXXXXX.log) || {
+    err "cannot create temp file for lace up log"
+    exit 1
+  }
+  trap "rm -f '$up_logfile'" EXIT
+
+  local up_exit=0
+
+  "$lace_cli" up --workspace-folder "$workspace_path" 2>&1 \
+    | tee "$up_logfile" >&2 \
+    || up_exit=$?
+
+  local up_output
+  up_output=$(cat "$up_logfile" 2>/dev/null || true)
+  rm -f "$up_logfile"
+  trap - EXIT
 
   if [[ $up_exit -eq 127 ]]; then
     # Exit 127 = command/interpreter not found. The container definitely did not start.
@@ -198,6 +216,10 @@ start_and_connect() {
     # lace reached the devcontainer up phase but something failed afterward.
     # The container may still be running — check discovery.
     info "warning: lace up exited with code $up_exit (checking if container started anyway...)"
+    info ""
+    info "lace up error context (last 5 lines):"
+    echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -5 >&2
+    info ""
   else
     info "container started successfully"
   fi
@@ -205,7 +227,7 @@ start_and_connect() {
   # Re-discover to get the current port (may have shifted after restart)
   local port=""
   local attempts=0
-  local max_attempts=10
+  local max_attempts=5
 
   while [[ $attempts -lt $max_attempts ]]; do
     while IFS=: read -r name p user path; do
@@ -219,9 +241,20 @@ start_and_connect() {
       break
     fi
 
+    # Check if a container is even running for this workspace.
+    # No running container means retries are futile.
+    local container_id
+    container_id=$(docker ps \
+      --filter "label=devcontainer.local_folder=$workspace_path" \
+      --format '{{.ID}}' 2>/dev/null || true)
+    if [[ -z "$container_id" ]]; then
+      info "no container running for $workspace_path -- aborting discovery retries"
+      break
+    fi
+
     attempts=$((attempts + 1))
     if [[ $attempts -lt $max_attempts ]]; then
-      info "waiting for container to be discoverable (attempt $((attempts + 1))/$max_attempts)..."
+      info "waiting for container to be discoverable (attempt $((attempts))/$max_attempts)..."
       sleep 2
     fi
   done
@@ -229,13 +262,28 @@ start_and_connect() {
   if [[ -z "$port" ]]; then
     if [[ $up_exit -ne 0 ]]; then
       err "lace up failed (exit $up_exit) and container is not discoverable"
-      err "lace up output (last 15 lines):"
-      echo "$up_output" | tail -15 >&2
+      err ""
+      err "error context (last 10 lines):"
+      echo "$up_output" | grep -v '^LACE_RESULT: ' | tail -10 >&2
+      err ""
+      err "to debug, run lace up directly:"
+      err "  lace up --workspace-folder \"$workspace_path\""
+      err ""
+      err "common causes:"
+      err "  - Docker daemon not running          (check: docker info)"
+      err "  - Missing host-side files             (check validation errors above)"
+      err "  - Image build failure                 (check Docker build output above)"
+      err "  - Lifecycle hook failure, no container (check: docker ps -a --filter label=devcontainer.local_folder=\"$workspace_path\")"
     else
       err "container started but not discoverable after $max_attempts attempts"
       err "the container may need more time to start SSH"
+      err ""
+      err "check container status:"
+      err "  docker ps --filter label=devcontainer.local_folder=\"$workspace_path\""
+      err ""
+      err "to retry connection:"
+      err "  wez-into $project"
     fi
-    err "try: wez-into $project"
     exit 1
   fi
 

@@ -182,10 +182,26 @@ export class MountPathResolver {
     validateLabel(label);
     this.validateDeclaration(label);
 
-    // Return existing assignment if already resolved
+    // Check if settings override state changed since last resolution.
+    // This ensures adding/removing/changing a settings override takes effect
+    // without needing to manually clear mount-assignments.json.
+    const overrideSettings = this.settings.mounts?.[label];
     const existing = this.assignments.get(label);
     if (existing) {
-      return existing.resolvedSource;
+      const settingsOverridePath = overrideSettings?.source
+        ? expandPath(overrideSettings.source)
+        : null;
+      const overrideChanged =
+        // Case 1: persisted as non-override but settings override now exists
+        (!existing.isOverride && settingsOverridePath !== null) ||
+        // Case 2: persisted as override but settings override was removed
+        (existing.isOverride && settingsOverridePath === null) ||
+        // Case 3: persisted as override but settings override path changed
+        (existing.isOverride && settingsOverridePath !== null && existing.resolvedSource !== settingsOverridePath);
+      if (!overrideChanged) {
+        return existing.resolvedSource;
+      }
+      // Override state changed — fall through to re-resolve
     }
 
     // Branch for validated mounts (sourceMustBe is set)
@@ -197,9 +213,8 @@ export class MountPathResolver {
     const [namespace, labelPart] = label.split("/");
 
     // Check settings override
-    const overrideSettings = this.settings.mounts?.[label];
     if (overrideSettings?.source) {
-      const overridePath = overrideSettings.source;
+      const overridePath = expandPath(overrideSettings.source);
 
       // Override path must exist on disk (hard error, consistent with repoMounts)
       if (!existsSync(overridePath)) {
@@ -255,7 +270,7 @@ export class MountPathResolver {
     // 1. Check settings override
     const overrideSettings = this.settings.mounts?.[label];
     if (overrideSettings?.source) {
-      const overridePath = overrideSettings.source;
+      const overridePath = expandPath(overrideSettings.source);
       this.validateSourceType(overridePath, decl.sourceMustBe!, label, true);
       const assignment: MountAssignment = {
         label,

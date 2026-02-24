@@ -18,6 +18,7 @@ import {
   warnPrebuildPortTemplates,
   warnPrebuildPortFeaturesStaticPort,
   emitMountGuidance,
+  deduplicateStaticMounts,
 } from "../template-resolver";
 import type { LaceMountDeclaration } from "../feature-metadata";
 import { PortAllocator } from "../port-allocator";
@@ -2559,5 +2560,170 @@ describe("emitMountGuidance", () => {
     // ~ expands to homedir which exists, so should get the "exists on host" message
     expect(output).toContain("~ exists on host. Configure in settings.json to use it.");
     logSpy.mockRestore();
+  });
+
+  it("shows validated mount as file type instead of default path", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        sourceMustBe: "file",
+      },
+    };
+    emitMountGuidance(declarations, [
+      { label: "wezterm-server/authorized-keys", resolvedSource: "/home/user/.config/lace/ssh/id_ed25519.pub", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain("(file)");
+    expect(output).not.toContain("using default path");
+    logSpy.mockRestore();
+  });
+
+  it("shows validated mount as directory type", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "feature/data": {
+        target: "/data",
+        sourceMustBe: "directory",
+      },
+    };
+    emitMountGuidance(declarations, [
+      { label: "feature/data", resolvedSource: "/home/user/data", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain("(directory)");
+    expect(output).not.toContain("using default path");
+    logSpy.mockRestore();
+  });
+
+  it("does not suggest settings.json for validated mount with resolved source", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        sourceMustBe: "file",
+        recommendedSource: "~/.config/lace/ssh/id_ed25519.pub",
+      },
+    };
+    emitMountGuidance(declarations, [
+      { label: "wezterm-server/authorized-keys", resolvedSource: "/home/user/.config/lace/ssh/id_ed25519.pub", isOverride: false },
+    ]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).not.toContain("Optional:");
+    expect(output).not.toContain("To configure custom mount sources");
+    logSpy.mockRestore();
+  });
+});
+
+describe("deduplicateStaticMounts", () => {
+  it("removes static mount string when declaration has same target", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        "source=/foo,target=/bar,type=bind",
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/label": { target: "/bar" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual(["/bar"]);
+    expect((config.mounts as string[]).length).toBe(0);
+  });
+
+  it("preserves static mount when no declaration target matches", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        "source=/foo,target=/baz,type=bind",
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/label": { target: "/bar" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual([]);
+    expect((config.mounts as string[]).length).toBe(1);
+  });
+
+  it("handles ${localEnv:HOME} in static mount source correctly", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        "source=${localEnv:HOME}/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+      },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual(["/home/node/.ssh/authorized_keys"]);
+    expect((config.mounts as string[]).length).toBe(0);
+  });
+
+  it("handles object-form mounts", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        { source: "/foo", target: "/bar", type: "bind" },
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/label": { target: "/bar" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual(["/bar"]);
+    expect((config.mounts as unknown[]).length).toBe(0);
+  });
+
+  it("does not remove ${lace.mount()} templates", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        "${lace.mount(ns/label)}",
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/label": { target: "/bar" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual([]);
+    expect((config.mounts as string[]).length).toBe(1);
+  });
+
+  it("returns list of removed mount targets", () => {
+    const config: Record<string, unknown> = {
+      mounts: [
+        "source=/a,target=/bar,type=bind",
+        "source=/b,target=/baz,type=bind",
+        "source=/c,target=/qux,type=bind",
+      ],
+    };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/one": { target: "/bar" },
+      "ns/two": { target: "/qux" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual(["/bar", "/qux"]);
+    expect((config.mounts as string[]).length).toBe(1);
+    expect((config.mounts as string[])[0]).toContain("target=/baz");
+  });
+
+  it("returns empty array when mounts is undefined", () => {
+    const config: Record<string, unknown> = {};
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "ns/label": { target: "/bar" },
+    };
+    const removed = deduplicateStaticMounts(config, declarations);
+    expect(removed).toEqual([]);
+  });
+
+  it("returns empty array when no declarations have targets", () => {
+    const config: Record<string, unknown> = {
+      mounts: ["source=/foo,target=/bar,type=bind"],
+    };
+    const removed = deduplicateStaticMounts(config, {});
+    expect(removed).toEqual([]);
+    expect((config.mounts as string[]).length).toBe(1);
   });
 });

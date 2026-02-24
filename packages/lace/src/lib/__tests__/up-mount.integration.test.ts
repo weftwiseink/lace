@@ -960,6 +960,74 @@ describe("lace up: validated mount (sourceMustBe) integration", () => {
     }
   });
 
+  it("error message includes all five elements when key missing", async () => {
+    setupSettings({});
+
+    const featureWithValidatedMount: FeatureMetadata = {
+      id: "wezterm-server",
+      version: "1.2.0",
+      options: {
+        hostSshPort: { type: "string", default: "2222" },
+      },
+      customizations: {
+        lace: {
+          ports: {
+            hostSshPort: {
+              label: "wezterm ssh",
+              onAutoForward: "silent",
+              requireLocalPort: true,
+            },
+          },
+          mounts: {
+            "authorized-keys": {
+              target: "/home/node/.ssh/authorized_keys",
+              recommendedSource: join(workspaceRoot, "nonexistent-key.pub"),
+              description: "SSH public key for WezTerm SSH domain access",
+              readonly: true,
+              sourceMustBe: "file",
+              hint: "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N ''",
+            },
+          },
+        },
+      },
+    };
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        features: {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          featureWithValidatedMount,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    // All five elements present:
+    // 1. Feature name
+    expect(result.message).toContain("wezterm-server");
+    // 2. Description
+    expect(result.message).toContain("SSH public key for WezTerm SSH domain access");
+    // 3. Default path
+    expect(result.message).toContain("nonexistent-key.pub");
+    // 4. ssh-keygen hint
+    expect(result.message).toContain("ssh-keygen");
+    // 5. settings.json override example
+    expect(result.message).toContain("settings.json");
+  });
+
   it("succeeds with settings override for sourceMustBe mount", async () => {
     const overrideKeyFile = join(workspaceRoot, "override-key.pub");
     writeFileSync(overrideKeyFile, "ssh-ed25519 AAAA override@test");
@@ -1028,5 +1096,96 @@ describe("lace up: validated mount (sourceMustBe) integration", () => {
       m.includes("authorized_keys"),
     );
     expect(authKeyMount).toContain(`source=${overrideKeyFile}`);
+  });
+});
+
+// ── Mount target deduplication integration ──
+
+describe("lace up: mount target deduplication", () => {
+  it("deduplicates static mount when auto-injected declaration targets same path", async () => {
+    const keyFile = join(workspaceRoot, "test-key.pub");
+    writeFileSync(keyFile, "ssh-ed25519 AAAA test@test");
+    setupSettings({});
+
+    const featureWithMount: FeatureMetadata = {
+      id: "wezterm-server",
+      version: "1.2.0",
+      options: {
+        hostSshPort: { type: "string", default: "2222" },
+      },
+      customizations: {
+        lace: {
+          ports: {
+            hostSshPort: {
+              label: "wezterm ssh",
+              onAutoForward: "silent",
+              requireLocalPort: true,
+            },
+          },
+          mounts: {
+            "authorized-keys": {
+              target: "/home/node/.ssh/authorized_keys",
+              recommendedSource: keyFile,
+              description: "SSH public key",
+              readonly: true,
+              sourceMustBe: "file",
+            },
+          },
+        },
+      },
+    };
+
+    // Config has BOTH a static mount and the feature declaration targeting same path
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        features: {
+          "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
+        },
+        mounts: [
+          "source=${localEnv:HOME}/.ssh/old_key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
+          "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly",
+        ],
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMetadataMock({
+        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1":
+          featureWithMount,
+      }),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const mounts = extended.mounts as string[];
+
+    // The static mount targeting authorized_keys should be removed
+    const staticAuthMount = mounts.find((m: string) =>
+      m.includes("old_key.pub"),
+    );
+    expect(staticAuthMount).toBeUndefined();
+
+    // The auto-injected mount should remain
+    const autoInjectedMount = mounts.find((m: string) =>
+      m.includes(`source=${keyFile}`),
+    );
+    expect(autoInjectedMount).toBeDefined();
+    expect(autoInjectedMount).toContain("readonly");
+
+    // The unrelated wezterm.lua mount should be preserved
+    const weztermMount = mounts.find((m: string) =>
+      m.includes("wezterm.lua"),
+    );
+    expect(weztermMount).toBeDefined();
   });
 });

@@ -25,6 +25,7 @@ import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
 import {
   autoInjectPortTemplates,
   autoInjectMountTemplates,
+  deduplicateStaticMounts,
   extractProjectMountDeclarations,
   extractFeatureShortId,
   validateMountNamespaces,
@@ -306,6 +307,14 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     autoInjectMountTemplates(configForResolution, projectMountDeclarations, metadataMap);
   if (mountInjected.length > 0) {
     console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
+  }
+
+  // Step 4.5: Deduplicate static mounts that conflict with auto-injected declarations
+  const deduplicatedTargets = deduplicateStaticMounts(configForResolution, mountDeclarations);
+  if (deduplicatedTargets.length > 0) {
+    console.log(
+      `Deduplicated static mount(s) superseded by declarations: ${deduplicatedTargets.join(", ")}`,
+    );
   }
 
   // Step 5: Validate mount declarations

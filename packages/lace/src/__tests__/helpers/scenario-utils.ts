@@ -82,6 +82,31 @@ export function createScenarioWorkspace(name: string): ScenarioWorkspace {
 }
 
 /**
+ * Write a settings.json file into the workspace and set LACE_SETTINGS env var.
+ * Useful for providing mount overrides in scenario tests.
+ */
+export function setupScenarioSettings(
+  ctx: ScenarioWorkspace,
+  settings: Record<string, unknown>,
+): void {
+  const settingsDir = join(ctx.workspaceRoot, ".config", "lace");
+  mkdirSync(settingsDir, { recursive: true });
+  const settingsPath = join(settingsDir, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+  process.env.LACE_SETTINGS = settingsPath;
+}
+
+/**
+ * Create a temporary SSH key file in the workspace for validated mount tests.
+ * Returns the absolute path to the created file.
+ */
+export function createTempSshKey(ctx: ScenarioWorkspace): string {
+  const keyPath = join(ctx.workspaceRoot, "test-ssh-key.pub");
+  writeFileSync(keyPath, "ssh-ed25519 AAAA test-scenario@test\n", "utf-8");
+  return keyPath;
+}
+
+/**
  * Write a devcontainer.json file into the workspace's .devcontainer/ directory.
  */
 export function writeDevcontainerJson(

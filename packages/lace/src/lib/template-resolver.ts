@@ -389,6 +389,9 @@ export function emitMountGuidance(
     const decl = declarations[assignment.label];
     if (assignment.isOverride) {
       lines.push(`  ${assignment.label}: ${assignment.resolvedSource} (override)`);
+    } else if (decl?.sourceMustBe) {
+      // Validated mount: show as resolved file/directory, not "default path"
+      lines.push(`  ${assignment.label}: ${assignment.resolvedSource} (${decl.sourceMustBe})`);
     } else {
       lines.push(`  ${assignment.label}: using default path ${assignment.resolvedSource}`);
       if (decl?.recommendedSource) {
@@ -408,6 +411,8 @@ export function emitMountGuidance(
     (a) => {
       const decl = declarations[a.label];
       if (!decl?.recommendedSource) return false;
+      // Validated mounts handle their own resolution — don't show generic guidance
+      if (decl.sourceMustBe) return false;
       return !existsSync(expandPath(decl.recommendedSource));
     },
   );
@@ -424,6 +429,62 @@ export function emitMountGuidance(
   }
 
   console.log(lines.join("\n"));
+}
+
+/**
+ * Remove static mount strings from the config's mounts array when they
+ * conflict with auto-injected declaration targets.
+ *
+ * A "static mount" is a raw mount string (not a ${lace.mount()} template).
+ * Target extraction: parse `target=<value>` from comma-separated strings,
+ * or read `target` property from mount objects.
+ *
+ * Returns the targets of static mounts that were removed.
+ */
+export function deduplicateStaticMounts(
+  config: Record<string, unknown>,
+  declarations: Record<string, LaceMountDeclaration>,
+): string[] {
+  const mounts = config.mounts as unknown[] | undefined;
+  if (!mounts || mounts.length === 0) return [];
+
+  // Build set of declaration targets
+  const declTargets = new Set(
+    Object.values(declarations).map((d) => d.target),
+  );
+  if (declTargets.size === 0) return [];
+
+  const removed: string[] = [];
+  const kept: unknown[] = [];
+
+  for (const entry of mounts) {
+    if (typeof entry === "string") {
+      // Skip lace template entries — never deduplicate these
+      if (entry.includes("${lace.mount(")) {
+        kept.push(entry);
+        continue;
+      }
+      // Parse target from comma-separated mount string: target=<value>
+      const targetMatch = entry.match(/target=([^,]+)/);
+      if (targetMatch && declTargets.has(targetMatch[1])) {
+        removed.push(targetMatch[1]);
+        continue;
+      }
+    } else if (entry !== null && typeof entry === "object") {
+      const obj = entry as Record<string, unknown>;
+      if (typeof obj.target === "string" && declTargets.has(obj.target)) {
+        removed.push(obj.target);
+        continue;
+      }
+    }
+    kept.push(entry);
+  }
+
+  if (removed.length > 0) {
+    config.mounts = kept;
+  }
+
+  return removed;
 }
 
 /**

@@ -27,6 +27,8 @@ import {
   getSshBanner,
   stopContainer,
   cleanupWorkspaceContainers,
+  createTempSshKey,
+  setupScenarioSettings,
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
 import { execSync } from "node:child_process";
@@ -36,10 +38,20 @@ let ctx: ScenarioWorkspace;
 beforeEach(() => {
   ctx = createScenarioWorkspace("wezterm");
   clearMetadataCache(ctx.metadataCacheDir);
+
+  // wezterm-server feature now declares a validated mount for authorized-keys.
+  // Provide a temp SSH key file via settings override so the mount validation passes.
+  const keyPath = createTempSshKey(ctx);
+  setupScenarioSettings(ctx, {
+    mounts: {
+      "wezterm-server/authorized-keys": { source: keyPath },
+    },
+  });
 });
 
 afterEach(() => {
   clearMetadataCache(ctx.metadataCacheDir);
+  delete process.env.LACE_SETTINGS;
   ctx.cleanup();
 });
 

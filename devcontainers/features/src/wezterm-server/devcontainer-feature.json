@@ -1,7 +1,7 @@
 {
     "name": "Wezterm Server",
     "id": "wezterm-server",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Installs wezterm-mux-server and wezterm CLI for headless terminal multiplexing via SSH domains. Extracts binaries from platform-native packages to avoid X11/Wayland GUI dependencies.",
     "options": {
         "version": {
@@ -27,6 +27,16 @@
                     "label": "wezterm ssh",
                     "onAutoForward": "silent",
                     "requireLocalPort": true
+                }
+            },
+            "mounts": {
+                "authorized-keys": {
+                    "target": "/home/node/.ssh/authorized_keys",
+                    "recommendedSource": "~/.config/lace/ssh/id_ed25519.pub",
+                    "description": "SSH public key for WezTerm SSH domain access",
+                    "readonly": true,
+                    "sourceMustBe": "file",
+                    "hint": "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N '' && chmod 700 ~/.config/lace/ssh"
                 }
             }
         }

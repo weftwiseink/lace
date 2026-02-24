@@ -67,7 +67,7 @@
       // Without lace, set these manually (see comments at bottom of file).
       "workspace": {
         "layout": "bare-worktree",
-        "mountTarget": "/workspace"
+        "mountTarget": "/workspace/lace"
       },
       // Host-side validation: ensure required files exist before container creation.
       "validate": {

@@ -355,6 +355,42 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
   const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations);
 
+  // Step 7.5: Validate sourceMustBe declarations before template resolution
+  if (Object.keys(mountDeclarations).length > 0) {
+    const validatedMounts = Object.entries(mountDeclarations)
+      .filter(([, decl]) => decl.sourceMustBe);
+
+    if (validatedMounts.length > 0) {
+      const validationErrors: string[] = [];
+      for (const [label] of validatedMounts) {
+        try {
+          mountResolver.resolveSource(label);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (skipValidation) {
+            console.warn(
+              `Warning: ${message}\n` +
+                `  Docker will create a directory at this path, which will silently break the mount.`,
+            );
+          } else {
+            validationErrors.push(message);
+          }
+        }
+      }
+
+      if (validationErrors.length > 0) {
+        const msg = validationErrors.join("\n\n");
+        result.exitCode = 1;
+        result.message = msg;
+        result.phases.templateResolution = {
+          exitCode: 1,
+          message: `Validated mount check failed`,
+        };
+        return result;
+      }
+    }
+  }
+
   // Step 8: Resolve all templates (auto-injected + user-written)
   const portAllocator = new PortAllocator(workspaceFolder);
   try {

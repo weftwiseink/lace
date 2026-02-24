@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-server
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [ssh, mount-templates, wezterm-server, validation, ux, error-handling, devcontainer, file-mount]
 last_reviewed:
   status: accepted

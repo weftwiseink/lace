@@ -1,9 +1,6 @@
 {
   "name": "Lace Development (Worktrees)",
-  // NOTE: This devcontainer is designed to be opened from the main/ worktree.
-  // It mounts the parent directory (bare repo root) at /workspace, giving access
-  // to all worktrees. The workspaceFolder opens in /workspace/main by default.
-  // See docs/worktree_development.md for details.
+  // NOTE: docs/worktree_development.md for details.
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
@@ -15,52 +12,8 @@
     },
     "context": ".."
   },
-  // NOTE: NET_ADMIN/NET_RAW capabilities removed - were only needed for firewall
-  // See docs/reports/2026-01-18_devcontainer_firewall_analysis.md
   "runArgs": [],
-  // Hopefully work around onCreateCommand not running detatched: https://stackoverflow.com/a/34518145
-  /* There's no way around this we aare GIMPED
-  "onCreateCommand": [ "nohup", "/sculptor_setup/on_create.sh", "2>&1", ">>", "/sculptor_setup/on_create.log", "&", "sleep", "1" ],
-  */
   "customizations": {
-    "vscode": {
-      "extensions": [
-        "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode",
-        "prisma.prisma",
-        "ms-vscode.vscode-typescript-next",
-        "christian-kohler.npm-intellisense",
-        "formulahendry.auto-rename-tag",
-        "naumovs.color-highlight",
-        "oderwat.indent-rainbow",
-        "yzhang.markdown-all-in-one",
-        "anthropic.claude-code",
-        "jackiotyu.git-worktree-manager"
-      ],
-      "settings": {
-        "editor.formatOnSave": true,
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.codeActionsOnSave": {
-          "source.fixAll.eslint": "always"
-        },
-        "typescript.updateImportsOnFileMove.enabled": "always",
-        "typescript.preferences.includePackageJsonAutoImports": "on",
-        "editor.tabSize": 2,
-        "files.trimTrailingWhitespace": true,
-        "files.insertFinalNewline": true,
-        "files.trimFinalNewlines": true,
-        "claude.defaultMode": "bypassPermissions",
-        "claudeCode.allowDangerouslySkipPermissions": true,
-        "files.associations": {
-          ".claude/settings.local.json": "jsonc",
-          ".claude/settings.json": "jsonc"
-        },
-        "git.repositoryScanMaxDepth": 2
-      }
-    },
-    // Lace self-hosting: prebuild stable features into the base image layer.
-    // git and sshd are baked in via prebuild; port-declaring features (wezterm-server)
-    // stay in the features block for lace up auto-injection to work.
     "lace": {
       // Workspace layout: auto-detect bare-repo worktree and generate
       // workspaceMount/workspaceFolder/postCreateCommand (safe.directory).
@@ -106,10 +59,11 @@
       }
     }
   },
-  // Port mapping for SSH domain multiplexing. lace up resolves the template
-  // to a port in 22425-22499 range, mapping it to container port 2222 (where sshd listens).
-  // Asymmetric: host port is in lace range, container port stays at sshd default.
-  "appPort": ["${lace.port(wezterm-server/hostSshPort)}:2222"],
+  /* should auto-select
+  "appPort": [
+    "${lace.port(wezterm-server/hostSshPort)}:2222"
+  ],
+  */
   "mounts": [
     // SSH public key for WezTerm SSH domain access (host -> container)
     // One-time setup: ssh-keygen -t ed25519 -f ~/.ssh/lace_devcontainer -N ""

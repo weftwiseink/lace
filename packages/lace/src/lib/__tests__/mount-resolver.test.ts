@@ -6,6 +6,7 @@ import {
   existsSync,
   readFileSync,
   writeFileSync,
+  symlinkSync,
 } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -612,5 +613,267 @@ describe("MountPathResolver — staleness detection", () => {
     const resolver = new MountPathResolver(workspaceFolder, {});
     expect(resolver.getAssignments()).toHaveLength(1);
     expect(resolver.getAssignments()[0].resolvedSource).toBe(correctPath);
+  });
+});
+
+// ── Validated mounts (sourceMustBe) ──
+
+describe("MountPathResolver — validated mounts (sourceMustBe)", () => {
+  it("resolveSource with sourceMustBe:'file' and existing file returns path", () => {
+    const keyFile = join(testDir, "key.pub");
+    writeFileSync(keyFile, "ssh-ed25519 AAAA test@test");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: keyFile,
+        sourceMustBe: "file",
+        readonly: true,
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("wezterm-server/authorized-keys");
+    expect(result).toBe(keyFile);
+  });
+
+  it("resolveSource with sourceMustBe:'file' and missing file throws with hint", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: join(testDir, "nonexistent.pub"),
+        description: "SSH public key for WezTerm SSH domain access",
+        sourceMustBe: "file",
+        hint: "Run: ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N ''",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/wezterm-server requires file/);
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/ssh-keygen/);
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/settings\.json/);
+  });
+
+  it("resolveSource with sourceMustBe:'file' and directory at path throws type mismatch", () => {
+    const dirPath = join(testDir, "actually-a-dir");
+    mkdirSync(dirPath, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: dirPath,
+        sourceMustBe: "file",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/expected file but found directory/);
+  });
+
+  it("resolveSource with sourceMustBe:'directory' and existing directory returns path", () => {
+    const dirPath = join(testDir, "config-dir");
+    mkdirSync(dirPath, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "myns/config": {
+        target: "/app/config",
+        recommendedSource: dirPath,
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("myns/config");
+    expect(result).toBe(dirPath);
+  });
+
+  it("resolveSource with sourceMustBe:'directory' and file at path throws type mismatch", () => {
+    const filePath = join(testDir, "actually-a-file");
+    writeFileSync(filePath, "content");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "myns/config": {
+        target: "/app/config",
+        recommendedSource: filePath,
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() => resolver.resolveSource("myns/config")).toThrow(
+      /expected directory but found file/,
+    );
+  });
+
+  it("resolveSource with sourceMustBe:'file' and settings override (existing) returns override", () => {
+    const overrideFile = join(testDir, "override-key.pub");
+    writeFileSync(overrideFile, "ssh-ed25519 AAAA override@test");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: join(testDir, "default-key.pub"),
+        sourceMustBe: "file",
+      },
+    };
+    const settings: LaceSettings = {
+      mounts: {
+        "wezterm-server/authorized-keys": { source: overrideFile },
+      },
+    };
+    const resolver = new MountPathResolver(
+      workspaceFolder,
+      settings,
+      declarations,
+    );
+    const result = resolver.resolveSource("wezterm-server/authorized-keys");
+    expect(result).toBe(overrideFile);
+
+    const assignments = resolver.getAssignments();
+    expect(assignments[0].isOverride).toBe(true);
+  });
+
+  it("resolveSource with sourceMustBe:'file' and settings override (missing) throws", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: join(testDir, "default-key.pub"),
+        sourceMustBe: "file",
+      },
+    };
+    const settings: LaceSettings = {
+      mounts: {
+        "wezterm-server/authorized-keys": {
+          source: join(testDir, "nonexistent-override.pub"),
+        },
+      },
+    };
+    const resolver = new MountPathResolver(
+      workspaceFolder,
+      settings,
+      declarations,
+    );
+
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/Mount override source does not exist/);
+  });
+
+  it("resolveSource with sourceMustBe:'file' no recommendedSource no override throws", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        sourceMustBe: "file",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/has no source/);
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/settings\.json/);
+  });
+
+  it("resolveSource with sourceMustBe:'file' and symlink to file passes", () => {
+    const realFile = join(testDir, "real-key.pub");
+    writeFileSync(realFile, "ssh-ed25519 AAAA real@test");
+    const symlinkPath = join(testDir, "symlink-key.pub");
+    symlinkSync(realFile, symlinkPath);
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: symlinkPath,
+        sourceMustBe: "file",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("wezterm-server/authorized-keys");
+    expect(result).toBe(symlinkPath);
+  });
+
+  it("resolveSource with sourceMustBe:'file' and broken symlink throws", () => {
+    const symlinkPath = join(testDir, "broken-symlink.pub");
+    symlinkSync(join(testDir, "does-not-exist"), symlinkPath);
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: symlinkPath,
+        sourceMustBe: "file",
+        hint: "Run: ssh-keygen ...",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(() =>
+      resolver.resolveSource("wezterm-server/authorized-keys"),
+    ).toThrow(/requires file/);
+  });
+
+  it("resolveFullSpec with sourceMustBe:'file' returns correct mount spec", () => {
+    const keyFile = join(testDir, "key.pub");
+    writeFileSync(keyFile, "ssh-ed25519 AAAA test@test");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: keyFile,
+        sourceMustBe: "file",
+        readonly: true,
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const spec = resolver.resolveFullSpec("wezterm-server/authorized-keys");
+    expect(spec).toBe(
+      `source=${keyFile},target=/home/node/.ssh/authorized_keys,type=bind,readonly`,
+    );
+  });
+
+  it("resolveSource without sourceMustBe unchanged (auto-create directory)", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "myns/data": { target: "/data" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("myns/data");
+    expect(existsSync(result)).toBe(true);
+    expect(result).toContain("/mounts/myns/data");
+  });
+
+  it("does not call mkdirSync for validated mounts", () => {
+    const keyFile = join(testDir, "key.pub");
+    writeFileSync(keyFile, "ssh-ed25519 AAAA test@test");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "wezterm-server/authorized-keys": {
+        target: "/home/node/.ssh/authorized_keys",
+        recommendedSource: keyFile,
+        sourceMustBe: "file",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    resolver.resolveSource("wezterm-server/authorized-keys");
+
+    // The default mount path under ~/.config/lace/<projectId>/mounts should NOT exist
+    const projectId = deriveProjectId(workspaceFolder);
+    const autoCreatedPath = join(
+      homedir(),
+      ".config",
+      "lace",
+      projectId,
+      "mounts",
+      "wezterm-server",
+      "authorized-keys",
+    );
+    expect(existsSync(autoCreatedPath)).toBe(false);
   });
 });

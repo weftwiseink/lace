@@ -1,9 +1,16 @@
 // IMPLEMENTATION_VALIDATION
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { deriveProjectId } from "./repo-clones";
 import type { LaceSettings } from "./settings";
+import { expandPath } from "./settings";
 import type { LaceMountDeclaration } from "./feature-metadata";
 
 // ── Types ──
@@ -181,6 +188,12 @@ export class MountPathResolver {
       return existing.resolvedSource;
     }
 
+    // Branch for validated mounts (sourceMustBe is set)
+    const decl = this.declarations[label];
+    if (decl?.sourceMustBe) {
+      return this.resolveValidatedSource(label, decl);
+    }
+
     const [namespace, labelPart] = label.split("/");
 
     // Check settings override
@@ -228,6 +241,115 @@ export class MountPathResolver {
     };
     this.assignments.set(label, assignment);
     return defaultPath;
+  }
+
+  /**
+   * Resolve source for a validated mount (sourceMustBe is set).
+   * Uses settings override or recommendedSource instead of auto-derived path.
+   * Validates existence and type via statSync().
+   */
+  private resolveValidatedSource(
+    label: string,
+    decl: LaceMountDeclaration,
+  ): string {
+    // 1. Check settings override
+    const overrideSettings = this.settings.mounts?.[label];
+    if (overrideSettings?.source) {
+      const overridePath = overrideSettings.source;
+      this.validateSourceType(overridePath, decl.sourceMustBe!, label, true);
+      const assignment: MountAssignment = {
+        label,
+        resolvedSource: overridePath,
+        isOverride: true,
+        assignedAt: new Date().toISOString(),
+      };
+      this.assignments.set(label, assignment);
+      return overridePath;
+    }
+
+    // 2. Use recommendedSource (expanded)
+    if (decl.recommendedSource) {
+      const expandedPath = expandPath(decl.recommendedSource);
+      this.validateSourceType(
+        expandedPath,
+        decl.sourceMustBe!,
+        label,
+        false,
+        decl,
+      );
+      const assignment: MountAssignment = {
+        label,
+        resolvedSource: expandedPath,
+        isOverride: false,
+        assignedAt: new Date().toISOString(),
+      };
+      this.assignments.set(label, assignment);
+      return expandedPath;
+    }
+
+    // 3. No source available
+    throw new Error(
+      `Validated mount "${label}" has no source.\n` +
+        `  Add to ~/.config/lace/settings.json:\n` +
+        `    { "mounts": { "${label}": { "source": "/path/to/source" } } }`,
+    );
+  }
+
+  /**
+   * Validate that a path exists and matches the expected type.
+   * @throws Error with actionable guidance on failure
+   */
+  private validateSourceType(
+    path: string,
+    expectedType: "file" | "directory",
+    label: string,
+    isOverride: boolean,
+    decl?: LaceMountDeclaration,
+  ): void {
+    let stats: import("node:fs").Stats;
+    try {
+      stats = statSync(path);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isOverride) {
+          throw new Error(
+            `Mount override source does not exist for "${label}": ${path}\n` +
+              `  Create the ${expectedType} or remove the override from settings.json.`,
+          );
+        }
+        const featureName = label.split("/")[0];
+        const lines = [
+          `${featureName} requires ${expectedType}: ${path}`,
+        ];
+        if (decl?.description) {
+          lines[0] += `\n       (${decl.description})`;
+        }
+        if (decl?.hint) {
+          lines.push("", "  To create it:", `    ${decl.hint}`);
+        }
+        lines.push(
+          "",
+          "  To use a different path, add to ~/.config/lace/settings.json:",
+          `    { "mounts": { "${label}": { "source": "/path/to/your/${expectedType}" } } }`,
+        );
+        throw new Error(lines.join("\n"));
+      }
+      throw err;
+    }
+
+    const actualType = stats.isFile()
+      ? "file"
+      : stats.isDirectory()
+        ? "directory"
+        : "unknown";
+    if (
+      (expectedType === "file" && !stats.isFile()) ||
+      (expectedType === "directory" && !stats.isDirectory())
+    ) {
+      throw new Error(
+        `${label}: expected ${expectedType} but found ${actualType} at ${path}`,
+      );
+    }
   }
 
   /**

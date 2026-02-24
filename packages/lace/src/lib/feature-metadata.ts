@@ -59,7 +59,11 @@ export interface LacePortDeclaration {
 export interface LaceMountDeclaration {
   /** Container target path for this mount */
   target: string;
-  /** Suggested host source path, surfaced in config guidance (never used as actual source) */
+  /**
+   * Suggested host source path, surfaced in config guidance.
+   * When `sourceMustBe` is set, also serves as the default source path
+   * (expanded via tilde expansion) if no settings override is configured.
+   */
   recommendedSource?: string;
   /** Human-readable description */
   description?: string;
@@ -69,6 +73,15 @@ export interface LaceMountDeclaration {
   type?: string;
   /** Docker mount consistency hint (e.g., "delegated", "cached") */
   consistency?: string;
+  /**
+   * When set, the resolved source must already exist as the specified type.
+   * - "file": source must be an existing file (validated via statSync().isFile())
+   * - "directory": source must be an existing directory (validated via statSync().isDirectory())
+   * When omitted, the default behavior applies: auto-create directory via mkdirSync.
+   */
+  sourceMustBe?: "file" | "directory";
+  /** Remediation hint shown when a validated source is missing. */
+  hint?: string;
 }
 
 export interface LaceCustomizations {
@@ -596,6 +609,11 @@ export function parseMountDeclarationEntry(
     type: typeof entry.type === "string" ? entry.type : undefined,
     consistency:
       typeof entry.consistency === "string" ? entry.consistency : undefined,
+    sourceMustBe:
+      entry.sourceMustBe === "file" || entry.sourceMustBe === "directory"
+        ? entry.sourceMustBe
+        : undefined,
+    hint: typeof entry.hint === "string" ? entry.hint : undefined,
   };
 }
 

@@ -21,8 +21,9 @@ Pair with the [sshd feature](https://github.com/devcontainers/features/tree/main
   "features": {
     "ghcr.io/devcontainers/features/sshd:1": {},
     "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {}
-  },
-  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true"
+  }
+  // The feature auto-starts the mux server via its entrypoint --
+  // no postStartCommand needed.
 }
 ```
 
@@ -32,6 +33,30 @@ Pair with the [sshd feature](https://github.com/devcontainers/features/tree/main
 |--------|------|---------|-------------|
 | `version` | string | `20240203-110809-5046fc22` | WezTerm release version string. |
 | `createRuntimeDir` | boolean | `true` | Create `/run/user/<uid>` runtime directory for `wezterm-mux-server` (UID resolved from `_REMOTE_USER`). |
+
+## Workspace awareness
+
+The feature installs a static `wezterm.lua` config that reads the `CONTAINER_WORKSPACE_FOLDER` environment variable at runtime. When set, new terminal panes open in the workspace directory instead of the user's home directory.
+
+### How it works
+
+- The entrypoint script starts `wezterm-mux-server` with `--config-file /usr/local/share/wezterm-server/wezterm.lua`.
+- The config calls `os.getenv("CONTAINER_WORKSPACE_FOLDER")` and sets `config.default_cwd` if the variable is present.
+- If the variable is not set, wezterm uses its default behavior (home directory). This means the feature degrades gracefully -- everything still works, panes just open in `$HOME`.
+
+### Setting `CONTAINER_WORKSPACE_FOLDER`
+
+**With lace:** The variable is injected automatically. No user configuration needed.
+
+**Without lace:** Set the variable in your `devcontainer.json`:
+
+```jsonc
+{
+  "containerEnv": {
+    "CONTAINER_WORKSPACE_FOLDER": "${containerWorkspaceFolder}"
+  }
+}
+```
 
 ## SSH key requirement (lace)
 
@@ -77,6 +102,8 @@ This downgrades the missing-key error to a warning. Docker will auto-create a di
 
 - `/usr/local/bin/wezterm-mux-server` -- headless multiplexer daemon
 - `/usr/local/bin/wezterm` -- CLI for interacting with the mux server
+- `/usr/local/share/wezterm-server/wezterm.lua` -- workspace-aware config (reads `CONTAINER_WORKSPACE_FOLDER`)
+- `/usr/local/share/wezterm-server/entrypoint.sh` -- auto-starts mux server as the remote user
 
 Binaries are extracted from the official `.deb` package without installing GUI dependencies.
 

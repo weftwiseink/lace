@@ -27,5 +27,11 @@
                 "createRuntimeDir": false
             }
         }
+    },
+    "workspace_config": {
+        "image": "mcr.microsoft.com/devcontainers/base:debian",
+        "features": {
+            "wezterm-server": {}
+        }
     }
 }

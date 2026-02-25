@@ -1313,6 +1313,37 @@ describe("lace up: auto-injected containerEnv vars", () => {
     expect(containerEnv.LACE_PROJECT_NAME).toBeDefined();
   });
 
+  it("does not overwrite user-defined LACE_PROJECT_NAME", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        containerEnv: {
+          LACE_PROJECT_NAME: "my-custom-name",
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    expect(containerEnv.LACE_PROJECT_NAME).toBe("my-custom-name");
+  });
+
   it("preserves existing containerEnv entries alongside injected vars", async () => {
     trackProjectMountsDir(workspaceRoot);
     setupSettings({});

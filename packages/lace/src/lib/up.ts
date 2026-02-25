@@ -745,7 +745,7 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
     typeof extended.workspaceFolder === "string" &&
     !containerEnv.CONTAINER_WORKSPACE_FOLDER
   ) {
-    containerEnv.CONTAINER_WORKSPACE_FOLDER = extended.workspaceFolder as string;
+    containerEnv.CONTAINER_WORKSPACE_FOLDER = extended.workspaceFolder;
   }
   if (options.projectName && !containerEnv.LACE_PROJECT_NAME) {
     containerEnv.LACE_PROJECT_NAME = options.projectName;

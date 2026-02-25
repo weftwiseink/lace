@@ -10,8 +10,8 @@ tags: [wezterm-server, devcontainer, workspace, mux-server, entrypoint, containe
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"
-  at: 2026-02-25T21:45:00-06:00
-  round: 4
+  at: 2026-02-25T22:15:00-06:00
+  round: 5
 related_to:
   - cdocs/reports/2026-02-25-wezterm-workspace-awareness-research.md
   - cdocs/reports/2026-02-25-devcontainer-wezterm-lua-investigation.md

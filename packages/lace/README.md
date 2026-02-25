@@ -28,14 +28,16 @@ The main command. Runs the full orchestration pipeline:
 2. Run host-side validation checks (if `validate` configured)
 3. Fetch and validate feature metadata from OCI registries
 4. Auto-inject `${lace.port()}` and `${lace.mount()}` templates from declarations
-5. Validate mount declarations (namespaces, target conflicts)
-6. Resolve all templates (port allocation, mount path resolution)
-7. Warn about bind-mount sources that do not exist on the host
-8. Emit guided configuration for unconfigured mounts
-9. Prebuild features (if `prebuildFeatures` configured)
-10. Resolve repo mounts (if `repoMounts` configured)
-11. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
-12. Invoke `devcontainer up`
+5. Deduplicate static mounts superseded by declarations (same container target)
+6. Validate mount declarations (namespaces, target conflicts)
+7. Validate `sourceMustBe` mount declarations (file/directory existence checks)
+8. Resolve all templates (port allocation, mount path resolution)
+9. Warn about bind-mount sources that do not exist on the host
+10. Emit guided configuration for unconfigured mounts
+11. Prebuild features (if `prebuildFeatures` configured)
+12. Resolve repo mounts (if `repoMounts` configured)
+13. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
+14. Invoke `devcontainer up`
 
 ```sh
 lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation] [--skip-validation]
@@ -46,7 +48,7 @@ lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation] [-
 | `--workspace-folder <path>` | Workspace folder (defaults to cwd). |
 | `--no-cache` | Bypass filesystem cache for floating feature tags (pinned versions still use cache). |
 | `--skip-metadata-validation` | Skip feature metadata fetch/validation entirely (offline/emergency). |
-| `--skip-validation` | Downgrade host-side validation errors to warnings (workspace layout mismatches and `fileExists` checks). |
+| `--skip-validation` | Downgrade host-side validation errors to warnings (workspace layout mismatches, `fileExists` checks, and `sourceMustBe` mount validation). |
 
 Any unrecognized flags are passed through to `devcontainer up`.
 
@@ -215,17 +217,45 @@ Declaration fields:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `target` | Yes | Container target path |
-| `recommendedSource` | No | Suggested host path, shown in guided config (never used as actual source) |
+| `recommendedSource` | No | Suggested host path, shown in guided config. For validated mounts (`sourceMustBe` set), also used as the default source path when no settings override is configured. |
 | `description` | No | Human-readable description |
 | `readonly` | No | Mount as read-only (default: false) |
 | `type` | No | Docker mount type (default: `"bind"`) |
 | `consistency` | No | Docker consistency hint (`"delegated"`, `"cached"`) |
+| `sourceMustBe` | No | `"file"` or `"directory"`. When set, the resolved source must already exist as the specified type. Validation runs before template resolution; failure aborts `lace up` with an actionable error. See [Validated mounts](#validated-mounts). |
+| `hint` | No | Remediation command shown when a validated source is missing (e.g., `"Run: ssh-keygen ..."`) |
 
 ### Auto-injection
 
 Declared mounts are auto-injected into the `mounts` array as `${lace.mount(ns/label)}` entries. If a declaration's label already appears in the mounts array in any accessor form, injection is suppressed — the user's explicit entry controls placement.
 
 Both regular features and prebuild features participate in auto-injection. Mounts are runtime config (`docker run` flags), so there is no build/runtime lifecycle asymmetry as there is with ports.
+
+### Validated mounts
+
+When a mount declaration sets `sourceMustBe`, lace validates that the source path exists and is the correct type (file or directory) **before** template resolution. This catches missing prerequisites early with actionable error messages instead of letting Docker silently auto-create an empty directory in their place.
+
+Validated mounts follow a different resolution path than regular mounts:
+
+1. **Settings override** (`settings.json`): used if configured. Must exist and match the expected type.
+2. **`recommendedSource`**: used as the actual source (expanded via tilde). Must exist and match the expected type.
+3. **No source available**: error with guidance to configure one in settings.
+
+This differs from regular mounts, which fall back to an auto-created default directory under `~/.config/lace/`. Validated mounts never auto-create -- the source must already exist.
+
+When validation fails, the error message includes:
+- The feature name and required type (`wezterm-server requires file: ~/.config/lace/ssh/id_ed25519.pub`)
+- The declaration's `description` (if set)
+- The `hint` field as a remediation command (if set)
+- Guidance on how to override the path via `settings.json`
+
+The `--skip-validation` flag downgrades validated-mount errors to warnings. Lace continues but prints a warning that Docker will create a directory at the expected path, which silently breaks file mounts.
+
+### Mount target deduplication
+
+When a mount declaration and a static mount string in the `mounts` array share the same container target path, lace removes the static mount. This prevents Docker bind-mount conflicts when a feature adds a mount declaration for a target that previously required a manual static mount entry.
+
+Deduplication only removes plain mount strings -- `${lace.mount()}` template entries are never removed. This runs automatically before template resolution.
 
 ### Source resolution
 
@@ -234,9 +264,11 @@ The host source path for each mount is resolved in this order:
 1. **Settings override**: `settings.json` → `mounts["ns/label"].source` (must exist on disk; hard error if missing)
 2. **Default path**: `~/.config/lace/<projectId>/mounts/<namespace>/<label>` (auto-created)
 
-Features declare mount _needs_ (a target path), not mount _sources_ (host directories). The actual source is always user-controlled: either an explicit settings override or a lace-managed empty default. This prevents features from silently mounting arbitrary host directories.
+Features declare mount _needs_ (a target path), not mount _sources_ (host directories). For regular mounts (no `sourceMustBe`), the actual source is always user-controlled: either an explicit settings override or a lace-managed empty default. This prevents features from silently mounting arbitrary host directories.
 
-The `recommendedSource` field is guidance only — it appears in console output to help users configure their settings, but is never used as an actual mount source path.
+The `recommendedSource` field serves two roles depending on `sourceMustBe`:
+- **Without `sourceMustBe`**: guidance only -- appears in console output to help users configure their settings, but is never used as an actual mount source path.
+- **With `sourceMustBe`**: used as the actual source path (after tilde expansion) when no settings override is configured. The source must already exist and match the expected type.
 
 ### Guided configuration
 
@@ -244,9 +276,10 @@ When mounts resolve to default paths (no settings override), `lace up` prints gu
 
 ```
 Mount configuration:
+  wezterm-server/authorized-keys: /home/user/.config/lace/ssh/id_ed25519.pub (file)
   project/bash-history: using default path /home/user/.config/lace/myproject/mounts/project/bash-history
   project/claude-config: using default path /home/user/.config/lace/myproject/mounts/project/claude-config
-    → Recommended: configure source to ~/.claude in settings.json
+    → Optional: configure source to ~/.claude in settings.json
 
 To configure custom mount sources, add to ~/.config/lace/settings.json:
 {
@@ -255,6 +288,8 @@ To configure custom mount sources, add to ~/.config/lace/settings.json:
   }
 }
 ```
+
+Validated mounts (those with `sourceMustBe`) are shown with their type annotation -- `(file)` or `(directory)` -- and are excluded from the generic settings.json hint since they handle their own resolution.
 
 The `→ Recommended` line appears only when a declaration includes `recommendedSource` — a hint from the feature or project author about where the mount _should_ point (e.g., `~/.claude` for Claude config). Without a settings override, the mount still works but uses an empty auto-created directory, which may not have the data the feature expects.
 
@@ -267,6 +302,7 @@ Lace validates mount declarations before resolution:
 - **Namespace validation**: each label's namespace must be `project` or a known feature short ID. Unknown namespaces produce a hard error.
 - **Target conflict detection**: no two declarations may share the same container target path.
 - **Declaration existence**: referencing an undeclared label (e.g., `${lace.mount(project/unknown)}`) fails with an error listing available labels.
+- **Source type validation**: declarations with `sourceMustBe` are checked before template resolution. The resolved source (from settings override or `recommendedSource`) must exist and match the declared type. See [Validated mounts](#validated-mounts).
 
 ### Settings
 
@@ -326,7 +362,7 @@ Override paths must exist on disk. Tilde (`~`) is expanded to the user's home di
 
 > NOTE: Lace does not currently detect overlapping mount paths (e.g., `/home/node` and `/home/node/.claude`). If ordering matters, write explicit `${lace.mount()}` entries to control placement.
 
-> NOTE: Only directory mounts are supported as lace declarations. When a mount resolves to a default path (no settings override), lace auto-creates the source as a directory via `mkdir -p`. This means individual file mounts — like SSH public keys or config files that must exist as files, not directories — cannot use the declaration system. Keep these as plain mount strings in the `mounts` array (e.g., `"source=${localEnv:HOME}/.ssh/key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly"`).
+> NOTE: Regular mount declarations (without `sourceMustBe`) auto-create the source as a directory via `mkdir -p`, so they only support directory mounts. For file mounts -- like SSH public keys or config files that must exist as files, not directories -- use `sourceMustBe: "file"` in the declaration. This validates the source exists as a file instead of auto-creating a directory. See [Validated mounts](#validated-mounts).
 
 > NOTE: Multi-project mount sharing is not first-class. Two projects declaring `project/bash-history` get isolated directories (different project IDs). Share by pointing both to the same path via settings overrides.
 
@@ -549,7 +585,7 @@ This runs automatically after template resolution with no configuration needed.
 
 ### `--skip-validation`
 
-The `--skip-validation` flag downgrades all `severity: "error"` checks to warnings, allowing `lace up` to proceed despite validation failures. Workspace layout detection still runs (it generates config, not just validates) but layout mismatches become warnings instead of errors.
+The `--skip-validation` flag downgrades all `severity: "error"` checks to warnings, allowing `lace up` to proceed despite validation failures. This applies to `fileExists` checks, workspace layout mismatches (detection still runs since it generates config), and `sourceMustBe` mount validation. For validated mounts, the warning notes that Docker will auto-create a directory at the expected path, which silently breaks file mounts.
 
 ```sh
 lace up --skip-validation
@@ -591,6 +627,7 @@ Lace stores data in three locations: a per-project `.lace/` directory, a user-le
 ```
 ~/.config/lace/
   settings.json                          # User settings (JSONC, manually created)
+  ssh/                                   # SSH keys for devcontainer access (user-created)
   cache/features/<encoded-id>.json       # OCI feature metadata cache
   <project-id>/repos/<name-or-alias>/    # Shallow git clones for repo mounts
   <project-id>/mounts/<ns>/<label>/      # Default mount source directories

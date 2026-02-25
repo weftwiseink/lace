@@ -12,7 +12,6 @@
     },
     "context": ".."
   },
-  "runArgs": [],
   "customizations": {
     "lace": {
       // Workspace layout: auto-detect bare-repo worktree and generate
@@ -23,8 +22,9 @@
         "mountTarget": "/workspace/lace"
       },
       // Mount declarations: lace resolves host source paths from settings or defaults.
-      // project/bash-history and project/claude-config are auto-injected into the
-      // mounts array during lace up. Configure custom source paths in settings.json:
+      // These plus wezterm-server/authorized-keys (from feature metadata) are
+      // auto-injected into the mounts array during lace up.
+      // Configure custom source paths in ~/.config/lace/settings.json:
       //   { "mounts": { "project/claude-config": { "source": "~/.claude" } } }
       "mounts": {
         "bash-history": {

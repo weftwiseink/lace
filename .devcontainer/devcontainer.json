@@ -22,16 +22,6 @@
         "layout": "bare-worktree",
         "mountTarget": "/workspace/lace"
       },
-      // Host-side validation: ensure required files exist before container creation.
-      "validate": {
-        "fileExists": [
-          {
-            "path": "~/.config/lace/ssh/id_ed25519.pub",
-            "severity": "error",
-            "hint": "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N '' && chmod 700 ~/.config/lace/ssh"
-          }
-        ]
-      },
       // Mount declarations: lace resolves host source paths from settings or defaults.
       // project/bash-history and project/claude-config are auto-injected into the
       // mounts array during lace up. Configure custom source paths in settings.json:
@@ -59,20 +49,12 @@
       }
     }
   },
-  /* should auto-select
-  "appPort": [
-    "${lace.port(wezterm-server/hostSshPort)}:2222"
-  ],
-  */
   "mounts": [
-    // SSH public key for WezTerm SSH domain access (host -> container)
-    // One-time setup: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N "" && chmod 700 ~/.config/lace/ssh
-    "source=${localEnv:HOME}/.config/lace/ssh/id_ed25519.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
     // Container-side wezterm config for mux server (sets default_cwd)
     // Bind mount instead of Dockerfile COPY so changes take effect without rebuild
     "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly"
-    // project/bash-history and project/claude-config are auto-injected from
-    // customizations.lace.mounts declarations above
+    // wezterm-server/authorized-keys, project/bash-history, and project/claude-config
+    // are auto-injected from feature metadata and customizations.lace.mounts declarations
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",

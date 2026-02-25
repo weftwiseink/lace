@@ -1144,7 +1144,6 @@ describe("lace up: mount target deduplication", () => {
         },
         mounts: [
           "source=${localEnv:HOME}/.ssh/old_key.pub,target=/home/node/.ssh/authorized_keys,type=bind,readonly",
-          "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly",
         ],
       },
       null,
@@ -1182,11 +1181,6 @@ describe("lace up: mount target deduplication", () => {
     expect(autoInjectedMount).toBeDefined();
     expect(autoInjectedMount).toContain("readonly");
 
-    // The unrelated wezterm.lua mount should be preserved
-    const weztermMount = mounts.find((m: string) =>
-      m.includes("wezterm.lua"),
-    );
-    expect(weztermMount).toBeDefined();
   });
 });
 

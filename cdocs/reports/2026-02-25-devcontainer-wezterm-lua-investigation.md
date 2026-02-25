@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-25T12:00:00-06:00
 task_list: lace/wezterm-server
 type: report
-state: live
+state: archived
 status: review_ready
 tags: [investigation, wezterm, devcontainer, wezterm-server, mux-server, config, cleanup]
 related_to:
@@ -12,6 +12,12 @@ related_to:
   - cdocs/proposals/2026-02-09-lace-devcontainer-self-hosting.md
   - cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md
 ---
+
+> **NOTE:** This investigation's findings led to the workspace-awareness implementation
+> in the wezterm-server feature. The feature now handles `default_cwd` dynamically via
+> `CONTAINER_WORKSPACE_FOLDER` env var and auto-starts the mux server via its entrypoint
+> script, eliminating the need for the per-project `.devcontainer/wezterm.lua` and
+> `postStartCommand`. The static file and its infrastructure were removed in Phase 3.
 
 # Investigation: Is `.devcontainer/wezterm.lua` Vestigial?
 

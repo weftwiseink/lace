@@ -97,12 +97,6 @@ RUN mkdir -p /home/${USERNAME}/.ssh && \
     chmod 700 /home/${USERNAME}/.ssh && \
     chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
 
-# Set up wezterm config directory for bind-mounted wezterm.lua
-# NOTE: The wezterm.lua file itself is delivered via bind mount in devcontainer.json
-# (not COPY) so changes take effect without rebuilding the container.
-RUN mkdir -p /home/${USERNAME}/.config/wezterm && \
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.config
-
 # Enable passwordless sudo for container user.
 # Required by devcontainer features (e.g. sshd) whose init scripts use `sudo` at runtime.
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \

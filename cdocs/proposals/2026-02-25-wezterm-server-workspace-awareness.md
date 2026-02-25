@@ -5,13 +5,13 @@ first_authored:
 task_list: lace/wezterm-server
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [wezterm-server, devcontainer, workspace, mux-server, entrypoint, containerEnv, dx, cleanup]
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"
-  at: 2026-02-25T20:00:00-06:00
-  round: 3
+  at: 2026-02-25T21:45:00-06:00
+  round: 4
 related_to:
   - cdocs/reports/2026-02-25-wezterm-workspace-awareness-research.md
   - cdocs/reports/2026-02-25-devcontainer-wezterm-lua-investigation.md

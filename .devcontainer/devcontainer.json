@@ -50,9 +50,6 @@
     }
   },
   "mounts": [
-    // Container-side wezterm config for mux server (sets default_cwd)
-    // Bind mount instead of Dockerfile COPY so changes take effect without rebuild
-    "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly"
     // wezterm-server/authorized-keys, project/bash-history, and project/claude-config
     // are auto-injected from feature metadata and customizations.lace.mounts declarations
   ],
@@ -66,6 +63,4 @@
   // "workspaceMount": "source=${localWorkspaceFolder}/..,target=/workspace,type=bind,consistency=delegated",
   // "workspaceFolder": "/workspace/main",
   // "postCreateCommand": "git config --global --add safe.directory '*'",
-  // Start wezterm mux daemon for SSH domain multiplexing (sshd is started by the sshd feature)
-  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true"
 }

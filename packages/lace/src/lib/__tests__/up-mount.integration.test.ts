@@ -1189,3 +1189,174 @@ describe("lace up: mount target deduplication", () => {
     expect(weztermMount).toBeDefined();
   });
 });
+
+// ── Auto-injected containerEnv vars ──
+
+describe("lace up: auto-injected containerEnv vars", () => {
+  it("injects CONTAINER_WORKSPACE_FOLDER from workspaceFolder", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        workspaceFolder: "/workspaces/my-project/main",
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    expect(containerEnv.CONTAINER_WORKSPACE_FOLDER).toBe(
+      "/workspaces/my-project/main",
+    );
+  });
+
+  it("injects LACE_PROJECT_NAME from derived project name", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    // Project name is derived from workspaceRoot basename
+    const expectedName = workspaceRoot.split("/").pop()!;
+    expect(containerEnv.LACE_PROJECT_NAME).toBe(expectedName);
+  });
+
+  it("does not overwrite user-defined CONTAINER_WORKSPACE_FOLDER", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        workspaceFolder: "/workspaces/my-project/main",
+        containerEnv: {
+          CONTAINER_WORKSPACE_FOLDER: "/custom/path",
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    // User's value should be preserved, not overwritten
+    expect(containerEnv.CONTAINER_WORKSPACE_FOLDER).toBe("/custom/path");
+  });
+
+  it("does not inject CONTAINER_WORKSPACE_FOLDER when workspaceFolder absent", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    // Image-only config with no workspaceFolder property
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    // No workspaceFolder in config => CONTAINER_WORKSPACE_FOLDER should not be set
+    expect(containerEnv.CONTAINER_WORKSPACE_FOLDER).toBeUndefined();
+    // LACE_PROJECT_NAME should still be injected
+    expect(containerEnv.LACE_PROJECT_NAME).toBeDefined();
+  });
+
+  it("preserves existing containerEnv entries alongside injected vars", async () => {
+    trackProjectMountsDir(workspaceRoot);
+    setupSettings({});
+
+    const config = JSON.stringify(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        workspaceFolder: "/workspaces/my-project",
+        containerEnv: {
+          MY_CUSTOM_VAR: "custom-value",
+          ANOTHER_VAR: "another-value",
+        },
+      },
+      null,
+      2,
+    );
+    setupWorkspace(config);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    );
+    const containerEnv = extended.containerEnv as Record<string, string>;
+    // Existing entries preserved
+    expect(containerEnv.MY_CUSTOM_VAR).toBe("custom-value");
+    expect(containerEnv.ANOTHER_VAR).toBe("another-value");
+    // Injected vars present
+    expect(containerEnv.CONTAINER_WORKSPACE_FOLDER).toBe(
+      "/workspaces/my-project",
+    );
+    const expectedName = workspaceRoot.split("/").pop()!;
+    expect(containerEnv.LACE_PROJECT_NAME).toBe(expectedName);
+  });
+});

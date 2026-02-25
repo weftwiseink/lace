@@ -737,6 +737,21 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
     extended.runArgs = runArgs;
   }
 
+  // Auto-inject standard container env vars for feature workspace awareness.
+  // These are universally useful and have no downside. User-defined values
+  // take precedence (no overwrite).
+  const containerEnv = (extended.containerEnv ?? {}) as Record<string, string>;
+  if (
+    typeof extended.workspaceFolder === "string" &&
+    !containerEnv.CONTAINER_WORKSPACE_FOLDER
+  ) {
+    containerEnv.CONTAINER_WORKSPACE_FOLDER = extended.workspaceFolder as string;
+  }
+  if (options.projectName && !containerEnv.LACE_PROJECT_NAME) {
+    containerEnv.LACE_PROJECT_NAME = options.projectName;
+  }
+  extended.containerEnv = containerEnv;
+
   // Write extended config
   mkdirSync(laceDir, { recursive: true });
 

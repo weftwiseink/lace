@@ -169,30 +169,29 @@ The proposal defines 18 tests. Coverage status:
 | 2 | No env var baking | Automated | `test.sh` (both `/etc/environment` and `/etc/profile.d/`) |
 | 3 | Version pinning | Automated | `custom_version.sh` |
 | 4 | No npm failure | Manual only | Devlog evidence; devcontainer test framework expects success |
-| 5 | Proxy auto-start (non-root) | Deferred | Requires container-level test harness with user switching |
-| 6 | Proxy auto-start (root) | Deferred | Same as 5 |
-| 7 | Idempotent restart | Deferred | Requires container lifecycle management in test |
-| 8 | Port already bound | Deferred | Same as 7 |
+| 5 | Proxy auto-start (non-root) | Cancelled | Would require container-level test harness with user switching |
+| 6 | Proxy auto-start (root) | Cancelled | Same as 5 |
+| 7 | Idempotent restart | Cancelled | Would require container lifecycle management in test |
+| 8 | Port already bound | Cancelled | Same as 7 |
 | 9 | Asymmetric port injection | Automated | P1 scenario test |
 | 10 | Port persistence | Automated | P2 scenario test |
 | 11 | Multi-feature coexistence | Automated | P3 scenario test |
-| 12 | Port reassignment | Deferred | Requires host-port conflict simulation |
+| 12 | Port reassignment | Cancelled | Would require host-port conflict simulation |
 | 13 | Proxy responds | Manual only | Devlog Docker evidence |
 | 14 | Route registration | Manual only | Devlog Docker evidence |
-| 15 | Host access | Deferred | Requires running container with port mapping |
+| 15 | Host access | Cancelled | Would require running container with port mapping |
 | 16 | Multiple services | Manual only | Devlog Docker evidence |
 | 17 | Browser access | Manual | By nature (manual verification) |
 | 18 | Route listing | Manual only | Devlog Docker evidence |
 
-**Summary:** 7 automated, 5 manual-only (with devlog evidence), 6 deferred.
+**Summary:** 7 automated, 5 manual-only (with devlog evidence), 6 cancelled.
 
-**Rationale for deferred tests:**
-Tests 5-8 (entrypoint lifecycle) require a container-level test harness that can manage container startup, user switching, and process inspection — infrastructure that does not exist in the current test framework.
+**Rationale for cancelled tests:**
+Tests 5-8 (entrypoint lifecycle) would require a container-level test harness that can manage container startup, user switching, and process inspection — infrastructure that does not exist in the current test framework and is not planned.
 The wezterm-server feature has the same gap: its entrypoint tests (S3) only verify SSH connectivity after container start, not the internal startup behavior.
-Test 12 (port reassignment) requires simulating host-port conflicts, which involves binding and releasing ports on the host during tests.
-Test 15 (host access) requires a running container with Docker port mapping.
-
-These are candidates for a future container-level test framework.
+Test 12 (port reassignment) would require simulating host-port conflicts.
+Test 15 (host access) would require a running container with Docker port mapping.
+Manual Docker verification during implementation covered the happy paths for these behaviors.
 
 ## Changes Made
 

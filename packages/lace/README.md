@@ -406,6 +406,85 @@ Rules:
 
 The prebuild image is tagged `lace.local/<base-image>` and stored in the local Docker daemon only. After building, lace rewrites the Dockerfile FROM or `image` field to point at it. Use `lace restore` before committing to revert the rewrite.
 
+## Portless (localhost subdomain routing)
+
+The portless devcontainer feature gives each dev server a stable `{name}.localhost` URL inside lace-managed containers. This eliminates port conflicts when running multiple services across worktrees.
+
+### Setup
+
+Add portless to `prebuildFeatures` in your devcontainer.json:
+
+```jsonc
+{
+  "image": "node:24-bookworm",
+  // Suppress VS Code auto-forward notifications for portless's internal app ports.
+  "portsAttributes": {
+    "4000-4999": { "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "lace": {
+      "workspace": { "layout": "bare-worktree" },
+      "prebuildFeatures": {
+        "ghcr.io/weft/devcontainer-features/portless:0": {}
+      }
+    }
+  }
+}
+```
+
+Lace allocates a host port and maps asymmetrically to portless's default port 1355 inside the container (e.g., `22435:1355`).
+
+### Usage
+
+Start services through portless using the `{service}.{worktree}` naming convention:
+
+```sh
+# In worktree: /workspace/main
+portless web.main next dev
+# → http://web.main.localhost:22435
+
+# In worktree: /workspace/add-websockets
+portless web.add-websockets next dev
+# → http://web.add-websockets.localhost:22435
+```
+
+Portless auto-starts the proxy, allocates an internal port for your app, and registers the `{name}.localhost` route. The `PORT` and `HOST` env vars are injected into the child process.
+
+### Naming convention
+
+| Worktree | Service | Name | URL |
+|----------|---------|------|-----|
+| main | web | `web.main` | `http://web.main.localhost:22435` |
+| main | api | `api.main` | `http://api.main.localhost:22435` |
+| main | (default) | `main` | `http://main.localhost:22435` |
+| add-websockets | web | `web.add-websockets` | `http://web.add-websockets.localhost:22435` |
+
+For single-service worktrees, the service prefix can be omitted: just `{worktree}`.
+
+### URL access patterns
+
+| Setup | URL pattern | Requirements |
+|-------|-------------|--------------|
+| Feature + lace | `http://web.main.localhost:22435` | Add the feature to prebuildFeatures |
+| Feature, no lace | `http://web.main.localhost:1355` | Manual port forwarding for 1355 |
+| No feature | `http://localhost:3000` | Raw dev server (port conflicts across worktrees) |
+
+### How it works
+
+Portless runs its proxy on port 1355 (default) inside the container. Lace allocates a host port from the 22425-22499 range and creates an asymmetric Docker mapping (e.g., `22435:1355`). The `*.localhost` domain resolves to `127.0.0.1` via RFC 6761 / nss-myhostname on Linux.
+
+No lace core changes are needed -- the existing prebuild features pipeline handles asymmetric port injection automatically.
+
+### Troubleshooting
+
+If the portless proxy is running but no traffic arrives:
+
+- **Docker port mapping**: `docker port <container>` -- verify the asymmetric mapping exists
+- **Host DNS**: `getent hosts web.main.localhost` -- must resolve to `127.0.0.1`
+- **Portless routes**: `portless list` inside the container -- verify the route is registered
+- **Proxy status**: `curl -sf http://localhost:1355/` inside the container -- should return HTTP 404 (no routes match)
+- **Host access**: `curl -H "Host: web.main.localhost" http://localhost:22435/` -- bypasses DNS
+
 ## Repo mounts
 
 Declare repos to clone and mount into the container:

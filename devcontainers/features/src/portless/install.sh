@@ -30,11 +30,12 @@ cat > "$FEATURE_DIR/entrypoint.sh" << ENTRYPOINT
 #!/bin/sh
 # Auto-start portless proxy daemon on default port 1355.
 # Lace maps this asymmetrically (e.g., 22435:1355) via appPort.
+# portless proxy start daemonizes itself — no trailing & needed.
 if command -v portless >/dev/null 2>&1; then
     if [ "\$(id -u)" = "0" ] && [ "${_REMOTE_USER}" != "root" ]; then
-        su -c "portless proxy 2>/dev/null || true" ${_REMOTE_USER} &
+        su -c "portless proxy start 2>/dev/null || true" ${_REMOTE_USER}
     else
-        portless proxy 2>/dev/null || true &
+        portless proxy start 2>/dev/null || true
     fi
 fi
 ENTRYPOINT

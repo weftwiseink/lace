@@ -44,13 +44,20 @@ extended.containerEnv = containerEnv;
 
 Key observations:
 
-1. **Source value correctness:** `CONTAINER_WORKSPACE_FOLDER` reads from `extended.workspaceFolder`, which is the devcontainer.json property (container-side path like `/workspace/lace/main`), NOT from `options.workspaceFolder` (host-side path). This is correct: the env var is consumed inside the container.
+1. **Source value correctness:** `CONTAINER_WORKSPACE_FOLDER` reads from `extended.workspaceFolder`, which is the devcontainer.json property (container-side path like `/workspace/lace/main`), NOT from `options.workspaceFolder` (host-side path).
+   This is correct: the env var is consumed inside the container.
 
-2. **Precedence logic:** Both variables use `!containerEnv.VAR` guards, meaning user-defined values in the source `devcontainer.json` take precedence. This is the correct "don't overwrite" semantic described in the proposal's D4 decision.
+2. **Precedence logic:** Both variables use `!containerEnv.VAR` guards, meaning user-defined values in the source `devcontainer.json` take precedence.
+   This is the correct "don't overwrite" semantic described in the proposal's D4 decision.
 
-3. **`typeof` guard on `workspaceFolder`:** The `typeof extended.workspaceFolder === "string"` check handles the case where no workspace layout is configured and the user's config has no `workspaceFolder` property. Without workspace layout, `applyWorkspaceLayout` returns "skipped" and the property stays undefined. The check correctly prevents injecting `"undefined"` as a string.
+3. **`typeof` guard on `workspaceFolder`:** The `typeof extended.workspaceFolder === "string"` check handles the case where no workspace layout is configured and the user's config has no `workspaceFolder` property.
+   Without workspace layout, `applyWorkspaceLayout` returns "skipped" and the property stays undefined.
+   The check correctly prevents injecting `"undefined"` as a string.
 
-4. **Unconditional assignment to `extended.containerEnv`:** Even when no env vars are injected, `extended.containerEnv = containerEnv` is executed. If the original config had no `containerEnv`, this creates an empty `{}` object. This is harmless: the devcontainer CLI treats `"containerEnv": {}` the same as an absent field. The `LACE_PROJECT_NAME` injection will populate it in nearly all cases anyway (since `projectName` is always derived).
+4. **Unconditional assignment to `extended.containerEnv`:** Even when no env vars are injected, `extended.containerEnv = containerEnv` is executed.
+   If the original config had no `containerEnv`, this creates an empty `{}` object.
+   This is harmless: the devcontainer CLI treats `"containerEnv": {}` the same as an absent field.
+   The `LACE_PROJECT_NAME` injection will populate it in nearly all cases anyway (since `projectName` is always derived).
 
 5. **Redundant `as string` cast on line 748:** `extended.workspaceFolder as string` is cast despite the `typeof` guard already narrowing the type. This is cosmetic and has no runtime impact.
 
@@ -112,14 +119,16 @@ The test now focuses solely on SSH authorized_keys mount deduplication, which is
 
 Grepping for `wezterm.lua` across the repository in active source files (`*.ts`, `*.json`):
 - No hits in `.devcontainer/`, `packages/lace/src/`, or any `devcontainer.json`.
-- Remaining references are exclusively in `cdocs/` documents (proposals, devlogs, reports, reviews), `overview_and_quickstart.md`, and the feature's own `README.md`. These are documentation of historical context or the feature itself, not functional references.
+- Remaining references are exclusively in `cdocs/` documents (proposals, devlogs, reports, reviews), `overview_and_quickstart.md`, and the feature's own `README.md`.
+  These are documentation of historical context or the feature itself, not functional references.
 - The feature `README.md` correctly references the new `/usr/local/share/wezterm-server/wezterm.lua` path (feature-owned, not project-specific).
 
 **Finding: correct.** No orphaned functional references.
 
 ### Devlog completeness
 
-The devlog (`cdocs/devlogs/2026-02-25-wezterm-server-workspace-awareness-implementation.md`) has empty "Changes Made" and "Verification" sections. This is a process gap: the devlog should serve as the single source of truth for what was changed and how it was verified.
+The devlog (`cdocs/devlogs/2026-02-25-wezterm-server-workspace-awareness-implementation.md`) has empty "Changes Made" and "Verification" sections.
+This is a process gap: the devlog should serve as the single source of truth for what was changed and how it was verified.
 
 **Finding: non-blocking.** The devlog should be updated to record the actual file changes from all three phases and the verification commands that were run.
 

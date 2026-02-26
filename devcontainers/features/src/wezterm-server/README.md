@@ -1,6 +1,7 @@
 # Wezterm Server (wezterm-server)
 
-Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains. Extracts binaries from platform-native packages to avoid X11/Wayland GUI dependencies.
+Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains.
+Extracts binaries from platform-native packages to avoid X11/Wayland GUI dependencies.
 
 ## Usage
 
@@ -36,13 +37,14 @@ Pair with the [sshd feature](https://github.com/devcontainers/features/tree/main
 
 ## Workspace awareness
 
-The feature installs a static `wezterm.lua` config that reads the `CONTAINER_WORKSPACE_FOLDER` environment variable at runtime. When set, new terminal panes open in the workspace directory instead of the user's home directory.
+The feature installs a static `wezterm.lua` config that reads the `CONTAINER_WORKSPACE_FOLDER` environment variable at runtime.
+When set, new terminal panes open in the workspace directory instead of the user's home directory.
 
 ### How it works
 
 - The entrypoint script starts `wezterm-mux-server` with `--config-file /usr/local/share/wezterm-server/wezterm.lua`.
 - The config calls `os.getenv("CONTAINER_WORKSPACE_FOLDER")` and sets `config.default_cwd` if the variable is present.
-- If the variable is not set, wezterm uses its default behavior (home directory). This means the feature degrades gracefully -- everything still works, panes just open in `$HOME`.
+- If the variable is not set, wezterm uses its default behavior (home directory). This means the feature degrades gracefully: everything still works, panes just open in `$HOME`.
 
 ### Setting `CONTAINER_WORKSPACE_FOLDER`
 
@@ -60,7 +62,8 @@ The feature installs a static `wezterm.lua` config that reads the `CONTAINER_WOR
 
 ## SSH key requirement (lace)
 
-When used with [lace](https://github.com/weftwiseink/lace), this feature declares a validated mount for the SSH public key used to authenticate WezTerm SSH domain connections. Lace validates that the key file exists on the host **before** starting the container.
+When used with [lace](https://github.com/weftwiseink/lace), this feature declares a validated mount for the SSH public key used to authenticate WezTerm SSH domain connections.
+Lace validates that the key file exists on the host **before** starting the container.
 
 The key is mounted read-only at `/home/node/.ssh/authorized_keys` inside the container.
 
@@ -72,7 +75,8 @@ Generate a dedicated SSH key for devcontainer access:
 mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N '' && chmod 700 ~/.config/lace/ssh
 ```
 
-This creates `~/.config/lace/ssh/id_ed25519` (private key) and `~/.config/lace/ssh/id_ed25519.pub` (public key). Lace mounts the `.pub` file into the container.
+This creates `~/.config/lace/ssh/id_ed25519` (private key) and `~/.config/lace/ssh/id_ed25519.pub` (public key).
+Lace mounts the `.pub` file into the container.
 
 ### Using a different key
 
@@ -96,14 +100,15 @@ If the SSH key is not available and you want to proceed anyway:
 lace up --skip-validation
 ```
 
-This downgrades the missing-key error to a warning. Docker will auto-create a directory at the key path, which means SSH authentication will not work until the key is properly configured.
+This downgrades the missing-key error to a warning.
+Docker will auto-create a directory at the key path, which means SSH authentication will not work until the key is properly configured.
 
 ## What gets installed
 
-- `/usr/local/bin/wezterm-mux-server` -- headless multiplexer daemon
-- `/usr/local/bin/wezterm` -- CLI for interacting with the mux server
-- `/usr/local/share/wezterm-server/wezterm.lua` -- workspace-aware config (reads `CONTAINER_WORKSPACE_FOLDER`)
-- `/usr/local/share/wezterm-server/entrypoint.sh` -- auto-starts mux server as the remote user
+- `/usr/local/bin/wezterm-mux-server`: headless multiplexer daemon
+- `/usr/local/bin/wezterm`: CLI for interacting with the mux server
+- `/usr/local/share/wezterm-server/wezterm.lua`: workspace-aware config (reads `CONTAINER_WORKSPACE_FOLDER`)
+- `/usr/local/share/wezterm-server/entrypoint.sh`: auto-starts mux server as the remote user
 
 Binaries are extracted from the official `.deb` package without installing GUI dependencies.
 
@@ -122,7 +127,8 @@ This feature declares the following mount in its `devcontainer-feature.json` met
 |-------|--------|------|-------------|
 | `wezterm-server/authorized-keys` | `/home/node/.ssh/authorized_keys` | file (readonly) | SSH public key for WezTerm SSH domain access |
 
-When lace fetches the feature metadata from the OCI registry, it auto-injects a `${lace.mount(wezterm-server/authorized-keys)}` entry into the `mounts` array and validates the source file exists before container creation. If the devcontainer.json already has a static mount targeting `/home/node/.ssh/authorized_keys`, lace deduplicates it automatically.
+When lace fetches the feature metadata from the OCI registry, it auto-injects a `${lace.mount(wezterm-server/authorized-keys)}` entry into the `mounts` array and validates the source file exists before container creation.
+If the devcontainer.json already has a static mount targeting `/home/node/.ssh/authorized_keys`, lace deduplicates it automatically.
 
 ## Feature ordering
 

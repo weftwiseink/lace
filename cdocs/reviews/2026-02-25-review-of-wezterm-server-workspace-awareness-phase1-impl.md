@@ -83,7 +83,8 @@ On Debian-based systems (the only supported distro family), `su` without a login
 This means `CONTAINER_WORKSPACE_FOLDER` from `containerEnv` (injected as `docker run -e`) will be available to `wezterm-mux-server`.
 
 The `wezterm-mux-server` reads the config file at startup, calls `os.getenv("CONTAINER_WORKSPACE_FOLDER")` in Lua, and sets `default_cwd`.
-The `--daemonize` flag causes the server to fork, but the forked process inherits the environment from its parent. This chain is correct.
+The `--daemonize` flag causes the server to fork, but the forked process inherits the environment from its parent.
+This chain is correct.
 
 **Finding: non-blocking concern.** The behavior is correct for Debian.
 If RPM-based distro support is added in the future, `su` behavior may differ due to PAM configuration.

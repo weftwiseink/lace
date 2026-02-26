@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-server
 type: report
 state: archived
-status: review_ready
+status: done
 tags: [investigation, wezterm, devcontainer, wezterm-server, mux-server, config, cleanup]
 related_to:
   - cdocs/reports/2026-02-09-wezterm-sshd-port-mechanics.md
@@ -21,7 +21,7 @@ related_to:
 
 # Investigation: Is `.devcontainer/wezterm.lua` Vestigial?
 
-> **BLUF:** The file is **not vestigial** -- it is actively used and serves a real
+> **BLUF:** The file is **not vestigial** - it is actively used and serves a real
 > purpose. It is bind-mounted into the container at startup and configures
 > `wezterm-mux-server` to open new panes in `/workspace/main` (the primary worktree
 > directory). Without it, wezterm-mux-server would fall back to its default working
@@ -32,8 +32,8 @@ related_to:
 
 ## Context / Background
 
-The user suspects `.devcontainer/wezterm.lua` may be vestigial -- a leftover from an
-earlier iteration of the devcontainer setup that is no longer needed. This investigation
+The user suspects `.devcontainer/wezterm.lua` may be vestigial - a leftover from an earlier iteration of the devcontainer setup that is no longer needed.
+This investigation
 examines whether the file is actively referenced, what it does, and whether its
 functionality is handled elsewhere.
 
@@ -65,8 +65,8 @@ Line 73 of `.devcontainer/devcontainer.json` declares the bind mount:
 "source=${localWorkspaceFolder}/.devcontainer/wezterm.lua,target=/home/node/.config/wezterm/wezterm.lua,type=bind,readonly"
 ```
 
-This mount delivers the file as the wezterm configuration for the `node` user inside
-the container. The mount is `readonly`, so the container cannot modify it.
+This mount delivers the file as the wezterm configuration for the `node` user inside the container.
+The mount is `readonly`, so the container cannot modify it.
 
 ### F3: The Dockerfile prepares the mount target directory
 
@@ -91,18 +91,15 @@ Line 88 of `devcontainer.json`:
 "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true"
 ```
 
-When `wezterm-mux-server` starts, it reads `~/.config/wezterm/wezterm.lua` (the standard
-wezterm config path) to obtain its configuration. The bind-mounted file is what it finds
-at that path. Without this file, wezterm-mux-server would use its built-in defaults,
-which do not set `default_cwd` to `/workspace/main`.
+When `wezterm-mux-server` starts, it reads `~/.config/wezterm/wezterm.lua` (the standard wezterm config path) to obtain its configuration.
+The bind-mounted file is what it finds at that path.
+Without this file, wezterm-mux-server would use its built-in defaults, which do not set `default_cwd` to `/workspace/main`.
 
 ### F5: The wezterm-server feature does NOT provide this configuration
 
-The wezterm-server devcontainer feature (`devcontainers/features/src/wezterm-server/`)
-only installs the `wezterm-mux-server` and `wezterm` binaries. Its `install.sh` does not
-create any wezterm Lua configuration files, and its `devcontainer-feature.json` has no
-option for setting `default_cwd` or providing a custom config. The configuration
-responsibility is left entirely to the consuming project.
+The wezterm-server devcontainer feature (`devcontainers/features/src/wezterm-server/`) only installs the `wezterm-mux-server` and `wezterm` binaries.
+Its `install.sh` does not create any wezterm Lua configuration files, and its `devcontainer-feature.json` has no option for setting `default_cwd` or providing a custom config.
+The configuration responsibility is left entirely to the consuming project.
 
 ### F6: Integration tests explicitly verify this mount is preserved
 
@@ -118,26 +115,23 @@ const weztermMount = mounts.find((m: string) =>
 expect(weztermMount).toBeDefined();
 ```
 
-This confirms the mount is considered part of the expected configuration and is
-protected from accidental deletion.
+This confirms the mount is considered part of the expected configuration and is protected from accidental deletion.
 
 ### F7: Historical proposals explicitly decided to keep this file
 
-The dotfiles migration proposal (`cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md`,
-line 445) states:
+The dotfiles migration proposal (`cdocs/proposals/2026-02-04-dotfiles-migration-and-config-extraction.md`, line 445) states:
 
 > `.devcontainer/wezterm.lua` remains in lace (sets default_cwd for mux server)
 
-The self-hosting proposal (`cdocs/proposals/2026-02-09-lace-devcontainer-self-hosting.md`)
-documented the evolution of this file -- it was originally delivered via `COPY` in the
-Dockerfile and was deliberately changed to a bind mount so that edits take effect without
+The self-hosting proposal (`cdocs/proposals/2026-02-09-lace-devcontainer-self-hosting.md`) documented the evolution of this file.
+It was originally delivered via `COPY` in the Dockerfile and was deliberately changed to a bind mount so that edits take effect without
 a full container rebuild. That same proposal also fixed a bug where `default_cwd` was
 set to `/workspace/lace` (wrong) instead of `/workspace/main` (correct).
 
 ### F8: No other mechanism provides the same functionality
 
-There is no other file, feature, or configuration in the devcontainer setup that sets
-`default_cwd` for the wezterm-mux-server. If this file were deleted:
+There is no other file, feature, or configuration in the devcontainer setup that sets `default_cwd` for the wezterm-mux-server.
+If this file were deleted:
 
 1. The bind mount in `devcontainer.json` would fail (source file missing), which could
    cause the entire container creation to fail.
@@ -153,13 +147,11 @@ purpose that nothing else in the stack provides.
 
 If the goal is to reduce the number of files in `.devcontainer/`, two future paths exist:
 
-1. **Feature-level config generation**: The wezterm-server feature could gain a
-   `defaultCwd` option that generates a minimal `wezterm.lua` at install time. This
-   would eliminate the per-project file but requires a feature update.
+1. **Feature-level config generation**: The wezterm-server feature could gain a `defaultCwd` option that generates a minimal `wezterm.lua` at install time.
+   This would eliminate the per-project file but requires a feature update.
 
-2. **Lace-level config generation**: Lace could auto-generate a container-side wezterm
-   config during `lace up` based on the workspace layout declaration (which already
-   knows the `workspaceFolder`). This would be the most elegant solution but requires
-   new lace functionality.
+2. **Lace-level config generation**: Lace could auto-generate a container-side wezterm config during `lace up` based on the workspace layout declaration (which already knows the `workspaceFolder`).
+   This would be the most elegant solution but requires new lace functionality.
 
-Neither path is urgent. The current approach works correctly and is well-documented.
+Neither path is urgent.
+The current approach works correctly and is well-documented.

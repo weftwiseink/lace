@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-server
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_accepted
 tags: [wezterm-server, devcontainer, workspace, mux-server, entrypoint, containerEnv, dx, cleanup]
 last_reviewed:
   status: accepted
@@ -64,14 +64,12 @@ Five coordinated pieces across four files:
 
 ### What Lace Already Knows
 
-`applyWorkspaceLayout()` in `workspace-layout.ts:171-175` computes the
-container workspace folder from the worktree name and mount target. For the
-lace project: `/workspace/lace/main`. This value is written to the
-intermediate `.lace/devcontainer.json` and is immutable at runtime.
+`applyWorkspaceLayout()` in `workspace-layout.ts:171-175` computes the container workspace folder from the worktree name and mount target.
+For the lace project: `/workspace/lace/main`.
+This value is written to the intermediate `.lace/devcontainer.json` and is immutable at runtime.
 
-`generateExtendedConfig()` in `up.ts:644-749` already injects ports,
-mounts, project labels, and run args into the intermediate config. Adding
-env var injection follows the same pattern.
+`generateExtendedConfig()` in `up.ts:644-749` already injects ports, mounts, project labels, and run args into the intermediate config.
+Adding env var injection follows the same pattern.
 
 ## Proposed Solution
 
@@ -100,38 +98,35 @@ Without this, panes open in the home directory (graceful degradation).
 ### D1: Static config reading env var vs. generated config per run
 
 Feature installs a static `wezterm.lua` reading an environment variable.
-Lace provides runtime context via env vars rather than generating
-wezterm-specific config files. This keeps wezterm knowledge in the feature
-and generic env var injection in lace.
+Lace provides runtime context via env vars rather than generating wezterm-specific config files.
+This keeps wezterm knowledge in the feature and generic env var injection in lace.
 
 ### D2: Config at `/usr/local/share/wezterm-server/` (not `~/.config/wezterm/`)
 
 Feature-owned directory avoids conflicting with user wezterm config.
-Referenced via `--config-file` in the entrypoint. Users override by
-replacing the file (bind mount or COPY) or replacing the entrypoint.
+Referenced via `--config-file` in the entrypoint.
+Users override by replacing the file (bind mount or COPY) or replacing the entrypoint.
 
 > NOTE: `WEZTERM_CONFIG_FILE` env var does NOT override `--config-file`
 > CLI flag. Override the file or script itself.
 
 ### D3: Feature entrypoint (not user postStartCommand)
 
-The mux server is infrastructure, not application logic. The
-docker-in-docker feature establishes this pattern. Entrypoints run before
-lifecycle hooks and have access to `containerEnv`.
+The mux server is infrastructure, not application logic.
+The docker-in-docker feature establishes this pattern.
+Entrypoints run before lifecycle hooks and have access to `containerEnv`.
 
 ### D4: Lace auto-injects env vars (no opt-in needed)
 
-`CONTAINER_WORKSPACE_FOLDER` and `LACE_PROJECT_NAME` are universally
-useful with no downside. Injected as resolved literals, avoiding
-substitution timing issues. User-defined values take precedence (no
-overwrite).
+`CONTAINER_WORKSPACE_FOLDER` and `LACE_PROJECT_NAME` are universally useful with no downside.
+Injected as resolved literals, avoiding substitution timing issues.
+User-defined values take precedence (no overwrite).
 
 ### D5: Entrypoint privilege drop via baked `$_REMOTE_USER`
 
-Feature entrypoints run as root during container init. The entrypoint
-uses `su -c "..." <user>` where the username is baked from `$_REMOTE_USER`
-at install time — the same variable already used by `install.sh` for
-runtime directory creation.
+Feature entrypoints run as root during container init.
+The entrypoint uses `su -c "..." <user>` where the username is baked from `$_REMOTE_USER` at install time.
+This is the same variable already used by `install.sh` for runtime directory creation.
 
 ## Edge Cases
 
@@ -177,8 +172,8 @@ return config
 WEZTERM_CONFIG
 
 # Entrypoint: starts mux server as the remote user (not root).
-# $_REMOTE_USER is baked at install time — same variable used for
-# runtime directory creation above.
+# $_REMOTE_USER is baked at install time.
+# This is the same variable used for runtime directory creation above.
 _REMOTE_USER="${_REMOTE_USER:-root}"
 cat > "$WEZTERM_SERVER_DIR/entrypoint.sh" << ENTRYPOINT
 #!/bin/sh
@@ -214,7 +209,7 @@ Update the usage section. Replace the `postStartCommand` example:
 
 ```diff
 -  "postStartCommand": "wezterm-mux-server --daemonize 2>/dev/null || true"
-+  // No postStartCommand needed — the feature auto-starts the mux server.
++  // No postStartCommand needed: the feature auto-starts the mux server.
 ```
 
 Add a new "Workspace awareness" section documenting:
@@ -225,8 +220,8 @@ Add a new "Workspace awareness" section documenting:
 - That lace injects it automatically.
 
 Update the "What gets installed" section to include:
-- `/usr/local/share/wezterm-server/wezterm.lua` -- workspace-aware config
-- `/usr/local/share/wezterm-server/entrypoint.sh` -- mux server startup
+- `/usr/local/share/wezterm-server/wezterm.lua`: workspace-aware config
+- `/usr/local/share/wezterm-server/entrypoint.sh`: mux server startup
 
 #### 1.4 Tests
 
@@ -281,7 +276,7 @@ Start container as root with CONTAINER_WORKSPACE_FOLDER=/workspace/test:
 **Goal:** Have lace auto-inject `CONTAINER_WORKSPACE_FOLDER` and
 `LACE_PROJECT_NAME` into the intermediate `containerEnv`.
 
-#### 2.1 Modify `packages/lace/src/lib/up.ts` -- `generateExtendedConfig()`
+#### 2.1 Modify `packages/lace/src/lib/up.ts`: `generateExtendedConfig()`
 
 Insert after the project name injection block (after line 738, before the
 "Write extended config" comment at line 740):
@@ -303,7 +298,7 @@ if (options.projectName && !containerEnv.LACE_PROJECT_NAME) {
 extended.containerEnv = containerEnv;
 ```
 
-#### 2.2 Tests -- new describe block in `up-mount.integration.test.ts`
+#### 2.2 Tests: new describe block in `up-mount.integration.test.ts`
 
 Add after the existing "mount source in containerEnv" describe block
 (after line 547):
@@ -410,7 +405,7 @@ describe("lace up: auto-injected containerEnv vars", () => {
     trackProjectMountsDir(workspaceRoot);
     setupSettings({});
 
-    // Image-only config with no workspace layout — workspaceFolder not set
+    // Image-only config with no workspace layout: workspaceFolder not set
     const config = JSON.stringify(
       { image: "mcr.microsoft.com/devcontainers/base:ubuntu" },
       null,
@@ -518,8 +513,8 @@ git rm .devcontainer/wezterm.lua
 
 #### 3.2 Modify `.devcontainer/devcontainer.json`
 
-Remove the wezterm.lua bind mount from the mounts array (currently the only
-static mount — the array becomes empty or can be removed):
+Remove the wezterm.lua bind mount from the mounts array (currently the only static mount).
+The array becomes empty or can be removed:
 
 ```diff
   "mounts": [
@@ -540,8 +535,8 @@ startup):
 
 #### 3.3 Modify `.devcontainer/Dockerfile` (lines 100-104)
 
-Remove the wezterm config directory creation. The SSH directory setup on
-lines 93-98 stays (still needed for authorized_keys).
+Remove the wezterm config directory creation.
+The SSH directory setup on lines 93-98 stays (still needed for authorized_keys).
 
 ```diff
 - # Set up wezterm config directory for bind-mounted wezterm.lua
@@ -553,9 +548,8 @@ lines 93-98 stays (still needed for authorized_keys).
 
 #### 3.4 Update `up-mount.integration.test.ts` (lines 1138-1191)
 
-The test "deduplicates static mount targeting same path as feature mount
-declaration" currently includes a wezterm.lua mount in its fixture config
-and asserts it is preserved (lines 1147, 1185-1189). Update:
+The test "deduplicates static mount targeting same path as feature mount declaration" currently includes a wezterm.lua mount in its fixture config and asserts it is preserved (lines 1147, 1185-1189).
+Update:
 
 Remove the wezterm.lua mount from the test fixture's `mounts` array:
 
@@ -584,7 +578,7 @@ grep -r "wezterm.lua" .devcontainer/
 
 # Should return no results in Dockerfile
 grep "wezterm" .devcontainer/Dockerfile
-# (SSH-related lines should NOT match — they reference .ssh, not wezterm)
+# (SSH-related lines should NOT match: they reference .ssh, not wezterm)
 
 # Feature README should still reference wezterm (it owns the feature)
 grep -l "wezterm" devcontainers/features/src/wezterm-server/
@@ -604,11 +598,8 @@ Run `lace up --skip-devcontainer-up` and verify:
 
 #### 3.7 Update related documents
 
-- Update `cdocs/reports/2026-02-25-devcontainer-wezterm-lua-investigation.md`
-  frontmatter: set `state: archived` and add NOTE that the investigation
-  findings led to the workspace-awareness implementation.
-- Update feature `README.md` examples to show simplified devcontainer.json
-  without `postStartCommand` or wezterm.lua mount.
+- Update `cdocs/reports/2026-02-25-devcontainer-wezterm-lua-investigation.md` frontmatter: set `state: archived` and add NOTE that the investigation findings led to the workspace-awareness implementation.
+- Update feature `README.md` examples to show simplified devcontainer.json without `postStartCommand` or wezterm.lua mount.
 
 #### 3.8 Constraints
 

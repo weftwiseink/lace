@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-server
 type: devlog
 state: live
-status: review_ready
+status: done
 tags: [wezterm-server, devcontainer, workspace, mux-server, entrypoint, containerEnv, cleanup, implementation]
 related_to:
   - cdocs/proposals/2026-02-25-wezterm-server-workspace-awareness.md
@@ -22,9 +22,9 @@ eliminating the per-project `.devcontainer/wezterm.lua` and its associated
 infrastructure.
 
 Three phases:
-1. **Feature changes** -- static config + entrypoint in `install.sh`, bump version
-2. **Lace changes** -- auto-inject `CONTAINER_WORKSPACE_FOLDER` and `LACE_PROJECT_NAME`
-3. **Cleanup** -- remove legacy `.devcontainer/wezterm.lua`, its mount, Dockerfile mkdir, postStartCommand
+1. **Feature changes**: static config + entrypoint in `install.sh`, bump version
+2. **Lace changes**: auto-inject `CONTAINER_WORKSPACE_FOLDER` and `LACE_PROJECT_NAME`
+3. **Cleanup**: remove legacy `.devcontainer/wezterm.lua`, its mount, Dockerfile mkdir, postStartCommand
 
 ## Plan
 
@@ -120,8 +120,8 @@ Total mounts: 3 (bash-history, claude-config, authorized-keys)
 ### Orphaned Reference Check
 
 ```
-grep -r "wezterm.lua" .devcontainer/ -- no matches
-grep "wezterm" .devcontainer/Dockerfile -- no matches
+grep -r "wezterm.lua" .devcontainer/ # no matches
+grep "wezterm" .devcontainer/Dockerfile # no matches
 ```
 
 ### Commits

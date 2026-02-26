@@ -1,0 +1,33 @@
+{
+    "name": "Portless",
+    "id": "portless",
+    "version": "0.1.0",
+    "description": "Installs portless for localhost subdomain routing. Declares a lace-managed proxy port with asymmetric mapping to portless's default port 1355.",
+    "entrypoint": "/usr/local/share/portless-feature/entrypoint.sh",
+    "options": {
+        "proxyPort": {
+            "type": "string",
+            "default": "1355",
+            "description": "Container-internal portless proxy port. With lace, this default is used as the container side of an asymmetric port mapping (e.g., 22435:1355). Not used by install.sh."
+        },
+        "version": {
+            "type": "string",
+            "default": "latest",
+            "description": "Portless version to install (npm version specifier)."
+        }
+    },
+    "customizations": {
+        "lace": {
+            "ports": {
+                "proxyPort": {
+                    "label": "portless proxy",
+                    "onAutoForward": "silent",
+                    "requireLocalPort": true
+                }
+            }
+        }
+    },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils"
+    ]
+}

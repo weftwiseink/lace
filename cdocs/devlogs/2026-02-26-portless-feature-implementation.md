@@ -7,6 +7,11 @@ type: devlog
 state: live
 status: review_ready
 tags: [portless, devcontainer-feature, implementation, handoff]
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6"
+  at: 2026-02-26T22:30:00-06:00
+  round: 1
 related_to:
   - cdocs/proposals/2026-02-26-portless-devcontainer-feature.md
   - cdocs/reports/2026-02-26-portless-integration-design-rationale.md
@@ -153,6 +158,41 @@ All smoke tests run inside Docker (`node:24-bookworm`) with the raw install.sh.
 1. **Entrypoint command**: Changed `portless proxy` to `portless proxy start` based on actual CLI interface.
 2. **Entrypoint backgrounding**: Removed trailing `&` since `portless proxy start` self-daemonizes.
 3. **Test strategy**: Lace scenario tests use mock subprocess instead of real `devcontainer build` due to devcontainer CLI absolute path restrictions.
+
+## Test Coverage vs Proposal
+
+The proposal defines 18 tests. Coverage status:
+
+| # | Test | Status | Notes |
+|---|------|--------|-------|
+| 1 | Install verification | Automated | `test.sh`, `node_default.sh` |
+| 2 | No env var baking | Automated | `test.sh` (both `/etc/environment` and `/etc/profile.d/`) |
+| 3 | Version pinning | Automated | `custom_version.sh` |
+| 4 | No npm failure | Manual only | Devlog evidence; devcontainer test framework expects success |
+| 5 | Proxy auto-start (non-root) | Deferred | Requires container-level test harness with user switching |
+| 6 | Proxy auto-start (root) | Deferred | Same as 5 |
+| 7 | Idempotent restart | Deferred | Requires container lifecycle management in test |
+| 8 | Port already bound | Deferred | Same as 7 |
+| 9 | Asymmetric port injection | Automated | P1 scenario test |
+| 10 | Port persistence | Automated | P2 scenario test |
+| 11 | Multi-feature coexistence | Automated | P3 scenario test |
+| 12 | Port reassignment | Deferred | Requires host-port conflict simulation |
+| 13 | Proxy responds | Manual only | Devlog Docker evidence |
+| 14 | Route registration | Manual only | Devlog Docker evidence |
+| 15 | Host access | Deferred | Requires running container with port mapping |
+| 16 | Multiple services | Manual only | Devlog Docker evidence |
+| 17 | Browser access | Manual | By nature (manual verification) |
+| 18 | Route listing | Manual only | Devlog Docker evidence |
+
+**Summary:** 7 automated, 5 manual-only (with devlog evidence), 6 deferred.
+
+**Rationale for deferred tests:**
+Tests 5-8 (entrypoint lifecycle) require a container-level test harness that can manage container startup, user switching, and process inspection — infrastructure that does not exist in the current test framework.
+The wezterm-server feature has the same gap: its entrypoint tests (S3) only verify SSH connectivity after container start, not the internal startup behavior.
+Test 12 (port reassignment) requires simulating host-port conflicts, which involves binding and releasing ports on the host during tests.
+Test 15 (host access) requires a running container with Docker port mapping.
+
+These are candidates for a future container-level test framework.
 
 ## Changes Made
 

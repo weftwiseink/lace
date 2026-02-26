@@ -27,6 +27,8 @@
             }
         }
     },
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/portless",
+    "licenseURL": "https://github.com/weftwiseink/lace/blob/main/LICENSE",
     "installsAfter": [
         "ghcr.io/devcontainers/features/common-utils"
     ]

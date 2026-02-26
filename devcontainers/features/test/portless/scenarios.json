@@ -1,0 +1,16 @@
+{
+    "node_default": {
+        "image": "node:24-bookworm",
+        "features": {
+            "portless": {}
+        }
+    },
+    "custom_version": {
+        "image": "node:24-bookworm",
+        "features": {
+            "portless": {
+                "version": "0.4.2"
+            }
+        }
+    }
+}

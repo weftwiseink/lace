@@ -7,6 +7,11 @@ type: devlog
 state: live
 status: review_ready
 tags: [wezterm, lace.wezterm, implementation]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-02-28T22:00:00-06:00
+  round: 1
 ---
 
 # Tab-Oriented lace.wezterm Implementation: Devlog
@@ -121,11 +126,51 @@ lace up --workspace-folder /var/home/mjr/code/weft/lace/main
 2. `0477744` (dotfiles) — `feat(wezterm): enable tab-oriented lace connection mode`
 3. `697258a` (lace/main) — `feat(wez-into): use tab-oriented connection via wezterm cli spawn`
 
-### Not Yet Verified (requires running devcontainer)
+### Runtime Testing (session 2 — with running devcontainer)
 
-- Picker creating tabs instead of workspaces (container is stopped)
-- Duplicate tab detection activating existing tab
-- Tab title showing project name instead of pane title
-- Tab title surviving OSC title changes from Claude Code TUI
+Started a fresh lace devcontainer on port 22426 and tested the full flow.
 
-These require a running devcontainer. The config infrastructure is validated; runtime behavior testing is deferred to next interactive session.
+#### Critical discovery: SSH domain mux limitation
+
+WezTerm's mux server cannot make SSH domain connections after config hot-reload. The `wezterm cli spawn --domain-name lace:<port>` command (which goes through the mux server) hangs permanently at "Connecting...". However, standalone WezTerm processes (`wezterm ssh`, `wezterm connect`) handle SSH fine.
+
+Root cause: the mux server's SSH domain implementation doesn't reliably pick up SSH key/config changes after hot-reload. This is a WezTerm-level limitation, not a lace bug.
+
+**Fix applied:** Replaced SSH domain-based tab creation with direct SSH:
+- CLI: `wezterm cli spawn -- ssh -p <port> -o IdentityFile=<key> ... node@localhost`
+- Plugin picker: `mux_win:spawn_tab({ args = ssh_args })`
+- Tab titles pinned via `wezterm cli set-tab-title` (CLI) and `tab:set_title()` (Lua)
+
+#### Additional fixes applied during runtime testing
+
+1. **SSH key path mismatch**: WezTerm config had `~/.ssh/lace_devcontainer` but container uses `~/.config/lace/ssh/id_ed25519`. Fixed in dotfiles.
+2. **Plugin cache stale**: WezTerm caches plugins in `~/.local/share/wezterm/plugins/`. The cached version lacked `format_tab_title`. Required manual cache update.
+3. **Project name mismatch**: Plugin used `basename(local_folder)` = "main", but `lace-discover` uses `lace.project_name` Docker label = "lace". Fixed plugin to query label.
+4. **Stale discovery cache**: Cache was incremental (never evicted old entries). Fixed to full replacement on each picker invocation.
+5. **connection_mode validation**: Added warning for unrecognized values.
+
+#### Test results
+
+```
+$ wez-into --dry-run lace
+wezterm cli spawn -- ssh -p 22426 -o IdentityFile=/home/mjr/.config/lace/ssh/id_ed25519 ...
+wezterm cli set-tab-title --pane-id <id> lace
+
+$ wez-into lace
+wez-into: connecting to lace as node on port 22426...
+wez-into: tab created for lace (pane 11)
+
+$ wez-into lace  # second call — duplicate detection
+wez-into: activated existing tab for lace (pane 11)
+```
+
+- Tab creation via direct SSH: **verified** (creates tab in current window, pane shows SSH session)
+- Tab title pinning via set-tab-title: **verified** (tab_title="lace" in JSON output, format-tab-title handler returns it)
+- Duplicate detection: **verified** (activates existing tab, skips ghost panes from stuck domain connections)
+- format-tab-title handler: **verified** (no errors after plugin cache update and config reload)
+
+#### Not verified (requires interactive GUI)
+
+- Picker creating tabs via Ctrl+Shift+P (code updated to use `mux_win:spawn_tab()` but not testable from CLI)
+- Tab title visually displayed in tab bar (tab_title is set correctly per JSON output)
+- Tab title surviving OSC title changes from Claude Code TUI (architecture is correct — format-tab-title checks tab_title first, which is separate from pane title)

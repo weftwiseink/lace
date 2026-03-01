@@ -22,6 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Must match M.KNOWN_HOSTS_FILE in the lace.wezterm plugin.
 LACE_KNOWN_HOSTS="$HOME/.ssh/lace_known_hosts"
 
+# SSH private key for lace devcontainers.
+# Must match the key configured in the lace.wezterm plugin's ssh_key option.
+LACE_SSH_KEY="$HOME/.config/lace/ssh/id_ed25519"
+
 err() { echo "${SCRIPT_NAME}: error: $*" >&2; }
 info() { echo "${SCRIPT_NAME}: $*" >&2; }
 
@@ -150,7 +154,8 @@ start_and_connect() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "lace up --workspace-folder $workspace_path"
-    echo "# then: wezterm cli spawn --domain-name lace:<port>"
+    echo "# then: wezterm cli spawn -- ssh -p <port> ... node@localhost"
+    echo "# then: wezterm cli set-tab-title --pane-id <id> $project"
     exit 0
   fi
 
@@ -409,13 +414,28 @@ refresh_host_key() {
   fi
 }
 
+# --- Resolve SSH user for a port ---
+# Queries lace-discover for the user associated with a port.
+# Falls back to "node" if not found.
+resolve_user_for_port() {
+  local port="$1"
+  while IFS=: read -r _name p user _path; do
+    if [[ "$p" == "$port" ]]; then
+      echo "$user"
+      return 0
+    fi
+  done < <(discover)
+  echo "node"
+}
+
 # --- Execute wezterm connect (or dry-run) ---
 do_connect() {
   local project="$1"
   local port="$2"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "wezterm cli spawn --domain-name lace:$port"
+    echo "wezterm cli spawn -- ssh -p $port -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$LACE_KNOWN_HOSTS node@localhost"
+    echo "wezterm cli set-tab-title --pane-id <id> $project"
     exit 0
   fi
 
@@ -428,23 +448,67 @@ do_connect() {
   # Pre-populate the host key so WezTerm doesn't prompt for trust
   refresh_host_key "$port"
 
-  info "connecting to $project on port $port..."
+  local user
+  user=$(resolve_user_for_port "$port")
+
+  # Check for existing tab connected to this project (duplicate detection).
+  # If a tab with this project's name already exists, activate it instead
+  # of creating a duplicate. Uses tab_title (set by set-tab-title) to match.
+  # Tries each matching pane in reverse order (newest first) since older
+  # panes from failed domain connections may be ghosts that can't activate.
+  local existing_panes
+  existing_panes=$(wezterm cli list --format json 2>/dev/null \
+    | python3 -c "
+import json, sys
+try:
+    panes = [p['pane_id'] for p in json.load(sys.stdin) if p.get('tab_title') == '$project']
+    for pid in reversed(panes):
+        print(pid)
+except: pass
+" 2>/dev/null) || true
+
+  if [[ -n "$existing_panes" ]]; then
+    while IFS= read -r existing_pane; do
+      if wezterm cli activate-pane --pane-id "$existing_pane" 2>/dev/null; then
+        info "activated existing tab for $project (pane $existing_pane)"
+        return 0
+      fi
+    done <<< "$existing_panes"
+    # All matches were ghosts (e.g. stuck domain panes) — fall through to create new tab
+  fi
+
+  info "connecting to $project as $user on port $port..."
 
   # Suppress xkbcommon errors from WezTerm's older bundled libxkbcommon
   # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
   export XKB_LOG_LEVEL=10  # critical only
 
-  # Tab mode: `wezterm cli spawn` creates a tab in the running mux.
+  # Tab mode: spawn a tab with a direct SSH connection.
+  # Uses `wezterm cli spawn` with an SSH command rather than `--domain-name`
+  # because WezTerm's mux server SSH domain implementation does not reliably
+  # pick up SSH key changes after config hot-reload. Direct SSH via the CLI
+  # avoids this issue entirely.
+  #
+  # After spawning, pin the tab title so it shows the project name instead
+  # of the SSH hostname. The format-tab-title handler in the wezterm config
+  # checks tab_title first, so this survives OSC title changes from TUIs.
+  #
   # Falls back to `wezterm connect` if no mux is running (cold start).
-  # The fallback targets the "main" workspace so subsequent cli spawn
-  # calls create tabs in the same window.
-  if wezterm cli spawn --domain-name "lace:$port" 2>/dev/null; then
-    info "tab created for $project"
-  else
+  local pane_id
+  pane_id=$(wezterm cli spawn -- ssh \
+    -o "IdentityFile=$LACE_SSH_KEY" \
+    -o "IdentitiesOnly=yes" \
+    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS" \
+    -o "StrictHostKeyChecking=no" \
+    -p "$port" \
+    "$user@localhost" 2>/dev/null) && {
+    wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
+    info "tab created for $project (pane $pane_id)"
+  } || {
     info "no running mux, falling back to wezterm connect..."
     wezterm connect "lace:$port" --workspace main &>/dev/null &
     disown
-  fi
+  }
 }
 
 # --- Execute action ---
@@ -484,8 +548,9 @@ Projects are discovered via Docker (containers with devcontainer.local_folder
 label and SSH ports in the 22425-22499 range). Discovery is performed by
 lace-discover.
 
-Connection uses WezTerm SSH domains pre-registered by the lace.wezterm plugin:
-  wezterm cli spawn --domain-name lace:<port>
+Connection creates a tab in the running WezTerm via direct SSH:
+  wezterm cli spawn -- ssh -p <port> node@localhost
+  wezterm cli set-tab-title --pane-id <id> <project>
 
 If no WezTerm mux is running (cold start), falls back to:
   wezterm connect lace:<port> --workspace main

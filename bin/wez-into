@@ -150,7 +150,7 @@ start_and_connect() {
 
   if [[ "$DRY_RUN" == "true" ]]; then
     echo "lace up --workspace-folder $workspace_path"
-    echo "# then: wezterm connect lace:<port> --workspace $project"
+    echo "# then: wezterm cli spawn --domain-name lace:<port>"
     exit 0
   fi
 
@@ -415,7 +415,7 @@ do_connect() {
   local port="$2"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "wezterm connect lace:$port --workspace $project"
+    echo "wezterm cli spawn --domain-name lace:$port"
     exit 0
   fi
 
@@ -434,14 +434,17 @@ do_connect() {
   # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
   export XKB_LOG_LEVEL=10  # critical only
 
-  # `wezterm connect` handles both cases:
-  #   - No running GUI: starts a new instance
-  #   - Running GUI: hands off to the existing instance (new window)
-  # Background + disown so the calling terminal returns immediately.
-  # All output (xkb noise, lua logs, SSH messages) goes to /dev/null;
-  # WezTerm writes its own structured logs to $XDG_RUNTIME_DIR/wezterm/.
-  wezterm connect "lace:$port" --workspace "$project" &>/dev/null &
-  disown
+  # Tab mode: `wezterm cli spawn` creates a tab in the running mux.
+  # Falls back to `wezterm connect` if no mux is running (cold start).
+  # The fallback targets the "main" workspace so subsequent cli spawn
+  # calls create tabs in the same window.
+  if wezterm cli spawn --domain-name "lace:$port" 2>/dev/null; then
+    info "tab created for $project"
+  else
+    info "no running mux, falling back to wezterm connect..."
+    wezterm connect "lace:$port" --workspace main &>/dev/null &
+    disown
+  fi
 }
 
 # --- Execute action ---
@@ -482,7 +485,10 @@ label and SSH ports in the 22425-22499 range). Discovery is performed by
 lace-discover.
 
 Connection uses WezTerm SSH domains pre-registered by the lace.wezterm plugin:
-  wezterm connect lace:<port> --workspace <project>
+  wezterm cli spawn --domain-name lace:<port>
+
+If no WezTerm mux is running (cold start), falls back to:
+  wezterm connect lace:<port> --workspace main
 
 The --start flag starts a stopped devcontainer before connecting. It uses
 `lace up --workspace-folder <path>` for the full startup pipeline (config
@@ -492,7 +498,7 @@ no effect (it just connects).
 
 The --dry-run flag prints the command(s) that would be executed without
 actually running them. When combined with --start, it prints both the
-lace up command and the wezterm connect command.
+lace up command and the wezterm cli spawn command.
 
 Examples:
   wez-into lace                Connect to the lace devcontainer

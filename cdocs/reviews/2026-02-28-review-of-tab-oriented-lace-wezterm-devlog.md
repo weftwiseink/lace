@@ -5,7 +5,7 @@ first_authored:
   at: 2026-02-28T22:00:00-06:00
 task_list: lace/wezterm-tab-mode
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, code_correctness, edge_cases, race_conditions, verification_sufficiency, cli_robustness]
 ---

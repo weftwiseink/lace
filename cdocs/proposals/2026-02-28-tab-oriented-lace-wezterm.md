@@ -4,8 +4,8 @@ first_authored:
   at: "2026-02-28T12:00:00-06:00"
 task_list: lace/wezterm-tab-mode
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [wezterm, lace.wezterm, architecture, tab-management]
 last_reviewed:
   status: revision_requested

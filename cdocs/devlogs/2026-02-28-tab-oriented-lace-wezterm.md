@@ -4,8 +4,8 @@ first_authored:
   at: "2026-02-28T19:00:00-06:00"
 task_list: lace/wezterm-tab-mode
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [wezterm, lace.wezterm, implementation]
 last_reviewed:
   status: accepted

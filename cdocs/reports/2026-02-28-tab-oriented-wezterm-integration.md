@@ -5,8 +5,8 @@ first_authored:
   at: "2026-02-28T17:33:00-06:00"
 task_list: null
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [analysis, wezterm, architecture]
 related_to:
   - cdocs/proposals/2026-02-04-multi-project-wezterm-plugin.md

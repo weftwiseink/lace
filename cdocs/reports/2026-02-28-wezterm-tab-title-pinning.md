@@ -5,8 +5,8 @@ first_authored:
   at: "2026-02-28T00:00:00-06:00"
 task_list: null
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [investigation, wezterm, tab-management]
 ---
 

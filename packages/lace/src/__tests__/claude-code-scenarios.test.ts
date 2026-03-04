@@ -266,3 +266,106 @@ describe.skipIf(!isDockerAvailable())(
     });
   },
 );
+
+// ── C5: Multi-feature coexistence with wezterm-server ──
+
+describe("Scenario C5: claude-code + wezterm-server coexistence", () => {
+  it("generates config with both mount and port entries", async () => {
+    const claudePath = symlinkLocalFeature(ctx, "claude-code");
+    const weztermPath = symlinkLocalFeature(ctx, "wezterm-server");
+
+    const claudeDir = join(ctx.workspaceRoot, ".claude-dir");
+    mkdirSync(claudeDir, { recursive: true });
+    const keyPath = createTempSshKey(ctx);
+
+    setupScenarioSettings(ctx, {
+      mounts: {
+        "claude-code/config": { source: claudeDir },
+        "wezterm-server/authorized-keys": { source: keyPath },
+      },
+    });
+
+    const config = {
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      features: {
+        [claudePath]: {},
+        [weztermPath]: {},
+      },
+    };
+
+    writeDevcontainerJson(ctx, config);
+
+    const result = await runUp({
+      workspaceFolder: ctx.workspaceRoot,
+      skipDevcontainerUp: true,
+      cacheDir: ctx.metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = readGeneratedConfig(ctx);
+
+    // Assert: claude-code mount is present
+    const mounts = extended.mounts as string[];
+    const claudeMount = mounts.find((m) => m.includes(".claude"));
+    expect(claudeMount).toBeDefined();
+
+    // Assert: wezterm-server port is allocated
+    const port = result.phases.portAssignment!.port!;
+    expect(port).toBeGreaterThanOrEqual(22425);
+
+    // Assert: both features present in generated config
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(features[claudePath]).toBeDefined();
+    expect(features[weztermPath]).toBeDefined();
+
+    // Assert: wezterm port entries present
+    expect(extended.appPort).toBeDefined();
+    expect(extended.forwardPorts).toContain(port);
+  });
+});
+
+// ── C6: Version pinning passes through ──
+
+describe("Scenario C6: version pinning passes through to feature options", () => {
+  it("version option is preserved in generated config", async () => {
+    const featurePath = symlinkLocalFeature(ctx, "claude-code");
+
+    const claudeDir = join(ctx.workspaceRoot, ".claude-dir");
+    mkdirSync(claudeDir, { recursive: true });
+    setupScenarioSettings(ctx, {
+      mounts: {
+        "claude-code/config": { source: claudeDir },
+      },
+    });
+
+    const config = {
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      features: {
+        [featurePath]: {
+          version: "1.0.20",
+        },
+      },
+    };
+
+    writeDevcontainerJson(ctx, config);
+
+    const result = await runUp({
+      workspaceFolder: ctx.workspaceRoot,
+      skipDevcontainerUp: true,
+      cacheDir: ctx.metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = readGeneratedConfig(ctx);
+    const features = extended.features as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(features[featurePath].version).toBe("1.0.20");
+  });
+});

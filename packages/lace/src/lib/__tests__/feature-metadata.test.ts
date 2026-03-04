@@ -7,8 +7,9 @@ import {
   readFileSync,
   existsSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import type { RunSubprocess, SubprocessResult } from "../subprocess";
 import {
   fetchFeatureMetadata,
@@ -1436,5 +1437,78 @@ describe("filesystem cache", () => {
     const cached = readCacheFile("ghcr.io/org/feat:1");
     expect(cached).not.toBeNull();
     expect((cached as any).metadata).toEqual(weztermMetadata);
+  });
+});
+
+// ── Real feature metadata helper ──
+
+const __test_filename = fileURLToPath(import.meta.url);
+const __test_dirname = dirname(__test_filename);
+const TEST_REPO_ROOT = resolve(__test_dirname, "..", "..", "..", "..", "..");
+const TEST_FEATURES_SRC_DIR = join(
+  TEST_REPO_ROOT,
+  "devcontainers",
+  "features",
+  "src",
+);
+
+/**
+ * Read and parse the real devcontainer-feature.json from the repo's
+ * devcontainers/features/src/<featureName>/ directory.
+ */
+function readRealFeatureMetadata(featureName: string): FeatureMetadata {
+  const metadataPath = join(
+    TEST_FEATURES_SRC_DIR,
+    featureName,
+    "devcontainer-feature.json",
+  );
+  return JSON.parse(readFileSync(metadataPath, "utf-8")) as FeatureMetadata;
+}
+
+// ── claude-code feature metadata extraction ──
+
+describe("claude-code feature metadata", () => {
+  it("extracts mount declaration with sourceMustBe from real feature metadata", () => {
+    const metadata = readRealFeatureMetadata("claude-code");
+    const customs = extractLaceCustomizations(metadata);
+
+    expect(customs).not.toBeNull();
+    expect(customs!.ports).toBeUndefined();
+    expect(customs!.mounts).toBeDefined();
+    expect(customs!.mounts!["config"]).toEqual({
+      target: "/home/${_REMOTE_USER}/.claude",
+      recommendedSource: "~/.claude",
+      description:
+        "Claude Code configuration, credentials, and session state",
+      sourceMustBe: "directory",
+      readonly: undefined,
+      type: undefined,
+      consistency: undefined,
+      hint: undefined,
+    });
+  });
+
+  it("has no port declarations", () => {
+    const metadata = readRealFeatureMetadata("claude-code");
+    const customs = extractLaceCustomizations(metadata);
+
+    expect(customs).not.toBeNull();
+    expect(customs!.ports).toBeUndefined();
+  });
+
+  it("has the expected feature id and version", () => {
+    const metadata = readRealFeatureMetadata("claude-code");
+
+    expect(metadata.id).toBe("claude-code");
+    expect(metadata.version).toBe("1.0.0");
+  });
+
+  it("declares a version option with default 'latest'", () => {
+    const metadata = readRealFeatureMetadata("claude-code");
+
+    expect(metadata.options).toBeDefined();
+    expect(metadata.options!.version).toBeDefined();
+    expect(metadata.options!.version.type).toBe("string");
+    expect(metadata.options!.version.default).toBe("latest");
   });
 });

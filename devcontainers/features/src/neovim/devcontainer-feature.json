@@ -1,0 +1,25 @@
+{
+    "id": "neovim",
+    "version": "1.0.0",
+    "name": "Neovim",
+    "description": "Installs Neovim from GitHub releases. Declares a lace mount for persistent plugin state.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/neovim",
+    "options": {
+        "version": {
+            "type": "string",
+            "default": "v0.11.6",
+            "description": "Neovim release tag (e.g., v0.11.6, stable, nightly)."
+        }
+    },
+    "customizations": {
+        "lace": {
+            "mounts": {
+                "plugins": {
+                    "target": "/home/${_REMOTE_USER}/.local/share/nvim",
+                    "description": "Neovim plugin cache, undo history, and shada (persists across rebuilds)",
+                    "sourceMustBe": "directory"
+                }
+            }
+        }
+    }
+}

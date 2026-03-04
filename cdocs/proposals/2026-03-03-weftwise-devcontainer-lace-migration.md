@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/weftwise-migration
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [migration, weftwise, devcontainer, wezterm-server, port-allocation, workspace-layout, mounts, prebuilds, host-validation]
 related_to:
   - cdocs/proposals/2026-02-14-mount-template-variables.md

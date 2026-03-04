@@ -42,6 +42,16 @@ This feature declares a lace mount for `/home/${_REMOTE_USER}/.local/share/nvim`
 
 When the mount is active, plugin state persists across container rebuilds. Without the mount, plugins re-download on each rebuild (~30s depending on your plugin set).
 
+By default, lace uses `~/.local/share/nvim` on the host as the mount source (the standard neovim data directory). If this directory exists on your host, your host plugins will be shared with the container. To use a different path, add a settings override to `~/.config/lace/settings.json`:
+
+```json
+{
+  "mounts": {
+    "neovim/plugins": { "source": "/path/to/your/nvim-data" }
+  }
+}
+```
+
 ## What gets installed
 
 - `/usr/local/bin/nvim`: Neovim binary
@@ -55,6 +65,6 @@ When the mount is active, plugin state persists across container rebuilds. Witho
 
 ## Lace mount declarations
 
-| Label | Target | Type | Description |
-|-------|--------|------|-------------|
-| `neovim/plugins` | `/home/${_REMOTE_USER}/.local/share/nvim` | directory | Neovim plugin cache, undo history, and shada |
+| Label | Target | Type | Default Source | Description |
+|-------|--------|------|----------------|-------------|
+| `neovim/plugins` | `/home/${_REMOTE_USER}/.local/share/nvim` | directory | `~/.local/share/nvim` | Neovim plugin cache, undo history, and shada |

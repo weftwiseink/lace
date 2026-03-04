@@ -29,6 +29,7 @@ Devcontainer features published to `ghcr.io/weftwiseink/devcontainer-features`:
 
 | Feature | Description |
 |---------|-------------|
+| [`neovim`](devcontainers/features/src/neovim/) | Installs Neovim from GitHub releases with lace mount for persistent plugin state. |
 | [`wezterm-server`](devcontainers/features/src/wezterm-server/) | Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains. |
 
 ## Dogfooding
@@ -70,6 +71,7 @@ lace/
 ├── devcontainers/
 │   └── features/          # Devcontainer features (OCI-published)
 │       └── src/
+│           ├── neovim/
 │           └── wezterm-server/
 ├── .devcontainer/         # This project's own devcontainer config
 ├── config/                # Terminal environment configs (wezterm, nvim)

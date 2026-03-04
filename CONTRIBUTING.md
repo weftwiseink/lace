@@ -262,7 +262,7 @@ const mockSubprocess: RunSubprocess = (command, args) => {
 ### `IMPLEMENTATION_VALIDATION` marker
 
 Every source file starts with `// IMPLEMENTATION_VALIDATION`. This is a
-tooling marker. All 42+ source and test files in `packages/lace/src/`
+tooling marker. All 50 source and test files in `packages/lace/src/`
 use it consistently.
 
 ### Interface ownership

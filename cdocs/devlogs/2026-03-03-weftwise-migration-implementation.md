@@ -7,6 +7,12 @@ type: devlog
 state: live
 status: done
 tags: [migration, weftwise, devcontainer, incremental]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-03-04T12:00:00-08:00
+  round: 2
+  note: "Revision addressed: updated deferred phases section to reflect P6-7 completion"
 ---
 
 # Weftwise Devcontainer Lace Migration Implementation
@@ -129,28 +135,23 @@ LACE_RESULT: {"exitCode":0,"failedPhase":null,"containerMayBeRunning":false}
 - Mount source validation (sourceMustBe checks)
 - Host validation failure messages (when SSH key is missing)
 
-## Deferred Phases
+## Phases 6-7 (Completed Separately)
 
-### Phase 6: Prebuilds (BLOCKED)
-**Blocked on**: GHCR publication of features (`ghcr.io/weftwiseink/lace/wezterm-server:1`, `ghcr.io/weftwiseink/lace/claude-code:1`, `ghcr.io/weftwiseink/lace/neovim:1`).
+Phases 6 and 7 were completed in a follow-up session after GHCR publication was established. See `cdocs/devlogs/2026-03-04-weftwise-migration-phases-6-7.md` for details.
 
-Prebuilds require published OCI references because `lace prebuild` pulls features from a registry to build cached `lace.local/` images. Local path references cannot be used with the prebuild system.
-
-**To unblock**: Establish GHCR publication pipeline for lace devcontainer features. Then add `prebuildFeatures` to `customizations.lace` in devcontainer.json.
-
-### Phase 7: lace up Entry Point (BLOCKED)
-**Blocked on**: All prior phases being verified in a real container environment, plus GHCR publication (Phase 6 dependency).
-
-**To unblock**: Complete Phase 6, then verify end-to-end with `lace up` from a clean state. Update project documentation to reference `lace up` instead of `devcontainer up`.
+- **Phase 6**: Local path refs switched to published GHCR OCI refs (`ghcr.io/weftwiseink/devcontainer-features/<feature>:1`). Features moved to `prebuildFeatures` (lace enforces mutual exclusivity with `features`). Prebuild image `lace.local/node:24-bookworm` built successfully.
+- **Phase 7**: `lace up --skip-devcontainer-up` verified end-to-end with GHCR refs. Port allocation, mount resolution, and workspace layout all confirmed working.
+- **Bug fix**: Neovim `install.sh` needed v-prefix normalization for version strings (e.g., `0.11.6` → `v0.11.6`).
 
 ## Summary
 
-Phases 1-5 implemented in the weftwise repo on branch `implement/lace-migration` across 6 commits. The Dockerfile was reduced from 186 to ~110 lines by removing ~60 lines of generic tool installation (Neovim, WezTerm, Claude Code, SSH setup, runtime dir, bash history persistence). These are now provided by three lace devcontainer features referenced via local relative paths.
+All 7 phases implemented across two sessions. Phases 1-5 in this session (6 commits on `implement/lace-migration`), Phases 6-7 in the follow-up (2 commits). The Dockerfile was reduced from 186 to ~110 lines by removing ~60 lines of generic tool installation (Neovim, WezTerm, Claude Code, SSH setup, runtime dir, bash history persistence). These are now provided by three lace devcontainer features published to GHCR.
 
 The devcontainer.json was restructured to use:
 - **Workspace layout detection** (`customizations.lace.workspace`) instead of manual `workspaceMount`/`workspaceFolder`/`postCreateCommand`
 - **Lace mount declarations** (`customizations.lace.mounts`) instead of static mount strings
 - **Lace port allocation** (via wezterm-server feature port metadata) instead of hardcoded `appPort`
 - **Host validation** (`customizations.lace.validate`) for SSH key pre-flight checks
+- **Prebuild features** (`customizations.lace.prebuildFeatures`) for cached image layers via GHCR OCI refs
 
 Verification via `lace up --skip-devcontainer-up` confirmed all declarations are correctly resolved. Phases 6 (prebuilds) and 7 (lace up entry point) are deferred pending GHCR feature publication.

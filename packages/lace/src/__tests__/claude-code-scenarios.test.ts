@@ -174,3 +174,95 @@ describe("Scenario C3: sourceMustBe validation rejects missing source", () => {
     expect(result.message).toContain("does not exist");
   });
 });
+
+// ── C4: Docker smoke test ──
+
+describe.skipIf(!isDockerAvailable())(
+  "Scenario C4: Docker smoke test -- claude installed and config dir exists",
+  { timeout: 180_000 },
+  () => {
+    let containerId: string | null = null;
+
+    afterEach(() => {
+      if (containerId) {
+        stopContainer(containerId);
+        containerId = null;
+      }
+      cleanupWorkspaceContainers(ctx.workspaceRoot);
+    });
+
+    it("builds container with claude CLI and .claude directory", async () => {
+      // Use copyLocalFeature (not symlink) because Docker build context
+      // does not follow symlinks.
+      const featurePath = copyLocalFeature(ctx, "claude-code");
+
+      // Provide a source directory for the mount
+      const claudeDir = join(ctx.workspaceRoot, ".claude-source");
+      mkdirSync(claudeDir, { recursive: true });
+      setupScenarioSettings(ctx, {
+        mounts: {
+          "claude-code/config": { source: claudeDir },
+        },
+      });
+
+      // Use node base image (has npm preinstalled) to avoid feature
+      // ordering issues -- claude-code install.sh requires npm.
+      const config = {
+        image: "node:24-bookworm",
+        features: {
+          [featurePath]: {},
+        },
+      };
+
+      writeDevcontainerJson(ctx, config);
+
+      // Phase A: Run lace up for config generation only
+      const result = await runUp({
+        workspaceFolder: ctx.workspaceRoot,
+        skipDevcontainerUp: true,
+        cacheDir: ctx.metadataCacheDir,
+      });
+
+      expect(result.exitCode).toBe(0);
+
+      // Phase B: Prepare config for devcontainer CLI with relative paths
+      prepareGeneratedConfigForDocker(
+        ctx,
+        new Map([[featurePath, "claude-code"]]),
+      );
+
+      // Invoke devcontainer up
+      try {
+        const upOutput = execSync(
+          `devcontainer up --workspace-folder "${ctx.workspaceRoot}"`,
+          { stdio: "pipe", timeout: 120_000 },
+        ).toString();
+
+        const parsed = JSON.parse(upOutput) as {
+          outcome: string;
+          containerId?: string;
+        };
+        if (parsed.containerId) {
+          containerId = parsed.containerId;
+        }
+      } catch (err) {
+        const error = err as { stderr?: Buffer; stdout?: Buffer };
+        console.error(
+          "devcontainer up failed:",
+          error.stderr?.toString() ?? "",
+        );
+        console.error("stdout:", error.stdout?.toString() ?? "");
+        throw new Error("devcontainer up failed in C4");
+      }
+
+      // Verify claude is installed
+      const claudeVersion = execSync(
+        `docker exec ${containerId} claude --version`,
+        { stdio: "pipe", timeout: 10_000 },
+      )
+        .toString()
+        .trim();
+      expect(claudeVersion).toBeTruthy();
+    });
+  },
+);

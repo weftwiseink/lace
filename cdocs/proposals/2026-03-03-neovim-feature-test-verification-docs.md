@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-features
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [testing, neovim, devcontainer-features, mounts, scenario-tests, docker, documentation]
 references:
   - devcontainers/features/src/neovim/devcontainer-feature.json

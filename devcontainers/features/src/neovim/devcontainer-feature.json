@@ -17,7 +17,8 @@
                 "plugins": {
                     "target": "/home/${_REMOTE_USER}/.local/share/nvim",
                     "description": "Neovim plugin cache, undo history, and shada (persists across rebuilds)",
-                    "sourceMustBe": "directory"
+                    "sourceMustBe": "directory",
+                    "recommendedSource": "~/.local/share/nvim"
                 }
             }
         }

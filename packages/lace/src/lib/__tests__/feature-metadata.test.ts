@@ -717,6 +717,87 @@ describe("extractLaceCustomizations", () => {
         ?.requireLocalPort,
     ).toBeUndefined();
   });
+
+  // ── Neovim feature metadata extraction ──
+
+  it("extracts neovim mount declaration with sourceMustBe: directory and recommendedSource", () => {
+    const metadata: FeatureMetadata = {
+      id: "neovim",
+      version: "1.0.0",
+      options: {
+        version: { type: "string", default: "v0.11.6" },
+      },
+      customizations: {
+        lace: {
+          mounts: {
+            plugins: {
+              target: "/home/${_REMOTE_USER}/.local/share/nvim",
+              description: "Neovim plugin cache, undo history, and shada (persists across rebuilds)",
+              sourceMustBe: "directory",
+              recommendedSource: "~/.local/share/nvim",
+            },
+          },
+        },
+      },
+    };
+
+    const lace = extractLaceCustomizations(metadata);
+    expect(lace).not.toBeNull();
+    expect(lace!.ports).toBeUndefined();
+    expect(lace!.mounts).toBeDefined();
+    expect(lace!.mounts!.plugins).toEqual({
+      target: "/home/${_REMOTE_USER}/.local/share/nvim",
+      description: "Neovim plugin cache, undo history, and shada (persists across rebuilds)",
+      sourceMustBe: "directory",
+      recommendedSource: "~/.local/share/nvim",
+      readonly: undefined,
+      type: undefined,
+      consistency: undefined,
+      hint: undefined,
+    });
+  });
+
+  it("returns undefined ports when neovim feature has only mounts", () => {
+    const metadata: FeatureMetadata = {
+      id: "neovim",
+      version: "1.0.0",
+      customizations: {
+        lace: {
+          mounts: {
+            plugins: {
+              target: "/home/vscode/.local/share/nvim",
+              sourceMustBe: "directory",
+              recommendedSource: "~/.local/share/nvim",
+            },
+          },
+        },
+      },
+    };
+
+    const lace = extractLaceCustomizations(metadata);
+    expect(lace).not.toBeNull();
+    expect(lace!.ports).toBeUndefined();
+    expect(lace!.mounts).toBeDefined();
+    expect(lace!.mounts!.plugins?.target).toBe("/home/vscode/.local/share/nvim");
+    expect(lace!.mounts!.plugins?.sourceMustBe).toBe("directory");
+    expect(lace!.mounts!.plugins?.recommendedSource).toBe("~/.local/share/nvim");
+  });
+
+  it("parseMountDeclarationEntry handles neovim-style mount with all fields", () => {
+    const result = parseMountDeclarationEntry("plugins", {
+      target: "/home/${_REMOTE_USER}/.local/share/nvim",
+      description: "Neovim plugin cache, undo history, and shada (persists across rebuilds)",
+      sourceMustBe: "directory",
+      recommendedSource: "~/.local/share/nvim",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.target).toBe("/home/${_REMOTE_USER}/.local/share/nvim");
+    expect(result!.sourceMustBe).toBe("directory");
+    expect(result!.recommendedSource).toBe("~/.local/share/nvim");
+    expect(result!.description).toBe("Neovim plugin cache, undo history, and shada (persists across rebuilds)");
+    expect(result!.readonly).toBeUndefined();
+  });
 });
 
 describe("validateFeatureOptions", () => {

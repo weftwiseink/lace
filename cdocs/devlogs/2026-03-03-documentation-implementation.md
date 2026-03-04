@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/documentation
 type: devlog
 state: live
-status: wip
+status: done
 tags: [documentation, architecture, troubleshooting, migration, contributing]
 ---
 
@@ -73,8 +73,86 @@ Implement the 5-phase documentation proposal (`cdocs/proposals/2026-03-03-docume
 
 ## Changes Made
 
-_(Updated as commits are made)_
+### Phase 1: Architecture Overview
+- Created `packages/lace/docs/architecture.md`
+- Pipeline flow narrative with ASCII diagram
+- Layer-to-step mapping table (10 layers to 14 README steps)
+- Dependency flow explanation
+- Two worked examples (port resolution, mount resolution)
+- Settings and state files section
+- Commit: `docs: add architecture overview with pipeline flow diagram`
+
+### Phase 2: Troubleshooting Guide
+- Created `packages/lace/docs/troubleshooting.md`
+- 10 entries, all error messages grep-verified against source:
+  1. Port exhaustion (`All ports in range 22425-22499 are in use`)
+  2. Stale metadata cache (24h TTL)
+  3. Prebuild image missing (`Prebuild image missing (...)`)
+  4. Docker auto-creates dir (`Bind mount source does not exist`)
+  5. Unknown template (`Unknown template variable`)
+  6. Default path mount (`using default path`)
+  7. Workspace mismatch (`bare-worktree declared but ... normal git clone`)
+  8. Metadata fetch failure (`Failed to fetch metadata for feature`)
+  9. Namespace validation (`Unknown mount namespace(s)`)
+  10. Lock contention (`Another lace operation is already running`)
+- Commit: `docs: add troubleshooting guide with verified error messages`
+
+### Phase 3: Migration Guide
+- Created `packages/lace/docs/migration.md`
+- 6 incremental steps with before/after configs
+- "What NOT to migrate" section
+- Commit: `docs: add migration guide from devcontainer CLI to lace`
+
+### Phase 4: Contributing Guidelines
+- Created `CONTRIBUTING.md` at repo root
+- 7 codebase idioms with verified code snippets
+- Testing patterns section
+- Conventions section with NOTE about source verification
+- Commit: `docs: add CONTRIBUTING.md with codebase idioms and testing patterns`
+- Added cross-reference comments in 11 source files
+- Build verified after source changes
+- Commit: `docs: add source cross-reference comments for CONTRIBUTING.md`
+
+### Phase 5: Cross-Linking
+- Added "Documentation" section to root `README.md`
+- Added "Further reading" section to `packages/lace/README.md`
+- Commit: `docs: cross-link new documentation from READMEs`
 
 ## Verification
 
-_(Updated after self-review)_
+### Cross-reference validity
+- All `../README.md#section` links verified against actual heading slugs:
+  `#lace-up`, `#port-allocation`, `#template-variables`, `#mount-templates`,
+  `#workspace-layout`, `#host-side-validation`, `#user-level-data`,
+  `#hardcoded-defaults`
+- `../../CONTRIBUTING.md` relative path from `packages/lace/README.md` confirmed
+- All `packages/lace/docs/*.md` files exist and are linked from both READMEs
+
+### Error message verification
+- Every error message in troubleshooting.md was grep-verified against source:
+  - `All ports in range` -> port-allocator.ts:157
+  - `Prebuild image missing` -> prebuild.ts:206
+  - `Bind mount source does not exist` -> up.ts:482
+  - `Unknown template variable` -> template-resolver.ts:642
+  - `using default path` -> template-resolver.ts:396
+  - `bare-worktree declared but` -> workspace-layout.ts:128
+  - `Failed to fetch metadata for feature` -> feature-metadata.ts:126
+  - `Unknown mount namespace` -> template-resolver.ts:341
+  - `Another lace operation is already running` -> flock.ts:34
+  - `Mount override source does not exist` -> mount-resolver.ts:222
+
+### Code snippet verification
+- `DevcontainerConfigError` constructor matches devcontainer.ts:39-44
+- `PrebuildFeaturesResult` type matches devcontainer.ts:7-11
+- `UpResult` interface matches up.ts:69-83
+- `RunSubprocess` type matches subprocess.ts:14-18
+- `LACE_PORT_FULL_MATCH` regex matches template-resolver.ts:45
+- `LACE_UNKNOWN_PATTERN` regex matches template-resolver.ts:44
+- `LABEL_PATTERN` regex matches mount-resolver.ts:38
+
+### Pipeline accuracy
+- Layer-to-step mapping verified against runUp() in up.ts and README's 14-step list
+- All 14 steps accounted for in the mapping table
+
+### Build verification
+- `pnpm --filter lace build` passes after all source cross-reference comments

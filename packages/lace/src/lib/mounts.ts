@@ -15,6 +15,7 @@ import {
 } from "./repo-clones";
 import type { RunSubprocess } from "./subprocess";
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export class MountsError extends Error {
   constructor(message: string) {
     super(message);

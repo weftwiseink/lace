@@ -55,6 +55,7 @@ export interface ScenarioWorkspace {
   cleanup: () => void;
 }
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 /**
  * Create a temporary workspace directory for a scenario test.
  * Includes .devcontainer/ subdirectory and an isolated metadata cache.

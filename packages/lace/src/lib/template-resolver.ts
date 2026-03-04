@@ -42,6 +42,7 @@ const LACE_MOUNT_SOURCE_PATTERN = /\$\{lace\.mount\(([^)]+)\)\.source\}/g;
 const LACE_MOUNT_PATTERN = /\$\{lace\.mount\(([^)]+)\)\}/g;
 // Guard: rejects any ${lace.*} that isn't port() or mount()
 const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\(|mount\()([^}]+)\}/;
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 const LACE_PORT_FULL_MATCH = /^\$\{lace\.port\(([^)]+)\)\}$/;
 
 // ── Prebuild features raw access ──

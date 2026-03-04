@@ -35,6 +35,7 @@ export interface MountAssignmentsFile {
 
 // ── Label validation ──
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 const LABEL_PATTERN = /^[a-z0-9_-]+\/[a-z0-9_-]+$/;
 
 /**

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 /** Discriminated result for prebuild feature extraction. */
 export type PrebuildFeaturesResult =
   | { kind: "features"; features: Record<string, Record<string, unknown>> }
@@ -10,6 +11,7 @@ export type PrebuildFeaturesResult =
   | { kind: "null" }
   | { kind: "empty" };
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 /** Build source for a devcontainer config - either Dockerfile-based or image-based. */
 export type ConfigBuildSource =
   | { kind: "dockerfile"; path: string }
@@ -36,6 +38,7 @@ export type RepoMountsResult =
   | { kind: "null" }
   | { kind: "empty" };
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export class DevcontainerConfigError extends Error {
   constructor(message: string) {
     super(message);

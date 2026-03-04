@@ -1,4 +1,4 @@
-// IMPLEMENTATION_VALIDATION
+// IMPLEMENTATION_VALIDATION -- Documented in CONTRIBUTING.md
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
@@ -66,6 +66,7 @@ export interface UpOptions {
   skipValidation?: boolean;
 }
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export interface UpResult {
   exitCode: number;
   message: string;

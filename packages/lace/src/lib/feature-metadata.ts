@@ -106,6 +106,7 @@ export type MetadataFetchKind =
   | "annotation_invalid" // Annotation present but malformed JSON
   | "blob_fallback_failed"; // Blob download/extraction failed after annotation missing
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 /** Error thrown when metadata cannot be fetched and skipValidation is false. */
 export class MetadataFetchError extends Error {
   constructor(

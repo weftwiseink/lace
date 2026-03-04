@@ -24,6 +24,7 @@ export interface ParsedDockerfile {
   fromLineText: string;
 }
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export class DockerfileParseError extends Error {
   constructor(
     message: string,

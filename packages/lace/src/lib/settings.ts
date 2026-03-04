@@ -38,6 +38,7 @@ export interface RepoMountSettings {
   };
 }
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export class SettingsConfigError extends Error {
   constructor(message: string) {
     super(message);

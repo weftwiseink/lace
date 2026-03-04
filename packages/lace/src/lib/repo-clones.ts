@@ -8,6 +8,7 @@ import { parseRepoId } from "./devcontainer";
 import { classifyWorkspace } from "./workspace-detector";
 import { deriveProjectName } from "./project-name";
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 export class RepoCloneError extends Error {
   constructor(message: string) {
     super(message);

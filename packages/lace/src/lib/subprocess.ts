@@ -7,6 +7,7 @@ export interface SubprocessResult {
   stderr: string;
 }
 
+// Documented in CONTRIBUTING.md -- update if changing this pattern
 /**
  * Thin wrapper for subprocess invocation, easily mockable in tests.
  * Default implementation shells out using execFileSync.

@@ -755,3 +755,11 @@ Values that are fixed today but could become user-configurable:
 | Docker image tag prefix | `dockerfile.ts` | `lace.local/` |
 
 Note: paths under `~/.config/lace/` do not currently honor `$XDG_CONFIG_HOME` or `$XDG_CACHE_HOME`. The cache directory is stored alongside config rather than under `$XDG_CACHE_HOME`.
+
+## Further reading
+
+- [Architecture overview](docs/architecture.md) -- how `lace up` transforms your config through its pipeline
+- [Troubleshooting guide](docs/troubleshooting.md) -- common failure modes with symptoms, causes, and fixes
+- [Migration guide](docs/migration.md) -- incremental steps from `devcontainer` CLI to lace
+- [Prebuild internals](docs/prebuild.md) -- FROM rewriting, cache behavior, image tagging
+- [Contributing guidelines](../../CONTRIBUTING.md) -- codebase idioms, testing patterns, conventions

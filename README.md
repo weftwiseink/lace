@@ -77,6 +77,14 @@ lace/
 └── cdocs/                 # Project documentation
 ```
 
+## Documentation
+
+- [Architecture overview](packages/lace/docs/architecture.md) -- pipeline flow, layer dependencies, worked examples
+- [Troubleshooting guide](packages/lace/docs/troubleshooting.md) -- common failure modes and fixes
+- [Migration guide](packages/lace/docs/migration.md) -- from standard `devcontainer` CLI to lace
+- [Prebuild internals](packages/lace/docs/prebuild.md) -- cache behavior, image tagging, lock files
+- [Contributing guidelines](CONTRIBUTING.md) -- codebase idioms, testing patterns, conventions
+
 ## License
 
 MIT

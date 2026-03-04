@@ -29,6 +29,7 @@ Devcontainer features published to `ghcr.io/weftwiseink/devcontainer-features`:
 
 | Feature | Description |
 |---------|-------------|
+| [`claude-code`](devcontainers/features/src/claude-code/) | Installs Claude Code CLI via npm. Declares a lace mount for persistent `~/.claude` configuration. |
 | [`neovim`](devcontainers/features/src/neovim/) | Installs Neovim from GitHub releases with lace mount for persistent plugin state. |
 | [`wezterm-server`](devcontainers/features/src/wezterm-server/) | Installs `wezterm-mux-server` and `wezterm` CLI for headless terminal multiplexing via SSH domains. |
 
@@ -71,6 +72,7 @@ lace/
 ├── devcontainers/
 │   └── features/          # Devcontainer features (OCI-published)
 │       └── src/
+│           ├── claude-code/
 │           ├── neovim/
 │           └── wezterm-server/
 ├── .devcontainer/         # This project's own devcontainer config

@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/claude-code-feature
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [testing, claude-code, devcontainer-features, mounts, scenario-tests, documentation, verification]
 references:
   - devcontainers/features/src/claude-code/devcontainer-feature.json

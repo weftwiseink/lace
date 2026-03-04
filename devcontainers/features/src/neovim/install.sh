@@ -3,6 +3,12 @@ set -eu
 
 VERSION="${VERSION:-v0.11.6}"
 
+# Normalize version: ensure 'v' prefix (neovim tags are v0.x.y)
+case "$VERSION" in
+    v*) ;;
+    *)  VERSION="v${VERSION}" ;;
+esac
+
 # Verify curl is available
 command -v curl >/dev/null 2>&1 || {
     echo "Error: curl is required. Install it or add ghcr.io/devcontainers/features/common-utils."

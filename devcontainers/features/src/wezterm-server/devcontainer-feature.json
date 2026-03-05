@@ -44,6 +44,9 @@
     },
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/wezterm-server",
     "licenseURL": "https://github.com/weftwiseink/lace/blob/main/LICENSE",
+    "dependsOn": {
+        "ghcr.io/devcontainers/features/sshd:1": {}
+    },
     "installsAfter": [
         "ghcr.io/devcontainers/features/common-utils",
         "ghcr.io/devcontainers/features/sshd"

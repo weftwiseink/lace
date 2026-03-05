@@ -11,6 +11,9 @@
             "description": "Claude Code version to install (npm version specifier)."
         }
     },
+    "dependsOn": {
+        "ghcr.io/devcontainers/features/node:1": {}
+    },
     "customizations": {
         "lace": {
             "mounts": {

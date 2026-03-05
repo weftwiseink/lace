@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/weftwise-migration
 type: proposal
 state: live
-status: implementation_accepted
+status: result_accepted
 tags: [migration, weftwise, devcontainer, wezterm-server, port-allocation, workspace-layout, mounts, prebuilds, host-validation]
 related_to:
   - cdocs/proposals/2026-02-14-mount-template-variables.md
@@ -28,7 +28,7 @@ last_reviewed:
 
 Replace weftwise's hand-rolled devcontainer infrastructure with lace's declarative equivalents, achieving:
 
-1. **Multi-worktree support**: eliminate the hardcoded port 2222 that prevents running multiple devcontainer instances simultaneously.
+1. **Multi-project support**: eliminate the hardcoded port 2222 that prevents running devcontainers from multiple projects simultaneously (e.g., weftwise and lace each with their own container).
 2. **Team portability**: replace hardcoded host paths (`${localEnv:HOME}/code/dev_records/weft/...`) with mount declarations that team members can override via `~/.config/lace/settings.json`.
 3. **Fail-fast validation**: catch missing SSH keys and mount sources before Docker silently creates root-owned empty directories.
 4. **Faster rebuilds**: cache Claude Code and Neovim installation across container rebuilds via lace prebuilds.
@@ -320,7 +320,7 @@ Lines removed: ~60 (WezTerm install, runtime dir, SSH dir, Neovim install, Claud
 
 **Decision:** Replace `"appPort": ["2222:2222"]` with lace's symmetric port allocation rather than simply choosing a different hardcoded port.
 
-**Why:** The fundamental problem is not that port 2222 is a bad choice, but that any hardcoded port prevents running multiple devcontainer instances simultaneously. Weftwise uses bare-worktree git layout specifically to support parallel worktree development; a hardcoded port undermines that goal by limiting the host to one running container at a time. Lace's port allocator assigns from the 22425-22499 range, persists assignments in `.lace/port-assignments.json`, and detects conflicts. This supports the multi-worktree workflow without manual port management.
+**Why:** The fundamental problem is not that port 2222 is a bad choice, but that any hardcoded port prevents running devcontainers from multiple projects simultaneously (e.g., weftwise and lace each with their own container). Within a single project, the bare-worktree layout mounts the parent directory (containing `.bare/` and all worktrees) into ONE container, so all worktrees share a single port allocation. But across projects, each project gets its own container and needs its own ports. Lace's port allocator assigns from the 22425-22499 range, persists assignments in `.lace/port-assignments.json`, and detects conflicts. This supports the multi-project workflow without manual port management.
 
 ### Decision: SSH Key Path Migration
 
@@ -354,9 +354,11 @@ Lines removed: ~60 (WezTerm install, runtime dir, SSH dir, Neovim install, Claud
 
 ## Edge Cases / Challenging Scenarios
 
-### Multiple Worktrees With Different Containers Running
+### Multiple Projects With Different Containers Running
 
-After migration, two worktrees (e.g., `main` and `feature-x`) can run devcontainers simultaneously because lace allocates different ports from the 22425-22499 range. However, the host WezTerm SSH domain configuration must be updated to use dynamic port discovery rather than a hardcoded port. If the host config is not updated, connections will target the wrong port.
+After migration, multiple projects (e.g., weftwise and lace) can run devcontainers simultaneously because lace allocates different ports from the 22425-22499 range for each project's container. Within a single project like weftwise, all worktrees (`main`, `feature-x`, etc.) share ONE container -- the bare-worktree parent directory is mounted, giving access to all worktrees as sibling directories inside the same container. Port allocation matters for the multi-project case, not for multi-worktree within one project.
+
+However, the host WezTerm SSH domain configuration must be updated to use dynamic port discovery rather than a hardcoded port. If the host config is not updated, connections will target the wrong port.
 
 **Handling:** Phase 2 explicitly includes updating the host WezTerm SSH domain config. The `wez-into` CLI discovers ports dynamically via `lace-discover`, which queries Docker container labels and port mappings at runtime (`docker ps` filtering for the `devcontainer.local_folder` label and ports in the 22425-22499 range). `wez-into` does **not** read `.lace/port-assignments.json` directly -- port discovery is entirely Docker-label-based, which means it works even if the `.lace/` directory is not accessible from the host shell's CWD. For manual SSH domain configs without `wez-into`, the `lace status` command displays the allocated port.
 

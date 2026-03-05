@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-03T20:00:00-08:00
 task_list: lace/weftwise-migration
 type: devlog
-state: live
+state: archived
 status: done
 tags: [migration, weftwise, devcontainer, incremental]
 last_reviewed:

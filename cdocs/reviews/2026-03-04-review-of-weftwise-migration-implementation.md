@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-04T12:00:00-08:00
 task_list: lace/weftwise-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, migration, devcontainer, implementation_fidelity, stale_documentation]
 ---

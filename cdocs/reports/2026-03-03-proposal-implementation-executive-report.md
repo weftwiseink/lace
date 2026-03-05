@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-03T21:00:00-08:00
 task_list: lace/devcontainer-features
 type: report
-state: live
+state: archived
 status: done
 tags: [executive-summary, implementation, testing, documentation, migration, parallel-agents]
 ---

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-05T10:00:00-06:00
 task_list: lace/feature-dependencies
 type: devlog
-state: live
+state: archived
 status: done
 tags: [devcontainer-features, dependencies, install-safety, dependsOn, lace]
 related_to:

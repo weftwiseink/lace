@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/documentation
 type: proposal
 state: live
-status: implemented
+status: result_accepted
 tags: [documentation, architecture, onboarding, migration, contributing, troubleshooting, idioms]
 last_reviewed:
   status: revision_requested

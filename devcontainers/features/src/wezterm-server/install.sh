@@ -118,5 +118,15 @@ fi
 ENTRYPOINT
 chmod +x "$WEZTERM_SERVER_DIR/entrypoint.sh"
 
+# Warn if sshd is not present — SSH domain multiplexing requires it.
+# This is a warning (not fatal) because:
+#   - With dependsOn, the sshd feature is auto-installed on supported tools.
+#   - With installsAfter only, sshd may install after this feature runs.
+#   - DevPod does not support dependsOn, so users must add sshd manually.
+if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
+    echo "WARNING: sshd not found. WezTerm SSH domain multiplexing requires an SSH server."
+    echo "Add ghcr.io/devcontainers/features/sshd:1 to your devcontainer.json features."
+fi
+
 echo "wezterm-mux-server and wezterm CLI installed successfully."
 wezterm-mux-server --version || true

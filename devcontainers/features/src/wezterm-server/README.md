@@ -130,6 +130,22 @@ This feature declares the following mount in its `devcontainer-feature.json` met
 When lace fetches the feature metadata from the OCI registry, it auto-injects a `${lace.mount(wezterm-server/authorized-keys)}` entry into the `mounts` array and validates the source file exists before container creation.
 If the devcontainer.json already has a static mount targeting `/home/node/.ssh/authorized_keys`, lace deduplicates it automatically.
 
+## Dependencies
+
+This feature requires an SSH server for WezTerm SSH domain multiplexing.
+
+| Dependency | Why | Auto-installed? |
+|------------|-----|-----------------|
+| `ghcr.io/devcontainers/features/sshd:1` | SSH server for remote terminal access | Yes (via `dependsOn`) |
+| `curl` | Downloads WezTerm release packages | No -- must be in base image |
+| `dpkg` | Extracts `.deb` packages (Debian/Ubuntu only) | No -- must be in base image |
+
+**Automatic dependency resolution:** On tools that support `dependsOn` (devcontainer CLI v0.44.0+, VS Code), the sshd feature is installed automatically. You do not need to add it to your `devcontainer.json` manually.
+
+**DevPod users:** DevPod does not currently support `dependsOn`. You must manually add `ghcr.io/devcontainers/features/sshd:1` to your `devcontainer.json` features. Without it, the container will build successfully but SSH domain connections will fail at runtime.
+
+The install script prints a warning if sshd is not detected after installation.
+
 ## Feature ordering
 
 This feature declares `installsAfter` for:

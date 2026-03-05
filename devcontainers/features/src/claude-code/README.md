@@ -50,6 +50,22 @@ This feature declares the following mount in its `devcontainer-feature.json` met
 
 When lace fetches the feature metadata from the OCI registry, it auto-injects a mount entry and validates the source directory exists before container creation.
 
+## Dependencies
+
+This feature requires Node.js (specifically `npm`) to install the Claude Code CLI.
+
+| Dependency | Why | Auto-installed? |
+|------------|-----|-----------------|
+| `ghcr.io/devcontainers/features/node:1` | Provides `npm` for global CLI installation | Yes (via `dependsOn`) |
+
+**Automatic dependency resolution:** On tools that support `dependsOn` (devcontainer CLI v0.44.0+, VS Code), the node feature is installed automatically. You do not need to add it to your `devcontainer.json` manually.
+
+**DevPod users:** DevPod does not currently support `dependsOn`. You must manually add `ghcr.io/devcontainers/features/node:1` to your `devcontainer.json` features, or use a base image that includes Node.js.
+
+**Base images with Node.js:** If your base image already includes `npm` (e.g., `mcr.microsoft.com/devcontainers/javascript-node`), the node feature dependency is satisfied by the base image and `dependsOn` will not install a duplicate.
+
+The install script exits with an error if `npm` is not found.
+
 ## What gets installed
 
 - `claude` CLI installed globally via `npm install -g @anthropic-ai/claude-code`

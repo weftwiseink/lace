@@ -52,6 +52,18 @@ By default, lace uses `~/.local/share/nvim` on the host as the mount source (the
 }
 ```
 
+## Dependencies
+
+This feature requires `curl` to download Neovim release tarballs. No feature-level dependencies are needed.
+
+| Dependency | Why | Auto-installed? |
+|------------|-----|-----------------|
+| `curl` | Downloads Neovim release tarballs from GitHub | No -- must be in base image |
+
+Most devcontainer base images include `curl`. If yours does not, add `ghcr.io/devcontainers/features/common-utils` to your `devcontainer.json` features.
+
+The install script exits with an error if `curl` is not found.
+
 ## What gets installed
 
 - `/usr/local/bin/nvim`: Neovim binary

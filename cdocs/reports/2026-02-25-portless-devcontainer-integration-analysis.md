@@ -15,7 +15,7 @@ tags: [analysis, research, portless, networking, worktrees, devcontainers]
 
 ## Context / Background
 
-Lace manages devcontainer orchestration with symmetric port allocation, worktree-aware workspace detection, and declarative feature metadata. When developing across multiple worktrees (e.g., `main`, `feature-auth`, `bugfix-api`), each worktree gets its own devcontainer with its own allocated ports.
+Lace manages devcontainer orchestration with symmetric port allocation, worktree-aware workspace detection, and declarative feature metadata. When using the bare-worktree layout, the parent directory (containing `.bare/` and all worktrees) is mounted into a single devcontainer, with `workspaceFolder` selecting which worktree to open. All worktrees (e.g., `main`, `feature-auth`, `bugfix-api`) are accessible as sibling directories inside the same container. Port allocation matters across projects (each project gets its own container), not across worktrees within one project.
 
 The problem: developers must remember which port corresponds to which service in which worktree. Portless solves exactly this for non-containerized Node.js development — replacing `localhost:4237` with `api-main.localhost:1355`. The question is whether and how to bridge portless into the containerized worktree workflow that lace manages.
 

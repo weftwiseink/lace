@@ -26,7 +26,7 @@ Lace already solves requirement 1 (symmetric port allocation in the 22425-22499 
 
 ## Key Findings
 
-- **No existing tool targets the "multiple worktrees, each with their own devcontainer" problem** with named domain routing. Portree comes closest but has no container awareness. DevTree has container awareness but no domain naming.
+- **No existing tool targets the "multiple worktrees inside a single devcontainer" problem** with named domain routing. In lace's model, one container mounts the bare-repo parent (containing all worktrees), and dev servers in different worktrees conflict on ports within that container. Portree comes closest to domain routing but has no container awareness. DevTree has container awareness but no domain naming.
 - **The `*.localhost` DNS trick (RFC 6761) is the foundation** that makes all of this work without `/etc/hosts` modification or dnsmasq. Chrome resolves `*.localhost` to `127.0.0.1` natively; Firefox is trailing but functional since v69 for base localhost.
 - **Container-aware reverse proxies (Traefik, caddy-docker-proxy, nginx-proxy) auto-discover containers** via Docker socket watching and label-based routing, but they run as Docker services themselves and target the multi-service production-like topology, not the single-developer multi-worktree case.
 - **Port allocation libraries (get-port, detect-port, portfinder) solve a different problem** -- finding a free port at startup -- not managing a persistent, coordinated allocation across multiple long-running environments. Lace's existing port allocator already handles this.

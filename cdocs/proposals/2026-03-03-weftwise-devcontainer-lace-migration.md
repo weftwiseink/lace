@@ -510,7 +510,7 @@ The wezterm-server feature declares `hostSshPort` in its `customizations.lace.po
 **Verification:**
 - Run `lace up --skip-devcontainer-up` and inspect `.lace/devcontainer.json` for `appPort` with a port in 22425-22499
 - Verify `.lace/port-assignments.json` contains the allocation
-- Start two containers from different worktrees simultaneously and confirm both allocate different ports
+- Start containers from two different projects simultaneously and confirm both allocate different ports
 - Verify WezTerm SSH connection succeeds on the allocated port
 
 **Constraints:**

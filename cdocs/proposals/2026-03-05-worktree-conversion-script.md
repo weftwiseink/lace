@@ -13,21 +13,22 @@ related_to:
   - cdocs/proposals/2026-03-03-weftwise-devcontainer-lace-migration.md
 ---
 
-# `wt clone`: Bare-Worktree Clone Command (Nushell)
+# `wt-clone`: Bare-Worktree Clone Command (Nushell)
 
-> BLUF: A `wt clone` nushell command in the user's dotfiles creates fresh
+> BLUF: A `wt-clone` nushell command in the user's dotfiles creates fresh
 > bare-worktree clones that lace's `classifyWorkspace()` immediately
 > recognizes. The command handles the multi-step git ceremony (bare clone,
 > `.git` file creation, refspec configuration, worktree creation, relative
-> gitdir fixup) in a single invocation. No conversion logic -- the user
-> philosophy is "push, delete, re-clone" rather than converting in-place.
+> gitdir fixup) in a single invocation. Named `wt-clone` to avoid collision
+> with the installed `wt` (worktrunk) binary. No conversion logic -- the
+> user philosophy is "push, delete, re-clone" rather than converting in-place.
 
 ## Objective
 
 Make it trivial to clone any git repository into the bare-worktree layout
 that lace expects. Today this requires remembering a 6-step manual process
 (`git clone --bare`, create `.git` file, fix refspec, fetch, add worktree,
-fix gitdir paths). `wt clone` reduces that to one command.
+fix gitdir paths). `wt-clone` reduces that to one command.
 
 ## Background
 
@@ -70,8 +71,8 @@ has many failure modes:
 - An interrupted in-place conversion leaves the repo in an inconsistent state
 - Remote URLs need fixup after local-to-local bare clone
 
-A fresh `wt clone` from the remote avoids all of these. The user pushes
-their work, deletes the old clone, and runs `wt clone` to get a clean
+A fresh `wt-clone` from the remote avoids all of these. The user pushes
+their work, deletes the old clone, and runs `wt-clone` to get a clean
 bare-worktree layout. This is the same workflow as "delete and re-clone"
 that developers already do for other reasons.
 
@@ -107,24 +108,23 @@ confirms the layout is recognized, but only if the project has a
 
 ## Proposed Solution
 
-### Command: `wt clone`
+### Command: `wt-clone`
 
 A single nushell custom command in the chezmoi-managed dotfiles.
 
-**Location:** `dot_config/nushell/scripts/wt.nu` (chezmoi source), deployed
-to `~/.config/nushell/scripts/wt.nu`. Sourced from `config.nu` via:
+**Location:** `dot_config/nushell/scripts/wt-clone.nu` (chezmoi source), deployed
+to `~/.config/nushell/scripts/wt-clone.nu`. Sourced from `config.nu` via:
 
 ```nu
-source ($nu.default-config-dir | path join "scripts/wt.nu")
+source ($nu.default-config-dir | path join "scripts/wt-clone.nu")
 ```
 
-This follows the exact same pattern as `wez-session.nu` which provides
-`wez save`, `wez restore`, `wez list`, and `wez delete`.
+This follows the same dotfile script pattern as `wez-session.nu`.
 
 **Signature:**
 
 ```nu
-export def "wt clone" [
+export def wt-clone [
   url: string           # Git remote URL (SSH or HTTPS)
   target?: path         # Target directory (default: derived from URL)
   --branch (-b): string # Branch to checkout (default: repo's default branch)
@@ -137,19 +137,19 @@ export def "wt clone" [
 
 ```nu
 # Basic clone: git@github.com:org/repo.git -> ./repo/{.bare, .git, main/}
-wt clone git@github.com:org/repo.git
+wt-clone git@github.com:org/repo.git
 
 # Explicit target directory
-wt clone git@github.com:org/repo.git ~/code/org/repo
+wt-clone git@github.com:org/repo.git ~/code/org/repo
 
 # Clone with non-default branch
-wt clone git@github.com:org/repo.git --branch develop
+wt-clone git@github.com:org/repo.git --branch develop
 
 # Custom worktree name for the initial checkout
-wt clone git@github.com:org/repo.git --branch develop --name dev
+wt-clone git@github.com:org/repo.git --branch develop --name dev
 
 # Shallow clone for large repos
-wt clone git@github.com:org/huge-monorepo.git --shallow
+wt-clone git@github.com:org/huge-monorepo.git --shallow
 ```
 
 ### Algorithm
@@ -251,7 +251,7 @@ def wt-repo-name [url: string] -> string {
 }
 
 # Fresh clone into bare-worktree layout
-export def "wt clone" [
+export def wt-clone [
   url: string           # Git remote URL (SSH or HTTPS)
   target?: path         # Target directory (default: derived from URL)
   --branch (-b): string # Branch to checkout (default: repo's default branch)
@@ -282,7 +282,7 @@ existing dotfile commands (`wez save`, `wez restore`, etc.).
 
 ### Decision: Clone-Only, No Conversion
 
-**Decision:** Only implement `wt clone` for fresh clones. No `wt convert`
+**Decision:** Only implement `wt-clone` for fresh clones. No `wt-convert`
 for existing repos.
 
 **Why:** The user's philosophy is that pushing, deleting, and re-cloning is
@@ -291,18 +291,18 @@ cleaner than converting in-place. In-place conversion has many edge cases
 interrupted operations, remote URL fixup) that add complexity without
 proportional value. A fresh clone from the remote is always clean and
 deterministic. If a user has unpushed work, `git push` first, then
-`wt clone`. This keeps the tool simple and reliable.
+`wt-clone`. This keeps the tool simple and reliable.
 
-### Decision: `wt` Command Namespace
+### Decision: `wt-clone` Standalone Command (Not `wt` Subcommand)
 
-**Decision:** Use `wt` as the command prefix rather than longer names like
-`worktree-clone` or `git-wt`.
+**Decision:** Use `wt-clone` as a standalone command rather than `wt clone`
+as a subcommand under the `wt` namespace.
 
-**Why:** Short and memorable. Matches the convention of other dotfile
-commands (`wez save`, `wez restore`). Does not conflict with any existing
-command. The `wt` prefix is an obvious abbreviation for "worktree" and
-groups related operations naturally (future: `wt add` for adding worktrees
-to an existing bare-worktree layout).
+**Why:** The `wt` binary is already taken by worktrunk (a Rust-based git
+worktree manager installed via brew). Defining a nushell `wt clone` custom
+command would shadow worktrunk's subcommand dispatch. `wt-clone` avoids the
+collision while remaining short and obvious. Future related commands follow
+the same pattern: `wt-add` for adding worktrees to an existing layout.
 
 ### Decision: Relative Gitdir Paths (Container Portability)
 
@@ -317,7 +317,7 @@ The two-line fixup is simple and reliable.
 
 ### Decision: Target Directory Naming
 
-**Decision:** `wt clone git@github.com:org/repo.git` creates `./repo/`
+**Decision:** `wt-clone git@github.com:org/repo.git` creates `./repo/`
 with `.bare/` and `main/` inside.
 
 **Why:** The URL's last path component (minus `.git`) is the natural
@@ -333,7 +333,7 @@ matching the nikitabobko convention.
 step, but do not run it automatically. Only suggest it if the project has
 a `.devcontainer` directory.
 
-**Why:** Not every project uses lace or devcontainers. The `wt clone`
+**Why:** Not every project uses lace or devcontainers. The `wt-clone`
 command is useful for any bare-worktree workflow, not just lace projects.
 Running `lace up` requires lace to be installed and the project to have a
 `.devcontainer` directory. Making verification optional keeps the tool
@@ -420,7 +420,7 @@ names. Error if the name would conflict.
 Since this is a personal dotfile script (not a library with a test suite),
 the testing strategy is manual but structured:
 
-1. **Basic SSH clone**: `wt clone git@github.com:org/public-repo.git /tmp/test-repo`
+1. **Basic SSH clone**: `wt-clone git@github.com:org/public-repo.git /tmp/test-repo`
    - Verify directory structure: `.bare/`, `.git`, `main/`, `.worktree-root`
    - Verify `.git` file contains `gitdir: ./.bare`
    - Verify `main/.git` file contains relative path `gitdir: ../.bare/worktrees/main`
@@ -430,21 +430,21 @@ the testing strategy is manual but structured:
 
 2. **Basic HTTPS clone**: Same checks with an HTTPS URL.
 
-3. **Non-default branch**: `wt clone <url> /tmp/test-repo --branch develop`
+3. **Non-default branch**: `wt-clone <url> /tmp/test-repo --branch develop`
    - Verify worktree directory is `develop/`
    - Verify `git -C /tmp/test-repo/develop branch` shows `develop`
 
-4. **Custom worktree name**: `wt clone <url> /tmp/test-repo --branch develop --name dev`
+4. **Custom worktree name**: `wt-clone <url> /tmp/test-repo --branch develop --name dev`
    - Verify worktree directory is `dev/`
    - Verify the worktree tracks `develop`
 
-5. **Auto-derived target**: `wt clone git@github.com:org/myproject.git`
+5. **Auto-derived target**: `wt-clone git@github.com:org/myproject.git`
    - Verify creates `./myproject/` in cwd
 
 6. **Target exists**: Create directory, then try clone
    - Verify clear error message
 
-7. **Shallow clone**: `wt clone <url> /tmp/test-repo --shallow`
+7. **Shallow clone**: `wt-clone <url> /tmp/test-repo --shallow`
    - Verify `git -C /tmp/test-repo/main rev-parse --is-shallow-repository` returns `true`
 
 8. **Lace verification** (for projects with `.devcontainer`):
@@ -453,7 +453,7 @@ the testing strategy is manual but structured:
 
 ## Implementation Phases
 
-### Phase 1: Core `wt clone` Command
+### Phase 1: Core `wt-clone` Command
 
 Implement the basic clone flow:
 - URL parsing and target directory derivation
@@ -465,7 +465,7 @@ Implement the basic clone flow:
 
 This covers the primary use case and all the test plan items.
 
-**Deliverable:** `dot_config/nushell/scripts/wt.nu` with `wt clone` command,
+**Deliverable:** `dot_config/nushell/scripts/wt-clone.nu` with `wt-clone` command,
 sourced from `config.nu`.
 
 ### Phase 2: Polish and Edge Cases
@@ -477,7 +477,7 @@ Add handling for:
 - Worktree name validation (reserved name blocklist)
 - Better URL parsing for edge cases (no `.git` suffix, unusual URL formats)
 
-### Phase 3: Future `wt add` (Not In Scope)
+### Phase 3: Future `wt-add` (Not In Scope)
 
 A natural follow-up would be `wt add <branch>` to add new worktrees to an
 existing bare-worktree layout, with relative gitdir fixup. This is out of

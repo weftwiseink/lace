@@ -6,37 +6,33 @@ task_list: lace/worktree-conversion
 type: proposal
 state: live
 status: review_ready
-tags: [worktree, bare-worktree, conversion, cli, git, workspace-layout, onboarding, devcontainer]
+tags: [worktree, bare-worktree, conversion, nushell, git, workspace-layout, dotfiles, chezmoi]
 related_to:
   - cdocs/proposals/2026-02-16-unify-worktree-project-identification.md
   - cdocs/proposals/2026-02-15-workspace-validation-and-layout.md
   - cdocs/proposals/2026-03-03-weftwise-devcontainer-lace-migration.md
 ---
 
-# Worktree Conversion CLI Tool
+# Worktree Conversion Scripts (Nushell)
 
-> BLUF: Lace's `bare-worktree` workspace layout is a prerequisite for running
+> BLUF: The `bare-worktree` workspace layout is a prerequisite for running
 > multiple devcontainers from the same repo simultaneously, but converting an
 > existing normal clone to this layout is a manual, error-prone process. The
 > weftwise project already has a `migrate_to_bare.sh` script
 > (`code/weft/weftwise/main/scripts/migrate_to_bare.sh`) that handles
 > conversion, but it is project-specific (hardcoded config file lists, weftwise
-> directory conventions) and not reusable. This proposal adds two lace CLI
-> commands -- `lace worktree convert` for in-place conversion of existing clones
-> and `lace worktree clone` for fresh bare-worktree clones -- that generalize
-> the weftwise script's approach, integrate with lace's existing workspace
-> detector, and close the gap where `workspace-layout.ts` tells users to
-> "convert to the bare-worktree convention" but offers no tool to do so.
+> directory conventions) and not reusable. This proposal defines two nushell
+> commands -- `wt convert` for conversion of existing clones and `wt clone` for
+> fresh bare-worktree clones -- that generalize the weftwise script's approach
+> as personal dotfile tools. Post-conversion verification uses
+> `lace up --skip-devcontainer-up` to confirm the layout is valid.
 
 ## Objective
 
-Make it trivial to adopt the `bare-worktree` layout for any project that wants
-to use lace devcontainers with multi-worktree support. Currently, users who
-encounter the error "Workspace layout `bare-worktree` declared but
-`/path/to/repo` is a normal git clone. Remove the workspace.layout setting or
-convert to the bare-worktree convention" must either find the weftwise migration
-script (which is project-specific and lives in a different repo) or follow a
-multi-step manual process.
+Make it trivial to adopt the `bare-worktree` layout for any project. Currently,
+users must either find the weftwise migration script (which is project-specific
+and lives in a different repo) or follow a multi-step manual process. Two short,
+memorable commands (`wt clone`, `wt convert`) eliminate that friction.
 
 ## Background
 
@@ -68,7 +64,7 @@ correct `workspaceMount`, `workspaceFolder`, and `postCreateCommand`.
 
 ### Existing Scripts
 
-The weftwise project contains two scripts at
+The weftwise project contains two bash scripts at
 `/home/mjr/code/weft/weftwise/main/scripts/`:
 
 1. **`migrate_to_bare.sh`** -- Converts a normal clone to bare-worktree layout
@@ -93,9 +89,9 @@ older `code/apps/weft_old/scripts/` location.
   `.mcp.json`). Other projects have different untracked config files.
 - **No in-place conversion**: The script always creates a new sibling directory.
   Users must manually clean up the old repo.
-- **No integration with lace**: The scripts do not validate the conversion
-  against lace's workspace detector. A conversion that produces a layout lace
-  cannot detect is a silent failure.
+- **No post-conversion verification**: The scripts do not validate the
+  conversion against lace's workspace detector. A conversion that produces a
+  layout lace cannot detect is a silent failure.
 - **Hardcoded `/workspace` paths**: The `worktree.sh` script assumes the
   devcontainer mount target is always `/workspace`.
 - **No stash/uncommitted change preservation**: The migration script warns about
@@ -104,7 +100,10 @@ older `code/apps/weft_old/scripts/` location.
   remote `origin` URL points to the old local `.git` path, not the upstream
   remote.
 - **Interactive prompts**: Both scripts use `read -p` for confirmation, making
-  them unsuitable for scripted/CI usage.
+  them unsuitable for scripted usage.
+- **Bash, not nushell**: The scripts are written in bash, not the user's
+  primary shell. They cannot leverage nushell's structured data, error handling,
+  or interactive features (like `input list`).
 
 ### External Tools
 
@@ -121,115 +120,143 @@ older `code/apps/weft_old/scripts/` location.
 None of these tools handle in-place conversion of an existing clone or integrate
 with a devcontainer orchestrator.
 
-### Lace's Current Capabilities
+### Lace's Role (Verification, Not Conversion)
 
-Lace already has the building blocks:
+Lace already has the building blocks for *detecting* and *validating* the
+bare-worktree layout:
 
 - **`classifyWorkspace()`** (`workspace-detector.ts`): Identifies `worktree`,
   `bare-root`, `normal-clone`, `standard-bare`, `not-git`, and `malformed`
-  layouts. Can validate whether a conversion succeeded.
+  layouts.
 - **`resolveGitdirPointer()`** (`workspace-detector.ts`): Parses `.git` files
   and detects absolute vs relative gitdir paths.
 - **`checkAbsolutePaths()`** (`workspace-detector.ts`): Scans sibling worktrees
   for absolute paths that break inside containers.
 - **`applyWorkspaceLayout()`** (`workspace-layout.ts`): Generates devcontainer
-  config from a classified workspace. Currently emits the error message that
-  motivates this proposal.
-- **Port allocator, mount resolver, host validator**: All downstream consumers
-  that benefit from the bare-worktree layout.
+  config from a classified workspace.
 
-What is missing is the *conversion* step -- the tool that transforms a
-normal-clone into the layout that these detectors and appliers expect.
+The conversion itself does not need to be part of lace. It is a personal
+workflow tool -- the kind of thing that belongs in dotfiles, not in a shared
+project CLI. Lace's `classifyWorkspace()` concept is used as a post-conversion
+verification step by running `lace up --skip-devcontainer-up` after conversion
+to confirm the layout is recognized correctly.
 
 ## Proposed Solution
 
-### Two New Subcommands Under `lace worktree`
+### Two Nushell Commands: `wt clone` and `wt convert`
+
+The commands are implemented as nushell custom commands in a script file sourced
+from `config.nu`, following the same pattern as the existing `wez save`,
+`wez restore`, `wez list`, and `wez delete` commands in `wez-session.nu`.
+
+**Location:** `dot_config/nushell/scripts/wt.nu` in the chezmoi dotfiles repo,
+deployed to `~/.config/nushell/scripts/wt.nu`. Sourced from `config.nu` via:
+
+```nu
+source ($nu.default-config-dir | path join "scripts/wt.nu")
+```
+
+**Commands:**
 
 ```
-lace worktree convert [--target <dir>] [--worktree-name <name>] [--force] [--no-verify]
-lace worktree clone <url> [<dir>] [--branch <branch>] [--worktree-name <name>]
+wt clone <url> [target] [--branch <branch>] [--name <worktree-name>]
+wt convert [--target <dir>] [--name <worktree-name>] [--force] [--in-place]
 ```
 
-#### `lace worktree convert`
+#### `wt clone`
+
+Fresh clone directly into bare-worktree layout:
+
+1. `git clone --bare <url> <dir>/.bare`
+2. Create `.git` file with `gitdir: ./.bare`.
+3. Configure fetch refspec for all branches:
+   `remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`.
+4. `git fetch origin` to pull all refs.
+5. Determine the default branch (`git remote show origin | head` or parse
+   `HEAD` ref) if `--branch` not specified.
+6. Create worktree via `git worktree add <name> <branch>`.
+7. Fix gitdir paths to use relative pointers (host/container portability).
+8. Create `.worktree-root` marker file.
+9. Print summary, directory structure, and next steps.
+
+```nu
+# Example usage:
+wt clone git@github.com:org/project.git ~/code/org/project
+wt clone git@github.com:org/project.git ~/code/org/project --branch develop --name dev
+```
+
+#### `wt convert`
 
 Converts the current working directory (or a specified repo path) from a normal
 git clone to the bare-worktree convention. Two modes:
 
 1. **Adjacent mode** (default): Creates a new directory alongside the existing
    repo, similar to the weftwise `migrate_to_bare.sh` script. The original repo
-   is left intact. Specified via `--target <dir>`.
+   is left intact.
 
-2. **In-place mode** (`--target .` or `--in-place`): Restructures the current
-   directory. The `.git/` directory becomes `.bare/`, a `.git` file is created
-   pointing to `.bare/`, and the current working tree contents move into a
-   worktree subdirectory.
+2. **In-place mode** (`--in-place`): Restructures the current directory. The
+   `.git/` directory becomes `.bare/`, a `.git` file is created pointing to
+   `.bare/`, and the current working tree contents move into a worktree
+   subdirectory.
 
-In-place conversion steps:
+**Adjacent mode steps:**
 
-1. Verify the repo is a normal git clone (`classifyWorkspace()` returns
-   `normal-clone`).
+1. Verify the current directory is a normal git clone (`.git/` is a directory
+   with `objects/` inside, not a file pointing elsewhere).
 2. Check for uncommitted changes and stashes. Warn if present; abort unless
    `--force`.
-3. Stash uncommitted changes if any (auto-applied after conversion).
-4. Record the current branch name and remote URL.
-5. Move `.git/` to `.bare/`.
-6. Create `.git` file with `gitdir: ./.bare`.
-7. Configure fetch refspec: `remote.origin.fetch = +refs/heads/*:refs/remotes/origin/*`.
-8. Fix remote origin URL if it points to a local path (replace with the
-   upstream URL from the old remote config).
-9. Create the worktree subdirectory (default name: current branch name, or
-   `main`, or specified via `--worktree-name`).
-10. Move all non-hidden, non-`.git` files/directories into the worktree
-    subdirectory.
-11. Move relevant dotfiles (`.devcontainer/`, `.claude/`, `.vscode/`, etc.)
-    into appropriate locations (root vs worktree).
-12. Run `git worktree add` to register the worktree with git.
-13. Fix gitdir paths to use relative pointers (host/container portability).
-14. Pop the stash if one was created.
-15. Validate the result with `classifyWorkspace()` -- must return `worktree`
-    type.
-16. Create `.worktree-root` marker file.
-17. Print summary and next steps.
+3. Record the current branch name and upstream remote URL.
+4. Determine target directory (default: `<repodir>-worktrees`, or specified
+   via `--target`).
+5. `git clone --bare .git <target>/.bare`.
+6. Create `<target>/.git` file with `gitdir: ./.bare`.
+7. Configure fetch refspec for all remotes.
+8. Fix remote origin URL to point to the upstream remote, not the local `.git`
+   path.
+9. `git fetch origin` in the new bare repo.
+10. Create worktree: `git worktree add <name> <branch>`.
+11. Fix gitdir paths to use relative pointers.
+12. Copy untracked config files to appropriate locations (see Dotfile Placement).
+13. Create `.worktree-root` marker file.
+14. Print summary, directory tree, and next steps (including verification
+    command).
 
-#### `lace worktree clone`
+**In-place mode steps:**
 
-Fresh clone directly into bare-worktree layout:
-
-1. `git clone --bare <url> <dir>/.bare`
-2. Create `.git` file with `gitdir: ./.bare`.
-3. Configure fetch refspec.
-4. Fetch all refs.
-5. Create default worktree (`main` or specified branch).
-6. Fix gitdir paths to relative.
-7. Validate with `classifyWorkspace()`.
-8. Create `.worktree-root` marker file.
-9. Print summary and next steps.
-
-This is essentially a polished, lace-integrated version of the
-`git_clone_bare_worktree` script pattern.
+1. Same pre-flight checks as adjacent mode.
+2. Stash uncommitted changes if any (auto-applied after conversion).
+3. Record the current branch name and remote URL.
+4. Move `.git/` to `.bare/`.
+5. Create `.git` file with `gitdir: ./.bare`.
+6. Configure fetch refspec.
+7. Create the worktree subdirectory (default name: current branch name, or
+   `main`, or specified via `--name`).
+8. Move all working tree files/directories into the worktree subdirectory.
+9. Move relevant dotfiles into appropriate locations (root vs worktree).
+10. Register the worktree with `git worktree add` (pointing to existing
+    checkout).
+11. Fix gitdir paths to use relative pointers.
+12. Pop the stash if one was created.
+13. Create `.worktree-root` marker file.
+14. Print summary and next steps.
 
 ### Post-Conversion Verification
 
-Both commands finish with a verification step:
+Both commands print a verification step at the end:
 
-```typescript
-const result = classifyWorkspace(worktreePath);
-if (result.classification.type !== "worktree") {
-  throw new Error(
-    `Conversion verification failed: expected "worktree" classification ` +
-    `but got "${result.classification.type}". The directory structure may ` +
-    `be in an inconsistent state.`
-  );
-}
-if (result.warnings.some(w => w.code === "absolute-gitdir")) {
-  console.warn("Warning: Some worktrees use absolute gitdir paths. " +
-    "Run `git worktree repair --relative-paths` (requires git 2.48+).");
-}
+```
+Conversion complete. Verify with:
+  cd <worktree-path> && lace up --skip-devcontainer-up
 ```
 
-This closes the loop between the conversion tool and the existing detector --
-the same code that will later validate the workspace during `lace up` is used
-to verify the conversion succeeded.
+This runs lace's `classifyWorkspace()` pipeline against the new layout. If lace
+recognizes it as a valid `worktree` type and generates the correct devcontainer
+config, the conversion succeeded. If it reports a layout error, the conversion
+produced an invalid structure.
+
+This approach leverages lace's detection capabilities without coupling the
+conversion tool to lace's internals. The scripts are standalone nushell
+commands; lace is used as a verifier, not a dependency.
 
 ### Dotfile Placement Heuristics
 
@@ -245,47 +272,71 @@ worktree. A general-purpose tool needs heuristics:
 - `.claude/` -- agent context is branch-specific
 - `.vscode/` -- workspace settings may differ per branch
 
-**Configurable** (user decides via `--config-placement` or interactive prompt):
-- `.env`, `.env.local` -- could be shared or per-branch
-- Other untracked dotfiles
+**Copy to worktree by default** (can be shared manually if needed):
+- `.env`, `.env.local` -- usually per-worktree to avoid port conflicts
+- `.mcp.json` -- may reference worktree-specific paths
+- Other untracked dotfiles found in the repo root
 
-The default placement can be guided by a `.lace/worktree-layout.json`
-config file if present, or by detecting common patterns.
+The heuristics are simple defaults. Since this is a personal dotfile tool (not a
+shared library), if a specific project needs different placement, the user
+adjusts manually after conversion. No configuration file or interactive prompt
+is needed.
 
-### Integration with `workspace-layout.ts` Error Message
+### Relative Gitdir Path Fixup
 
-Update the error message in `applyWorkspaceLayout()` to reference the new tool:
+A critical detail from the weftwise scripts that must be preserved: after
+`git worktree add`, the `.git` file inside the worktree and the `gitdir` file
+inside `.bare/worktrees/<name>/` use absolute paths by default. These break when
+the repo is mounted inside a devcontainer at a different path.
 
-```typescript
-// Before:
-"Remove the workspace.layout setting or convert to the bare-worktree convention."
+The fix (from weftwise `fix_worktree_paths`):
 
-// After:
-"Remove the workspace.layout setting or run `lace worktree convert` to convert " +
-"this clone to the bare-worktree convention."
+```nu
+# Fix worktree .git file to use relative path
+"gitdir: ../.bare/worktrees/<name>" | save -f <worktree>/.git
+
+# Fix bare repo's worktree gitdir to use relative path back
+"../../<name>/.git" | save -f .bare/worktrees/<name>/gitdir
 ```
+
+Git 2.48+ has `git worktree repair --relative-paths` but we cannot assume that
+version is available. The manual fixup works on all git versions.
 
 ## Important Design Decisions
 
-### Decision: Subcommand Under `lace worktree` Rather Than Top-Level
+### Decision: Nushell Scripts in Dotfiles, Not Built Into Lace
 
-**Decision:** Place the commands under `lace worktree convert` and
-`lace worktree clone` rather than `lace convert-to-worktree` or a standalone
-script.
+**Decision:** Implement as nushell custom commands in the chezmoi-managed
+dotfiles, not as lace CLI subcommands.
 
-**Why:** The `lace worktree` namespace groups all worktree-related operations
-(convert, clone, and potentially `add`/`list`/`remove` in the future --
-absorbing the weftwise `worktree.sh` functionality). This mirrors `git worktree`
-subcommand structure, which users are already familiar with. A top-level command
-like `lace convert-to-worktree` is too specific to warrant top-level namespace
-space, and a standalone script outside lace cannot leverage `classifyWorkspace()`
-for verification.
+**Why:** Worktree conversion is a personal workflow operation, not a project
+build tool. It runs on the host machine, outside any devcontainer, and only
+needs to happen once per project. Putting it in lace would mean:
+- Requiring lace to be installed on the host (lace is primarily a devcontainer
+  tool).
+- Adding TypeScript code to shell out to git commands that nushell handles
+  natively.
+- Coupling a one-shot conversion tool to a project's build lifecycle.
+
+Nushell scripts in dotfiles are the right abstraction level: they are personal
+tools that work across all projects, they run in the user's primary shell with
+native structured data handling, and they follow the same pattern as existing
+dotfile commands (`wez save`, `wez restore`, `ssh-del`, `extract`, etc.).
+
+### Decision: `wt` Command Namespace
+
+**Decision:** Use `wt` as the command prefix (`wt clone`, `wt convert`) rather
+than longer names like `worktree-convert` or `git-wt`.
+
+**Why:** Short and memorable. Matches the convention of other dotfile commands
+(`wez save`, `wez restore`). Does not conflict with any existing command (verified:
+no `wt` in PATH or nushell config). The `wt` prefix is an obvious abbreviation
+for "worktree" and groups related operations naturally.
 
 ### Decision: Adjacent Mode as Default, In-Place as Opt-In
 
 **Decision:** Default to creating a new directory alongside the existing repo
-(adjacent mode). In-place conversion requires explicit `--in-place` or
-`--target .`.
+(adjacent mode). In-place conversion requires explicit `--in-place`.
 
 **Why:** In-place conversion is destructive -- if it fails midway, the repo can
 be left in an inconsistent state. Adjacent mode is always safe: the original
@@ -294,16 +345,18 @@ old one. This matches the weftwise `migrate_to_bare.sh` script's behavior and
 follows the principle of least surprise. Users who understand the risks can
 opt into in-place mode for convenience.
 
-### Decision: Validate with `classifyWorkspace()` Post-Conversion
+### Decision: Post-Conversion Verification via `lace up`
 
-**Decision:** Use lace's own workspace classifier to verify the conversion
-result rather than relying on git commands or filesystem checks.
+**Decision:** Use `lace up --skip-devcontainer-up` as the verification step
+rather than reimplementing workspace classification in nushell.
 
-**Why:** The classifier is the same code that `lace up` will use to detect the
-workspace layout. If the classifier does not recognize the conversion result as
-a valid `worktree` type, `lace up` will also fail. By testing with the same
-code, the conversion tool guarantees compatibility with the downstream pipeline.
-This also serves as an integration test for the classifier itself.
+**Why:** Lace's `classifyWorkspace()` is the authoritative source of truth for
+whether a layout is valid. Reimplementing that logic in nushell would create
+drift risk. Running `lace up --skip-devcontainer-up` exercises the exact same
+code path that will be used when the user actually starts a devcontainer. If the
+verification passes, the conversion is guaranteed to work with lace. The
+`--skip-devcontainer-up` flag (or equivalent) prevents actually launching a
+container during verification.
 
 ### Decision: Fix Remote URL After Local-to-Local Clone
 
@@ -316,87 +369,88 @@ filesystem path. This is almost never what the user wants -- they want `origin`
 to remain the upstream GitHub/GitLab URL. The weftwise script does not fix this,
 which means the first `git push` after migration targets the old local `.git`
 directory. The fix is straightforward: read the upstream URL from the old repo's
-config and set it as the new `origin`.
+config before cloning, then set it on the new bare repo afterward.
 
-### Decision: No Automatic Submodule Handling in Phase 1
+### Decision: No Automatic Submodule Handling
 
-**Decision:** Defer submodule support to a later phase. Phase 1 detects
-submodules and aborts with a clear error.
+**Decision:** Detect submodules and abort with a clear error rather than
+attempting conversion.
 
 **Why:** Submodule paths inside a worktree are relative to the worktree root,
 and submodule `.git` files point into `.git/modules/` (which becomes
 `.bare/modules/` after conversion). The path rewriting is complex and
-error-prone. Most lace-managed projects do not use submodules. Adding submodule
-support later is additive and does not change the core conversion logic.
-
-### Decision: TypeScript Implementation, Not Shell Script
-
-**Decision:** Implement the conversion logic in TypeScript as part of the lace
-CLI, not as a standalone shell script.
-
-**Why:** The conversion needs to call `classifyWorkspace()` for pre-flight
-validation and post-conversion verification. It needs structured error handling,
-progress reporting, and JSON output for `--json` mode. Shelling out to `git`
-commands from TypeScript is straightforward (lace already does this in other
-commands). A TypeScript implementation also enables proper unit testing with
-filesystem fixtures, which the weftwise shell script lacks entirely.
+error-prone. Most projects using the bare-worktree convention do not use
+submodules. If submodule support is needed later, it can be added incrementally.
 
 ## Stories
 
-### S1: New User Adopts Bare-Worktree for Existing Project
+### S1: Fresh Clone into Bare-Worktree Layout
 
-A developer has a normal clone at `~/code/myproject/`. They add
-`"layout": "bare-worktree"` to their `devcontainer.json` and run `lace up`.
-Lace reports: "Workspace layout `bare-worktree` declared but ~/code/myproject
-is a normal git clone. Run `lace worktree convert` to convert this clone to
-the bare-worktree convention."
+A developer wants to start working on a project with worktree support:
 
-The developer runs `lace worktree convert` from inside `~/code/myproject/`. Lace
-creates `~/code/myproject-worktrees/` with the bare-worktree layout, prints the
-new directory structure and next steps. The developer verifies, moves their work
-to the new directory, and `lace up` succeeds.
-
-### S2: Clone a New Repo Directly into Bare-Worktree Layout
-
-A developer wants to start working on a new project that uses lace. They run:
-
-```bash
-lace worktree clone git@github.com:org/project.git ~/code/org/project
+```nu
+wt clone git@github.com:org/project.git ~/code/org/project
 ```
 
-This creates the bare-worktree layout directly, with a `main` worktree ready
-for `lace up`.
+This creates the bare-worktree layout directly, with a `main/` worktree. The
+developer can immediately `cd ~/code/org/project/main && lace up`.
 
-### S3: In-Place Conversion for Experienced Users
+### S2: Convert an Existing Clone
+
+A developer has a normal clone at `~/code/myproject/`. They want to convert:
+
+```nu
+cd ~/code/myproject
+wt convert
+```
+
+This creates `~/code/myproject-worktrees/` with the bare-worktree layout. The
+original repo at `~/code/myproject/` is untouched. The developer verifies:
+
+```nu
+cd ~/code/myproject-worktrees/main
+lace up --skip-devcontainer-up
+```
+
+Then removes the old repo:
+
+```nu
+rm -rf ~/code/myproject
+```
+
+### S3: In-Place Conversion
 
 An experienced developer with a clean working tree runs:
 
-```bash
+```nu
 cd ~/code/myproject
-lace worktree convert --in-place
+wt convert --in-place
 ```
 
-The conversion happens in-place. The directory structure changes from a normal
-clone to a bare-worktree layout. The developer's files are now under
-`~/code/myproject/main/`. A `lace up` from `~/code/myproject/main/` succeeds.
+The directory structure changes from a normal clone to bare-worktree layout.
+Files are now under `~/code/myproject/main/`. The developer verifies with
+`lace up --skip-devcontainer-up` from the worktree directory.
 
 ### S4: Conversion with Dirty Working Tree
 
-A developer has uncommitted changes and tries to convert. Lace warns:
+A developer has uncommitted changes and tries to convert:
 
 ```
-Warning: Working directory has 3 uncommitted changes.
-  Changes will be stashed before conversion and re-applied after.
-  Use --force to proceed, or commit/stash manually first.
+Warning: Working directory has uncommitted changes.
+  Use --force to stash changes and proceed, or commit/stash manually first.
 ```
 
-With `--force`, lace stashes, converts, and pops the stash in the new worktree.
+With `--force`, the script stashes, converts, and pops the stash in the new
+worktree.
 
-### S5: Error Message Guides User to the Tool
+### S5: Clone with Specific Branch
 
-A developer working on any lace-managed project with a normal clone hits the
-workspace layout error. The error message now includes the command to run,
-reducing friction from "figure out how to convert" to "run this command."
+```nu
+wt clone git@github.com:org/project.git ~/code/org/project --branch develop --name dev
+```
+
+Creates bare-worktree layout with a `dev/` worktree tracking the `develop`
+branch.
 
 ## Edge Cases / Challenging Scenarios
 
@@ -415,9 +469,9 @@ shallow bare clone.
 Repos with submodules have `.gitmodules` and `.git/modules/` directories. The
 module paths need rewriting after conversion.
 
-**Handling (Phase 1):** Detect submodules and abort with a clear error:
-"Repository contains submodules, which are not yet supported by `lace worktree
-convert`. Convert manually or wait for submodule support in a future version."
+**Handling:** Detect submodules (check for `.gitmodules` file) and abort with a
+clear error: "Repository contains submodules, which are not supported by
+`wt convert`. Convert manually."
 
 ### E3: Existing Worktrees
 
@@ -446,10 +500,10 @@ reminder to verify hook behavior.
 If the in-place conversion fails midway (power loss, disk full), the repo could
 be in an inconsistent state -- `.git/` partially renamed, files partially moved.
 
-**Handling:** Write a `.lace/conversion-in-progress.json` marker at the start of
-in-place conversion, containing the original state (branch, remote URL, file
-manifest). If a subsequent `lace worktree convert` finds this marker, offer to
-resume or rollback. The marker is removed on successful completion.
+**Handling:** Write a `.wt-conversion-in-progress` marker file at the start of
+in-place conversion, containing the original state (branch, remote URL). If a
+subsequent `wt convert` finds this marker, print guidance for manual recovery.
+The marker is removed on successful completion.
 
 ### E6: LFS-Tracked Files
 
@@ -467,9 +521,9 @@ For very large repos, the in-place file move could take significant time. Moving
 files within the same filesystem is O(n) in the number of entries but does not
 copy data (rename syscall).
 
-**Handling:** Use rename/move operations (not copy) for in-place conversion.
-Show progress for repos with many files. For adjacent mode, `git clone --bare`
-uses hardlinks on the same filesystem, which is fast and space-efficient.
+**Handling:** Use `mv` (rename) operations, not copy, for in-place conversion.
+For adjacent mode, `git clone --bare` uses hardlinks on the same filesystem,
+which is fast and space-efficient.
 
 ### E8: Non-Default Remote Names
 
@@ -480,134 +534,85 @@ The conversion should preserve all remotes, not just `origin`.
 preserved in the new bare repo. Fix the fetch refspec for each remote, not just
 `origin`.
 
-## Implementation Phases
+## Implementation Plan
 
-### Phase 1: `lace worktree clone` (Fresh Clone)
+### File Layout
 
-The simpler command -- no existing state to preserve.
+A single nushell script in the chezmoi dotfiles:
 
-**Files:**
-- `packages/lace/src/commands/worktree.ts` (new command module)
-- `packages/lace/src/lib/worktree-converter.ts` (core logic)
-- `packages/lace/src/lib/__tests__/worktree-converter.test.ts`
+```
+dot_config/nushell/scripts/wt.nu    # wt clone, wt convert commands
+```
 
-**Implementation:**
-- Create the `lace worktree` command group with `clone` subcommand.
-- Implement `cloneBareWorktree(url, targetDir, options)`:
-  - Shell out to `git clone --bare <url> <targetDir>/.bare`.
-  - Create `.git` file, configure fetch refspec, fetch refs.
-  - Create worktree via `git worktree add`.
-  - Fix gitdir paths to relative pointers (reuse the pattern from weftwise's
-    `fix_worktree_paths`).
-  - Create `.worktree-root` marker.
-  - Validate with `classifyWorkspace()`.
-- Support `--branch` to specify the initial worktree branch.
-- Support `--worktree-name` to name the worktree directory differently from
-  the branch name.
-- Support `--json` for machine-readable output.
+Sourced from `config.nu`:
 
-**Verification:**
-- Unit test: clone a local test repo into bare-worktree layout, verify
-  `classifyWorkspace()` returns `worktree` type.
-- Unit test: verify gitdir pointers are relative.
-- Unit test: verify remote URL is correct (not local path).
-- Unit test: verify fetch refspec allows fetching all branches.
+```nu
+source ($nu.default-config-dir | path join "scripts/wt.nu")
+```
 
-### Phase 2: `lace worktree convert` (Adjacent Mode)
+This follows the exact same pattern as `wez-session.nu` which provides
+`wez save`, `wez restore`, `wez list`, and `wez delete`.
 
-Convert an existing normal clone by creating a new directory.
+### Command Structure
 
-**Files:**
-- `packages/lace/src/commands/worktree.ts` (add `convert` subcommand)
-- `packages/lace/src/lib/worktree-converter.ts` (extend)
-- `packages/lace/src/lib/__tests__/worktree-converter.test.ts` (extend)
+```nu
+# Helper: fix worktree gitdir paths to use relative pointers
+def wt-fix-paths [name: string, root: path] { ... }
 
-**Implementation:**
-- Add `convert` subcommand to the `lace worktree` group.
-- Implement `convertToWorktree(repoPath, options)`:
-  - Pre-flight: `classifyWorkspace()` must return `normal-clone`. Reject
-    already-converted repos, bare repos, non-git directories.
-  - Detect and warn about: dirty working tree, stashes, submodules, shallow
-    clone, existing worktrees, LFS.
-  - Determine target directory (default: `<repoPath>-worktrees` or
-    `<parent>/<basename>` if repo is a sibling).
-  - Clone bare from existing `.git/`.
-  - Fix remote origin URL to upstream.
-  - Create worktree, fix gitdir paths, create marker.
-  - Copy relevant untracked config files (`.devcontainer/`, `.claude/`,
-    `.vscode/`, `.env*`) using configurable placement heuristics.
-  - Validate with `classifyWorkspace()`.
-  - Print summary with directory structure and next steps.
-- Support `--target <dir>` to specify the output directory.
-- Support `--force` to proceed despite warnings.
-- Support `--no-verify` to skip post-conversion validation.
+# Helper: create .worktree-root marker file
+def wt-create-marker [root: path] { ... }
 
-**Verification:**
-- Unit test: convert a normal clone, verify output layout.
-- Unit test: verify original repo is untouched.
-- Unit test: verify remote URL fixup.
-- Unit test: verify config file placement heuristics.
-- Unit test: reject already-converted repos gracefully.
-- Unit test: reject repos with submodules.
+# Helper: detect repo type (normal-clone, worktree, bare, not-git)
+def wt-detect-layout [] { ... }
 
-### Phase 3: `lace worktree convert --in-place`
+# Fresh clone into bare-worktree layout
+export def "wt clone" [
+  url: string           # Git remote URL to clone
+  target?: path         # Target directory (default: derived from URL)
+  --branch (-b): string # Branch to checkout (default: repo default branch)
+  --name (-n): string   # Worktree directory name (default: branch name)
+] { ... }
 
-The most complex mode -- restructures the current directory.
+# Convert existing normal clone to bare-worktree layout
+export def "wt convert" [
+  --target (-t): path   # Output directory (default: <repo>-worktrees)
+  --name (-n): string   # Worktree name (default: current branch or "main")
+  --force (-f)          # Proceed despite warnings (stashes uncommitted changes)
+  --in-place            # Convert in-place instead of creating adjacent directory
+] { ... }
+```
 
-**Files:**
-- `packages/lace/src/lib/worktree-converter.ts` (extend)
-- `packages/lace/src/lib/__tests__/worktree-converter.test.ts` (extend)
+### Testing Strategy
 
-**Implementation:**
-- Implement in-place conversion in `convertToWorktree()` when
-  `options.inPlace === true`:
-  - Write `.lace/conversion-in-progress.json` with rollback state.
-  - Stash uncommitted changes if `--force`.
-  - Rename `.git/` to `.bare/`.
-  - Create `.git` file pointing to `.bare/`.
-  - Create worktree subdirectory.
-  - Move all working tree files into the worktree subdirectory.
-  - Register the worktree with `git worktree add` (or manually create the
-    worktree entry in `.bare/worktrees/`).
-  - Fix gitdir paths.
-  - Pop stash in the worktree if one was created.
-  - Validate with `classifyWorkspace()`.
-  - Remove `.lace/conversion-in-progress.json`.
-  - Print summary and next steps.
-- Implement rollback detection: if `.lace/conversion-in-progress.json` exists,
-  offer to resume or rollback.
+Since these are personal dotfile scripts (not a library with a test suite), the
+testing strategy is manual but structured:
 
-**Verification:**
-- Unit test: in-place conversion produces valid layout.
-- Unit test: verify files are moved, not copied (check inode if possible).
-- Unit test: verify stash round-trip (stash before, pop after).
-- Unit test: verify rollback marker is created and cleaned up.
-- Integration test: `classifyWorkspace()` succeeds on converted repo.
+1. **Fresh clone test**: `wt clone` a known public repo, verify layout with
+   `git worktree list`, check gitdir paths are relative, check remote URL is
+   correct.
+2. **Adjacent convert test**: Create a normal clone, `wt convert`, verify
+   original is untouched, verify new layout, verify remote URL fixup.
+3. **In-place convert test**: Create a throwaway clone, `wt convert --in-place`,
+   verify layout.
+4. **Dirty tree test**: Make uncommitted changes, verify `wt convert` warns,
+   verify `--force` stashes and restores.
+5. **Post-conversion lace verification**: Run `lace up --skip-devcontainer-up`
+   in the new worktree to confirm lace recognizes it.
+6. **Edge case spot checks**: Shallow clone warning, submodule abort, existing
+   worktree abort.
 
-### Phase 4: Error Message Integration and Documentation
+### Nushell Patterns to Follow
 
-**Files:**
-- `packages/lace/src/lib/workspace-layout.ts` (update error message)
-- `packages/lace/docs/troubleshooting.md` (update guidance)
+Based on the existing dotfile scripts:
 
-**Implementation:**
-- Update the `normal-clone` error message in `applyWorkspaceLayout()` to
-  reference `lace worktree convert`.
-- Add a troubleshooting section documenting the conversion workflow.
-- Add a "Worktree Layout" section to the lace README or architecture docs
-  explaining the convention and how to adopt it.
-
-**Verification:**
-- Verify error message includes the `lace worktree convert` command.
-- Verify troubleshooting docs are accurate and complete.
-
-### Phase 5: `lace worktree add/list/remove` (Optional, Future)
-
-Absorb the weftwise `worktree.sh` functionality into lace, making worktree
-management available to any lace-managed project. This is lower priority since
-`git worktree add/list/remove` works directly; the value-add is lace-specific
-features like relative-path fixup, context file creation, and dependency
-installation.
-
-**Deferred:** This phase is listed for completeness but is not part of the
-initial implementation scope.
+- **Structured output**: Use nushell's structured data for status reporting
+  rather than `echo` with ANSI codes. The bash scripts' `log_info`, `log_warn`,
+  `log_error` pattern becomes nushell's `print` with string interpolation.
+- **Error handling**: Use `error make { msg: "..." }` for fatal errors (see
+  `wez-session.nu` and `utils.nu` for examples).
+- **Interactive prompts**: Use `input list` for choices (see `wez-session.nu`
+  restore flow) and `input` for confirmation.
+- **Git commands**: Shell out to git via `^git` (nushell external command
+  syntax). Parse output with `lines`, `str trim`, `split column`, etc.
+- **File operations**: Use nushell's native `mv`, `cp`, `mkdir`, `save` rather
+  than shelling out.

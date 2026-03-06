@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/worktree-tooling
 type: proposal
 state: live
-status: implementation_wip
+status: result_accepted
 tags: [worktree, bare-worktree, clone, nushell, git, workspace-layout, dotfiles, chezmoi]
 related_to:
   - cdocs/proposals/2026-02-16-unify-worktree-project-identification.md

@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
+import { parseDockerfileUser } from "./dockerfile.js";
 
 // Documented in CONTRIBUTING.md -- update if changing this pattern
 /** Discriminated result for prebuild feature extraction. */
@@ -341,4 +342,46 @@ export function hasLaceLocalImage(raw: Record<string, unknown>): boolean {
 export function getCurrentImage(raw: Record<string, unknown>): string | null {
   const image = raw.image;
   return typeof image === "string" ? image : null;
+}
+
+/**
+ * Extract the remote user from a devcontainer config.
+ * Resolution order:
+ * 1. remoteUser field (explicit)
+ * 2. Dockerfile USER directive (if Dockerfile-based build)
+ * 3. "root" (devcontainer spec default)
+ *
+ * NOTE: This implements the same resolution semantics as lace-discover
+ * (bin/lace-discover, lines 89-105), which resolves the remote user at
+ * runtime from container metadata. This operates at config-generation time
+ * from source files. Both follow the same three-tier resolution:
+ * explicit remoteUser > inspected/parsed user > default.
+ * See the "DRY with lace-discover" section in
+ * cdocs/proposals/2026-03-07-remote-user-resolution-in-mount-targets.md
+ * for the shared contract between these two implementations.
+ */
+export function extractRemoteUser(
+  raw: Record<string, unknown>,
+  configDir: string,
+): string {
+  // 1. Explicit remoteUser
+  if (typeof raw.remoteUser === "string") {
+    return raw.remoteUser;
+  }
+
+  // 2. Dockerfile USER directive
+  try {
+    const buildSource = resolveBuildSource(raw, configDir);
+    if (buildSource.kind === "dockerfile") {
+      const content = readFileSync(buildSource.path, "utf-8");
+      const user = parseDockerfileUser(content);
+      if (user) return user;
+    }
+  } catch {
+    // resolveBuildSource throws when no build source is found (e.g.,
+    // malformed config). Fall through to default.
+  }
+
+  // 3. Default
+  return "root";
 }

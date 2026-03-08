@@ -1,7 +1,8 @@
 // IMPLEMENTATION_VALIDATION
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import * as jsonc from "jsonc-parser";
 import {
   extractPrebuildFeatures,
@@ -16,6 +17,7 @@ import {
   rewriteImageField,
   hasLaceLocalImage,
   getCurrentImage,
+  extractRemoteUser,
 } from "@/lib/devcontainer";
 
 const FIXTURES = join(import.meta.dirname, "../../__fixtures__/devcontainers");
@@ -484,5 +486,100 @@ describe("getCurrentImage", () => {
   it("returns null when image is not a string", () => {
     expect(getCurrentImage({ image: 123 })).toBe(null);
     expect(getCurrentImage({})).toBe(null);
+  });
+});
+
+// --- extractRemoteUser ---
+
+describe("extractRemoteUser", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    tempDir = join(tmpdir(), `lace-test-extract-remote-user-${suffix}`);
+    mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns remoteUser field when present", () => {
+    const raw = { image: "node:24", remoteUser: "node" };
+    expect(extractRemoteUser(raw, tempDir)).toBe("node");
+  });
+
+  it("returns Dockerfile USER when no remoteUser", () => {
+    const dockerfilePath = join(tempDir, "Dockerfile");
+    writeFileSync(
+      dockerfilePath,
+      "FROM node:24-bookworm\nRUN apt-get update\nUSER vscode\n",
+      "utf-8",
+    );
+
+    const raw = { build: { dockerfile: "Dockerfile" } };
+    expect(extractRemoteUser(raw, tempDir)).toBe("vscode");
+  });
+
+  it("returns 'root' when neither remoteUser nor Dockerfile USER is available", () => {
+    const raw = { image: "node:24" };
+    expect(extractRemoteUser(raw, tempDir)).toBe("root");
+  });
+
+  it("returns 'root' when Dockerfile USER is an ARG reference", () => {
+    const dockerfilePath = join(tempDir, "Dockerfile");
+    writeFileSync(
+      dockerfilePath,
+      "FROM node:24-bookworm\nARG USERNAME=node\nUSER ${USERNAME}\n",
+      "utf-8",
+    );
+
+    const raw = { build: { dockerfile: "Dockerfile" } };
+    expect(extractRemoteUser(raw, tempDir)).toBe("root");
+  });
+
+  it("returns 'root' when config has no build source", () => {
+    // Empty config with no image, no dockerfile — resolveBuildSource throws
+    const raw = {};
+    expect(extractRemoteUser(raw, tempDir)).toBe("root");
+  });
+
+  it("prioritizes remoteUser over Dockerfile USER", () => {
+    const dockerfilePath = join(tempDir, "Dockerfile");
+    writeFileSync(
+      dockerfilePath,
+      "FROM node:24-bookworm\nUSER vscode\n",
+      "utf-8",
+    );
+
+    const raw = {
+      build: { dockerfile: "Dockerfile" },
+      remoteUser: "node",
+    };
+    expect(extractRemoteUser(raw, tempDir)).toBe("node");
+  });
+
+  it("returns 'root' for image-based config without remoteUser", () => {
+    const raw = { image: "mcr.microsoft.com/devcontainers/base:ubuntu" };
+    expect(extractRemoteUser(raw, tempDir)).toBe("root");
+  });
+
+  it("returns Dockerfile USER from final stage of multi-stage build", () => {
+    const dockerfilePath = join(tempDir, "Dockerfile");
+    writeFileSync(
+      dockerfilePath,
+      `FROM node:24 AS builder
+USER builduser
+RUN npm install
+
+FROM debian:bookworm
+RUN apt-get update
+USER appuser
+`,
+      "utf-8",
+    );
+
+    const raw = { build: { dockerfile: "Dockerfile" } };
+    expect(extractRemoteUser(raw, tempDir)).toBe("appuser");
   });
 });

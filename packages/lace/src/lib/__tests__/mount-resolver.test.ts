@@ -11,7 +11,7 @@ import {
 import { join, basename } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { MountPathResolver } from "../mount-resolver";
-import type { MountAssignmentsFile } from "../mount-resolver";
+import type { MountAssignmentsFile, ContainerVariables } from "../mount-resolver";
 import type { LaceSettings } from "../settings";
 import type { LaceMountDeclaration } from "../feature-metadata";
 import { deriveProjectId } from "../repo-clones";
@@ -875,5 +875,120 @@ describe("MountPathResolver — validated mounts (sourceMustBe)", () => {
       "authorized-keys",
     );
     expect(existsSync(autoCreatedPath)).toBe(false);
+  });
+});
+
+// ── Container variable resolution ──
+
+describe("MountPathResolver — container variable resolution", () => {
+  it("resolveTarget resolves ${_REMOTE_USER} when containerVars provided", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "claude-code/config": { target: "/home/${_REMOTE_USER}/.claude" },
+    };
+    const containerVars: ContainerVariables = { remoteUser: "node" };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    expect(resolver.resolveTarget("claude-code/config")).toBe("/home/node/.claude");
+  });
+
+  it("resolveTarget passes through literal targets unchanged when containerVars provided", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/data": { target: "/data" },
+    };
+    const containerVars: ContainerVariables = { remoteUser: "node" };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    expect(resolver.resolveTarget("project/data")).toBe("/data");
+  });
+
+  it("resolveTarget passes through ${_REMOTE_USER} when containerVars not provided", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "claude-code/config": { target: "/home/${_REMOTE_USER}/.claude" },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    expect(resolver.resolveTarget("claude-code/config")).toBe(
+      "/home/${_REMOTE_USER}/.claude",
+    );
+  });
+
+  it("resolveFullSpec includes resolved target in spec string", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "claude-code/config": { target: "/home/${_REMOTE_USER}/.claude" },
+    };
+    const containerVars: ContainerVariables = { remoteUser: "node" };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    const spec = resolver.resolveFullSpec("claude-code/config");
+    expect(spec).toContain("target=/home/node/.claude");
+    expect(spec).not.toContain("${_REMOTE_USER}");
+  });
+
+  it("resolveTarget resolves ${containerWorkspaceFolder}", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/workspace": { target: "${containerWorkspaceFolder}/data" },
+    };
+    const containerVars: ContainerVariables = {
+      remoteUser: "root",
+      containerWorkspaceFolder: "/workspace/main",
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    expect(resolver.resolveTarget("project/workspace")).toBe("/workspace/main/data");
+  });
+
+  it("resolves multiple ${_REMOTE_USER} in one target", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/multi": {
+        target: "/home/${_REMOTE_USER}/.config/${_REMOTE_USER}-data",
+      },
+    };
+    const containerVars: ContainerVariables = { remoteUser: "vscode" };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    expect(resolver.resolveTarget("project/multi")).toBe(
+      "/home/vscode/.config/vscode-data",
+    );
+  });
+
+  it("resolves both ${_REMOTE_USER} and ${containerWorkspaceFolder} in one target", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "project/combined": {
+        target: "${containerWorkspaceFolder}/home/${_REMOTE_USER}/data",
+      },
+    };
+    const containerVars: ContainerVariables = {
+      remoteUser: "node",
+      containerWorkspaceFolder: "/workspace",
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    expect(resolver.resolveTarget("project/combined")).toBe(
+      "/workspace/home/node/data",
+    );
+  });
+
+  it("getDeclarations returns resolved targets", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "claude-code/config": { target: "/home/${_REMOTE_USER}/.claude" },
+    };
+    const containerVars: ContainerVariables = { remoteUser: "node" };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    const resolved = resolver.getDeclarations();
+    expect(resolved["claude-code/config"].target).toBe("/home/node/.claude");
+  });
+
+  it("does not mutate original declaration objects", () => {
+    const original: LaceMountDeclaration = { target: "/home/${_REMOTE_USER}/.claude" };
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "claude-code/config": original,
+    };
+    const containerVars: ContainerVariables = { remoteUser: "node" };
+    new MountPathResolver(workspaceFolder, {}, declarations, containerVars);
+
+    // Original object should be unchanged
+    expect(original.target).toBe("/home/${_REMOTE_USER}/.claude");
   });
 });

@@ -15,6 +15,14 @@ import type { LaceMountDeclaration } from "./feature-metadata";
 
 // ── Types ──
 
+/** Variables available for resolution in mount target paths. */
+export interface ContainerVariables {
+  /** The container's remote user (from remoteUser, Dockerfile USER, or default). */
+  remoteUser: string;
+  /** The container workspace folder path (from workspaceFolder in config). */
+  containerWorkspaceFolder?: string;
+}
+
 /** A single mount path assignment tracked by lace. */
 export interface MountAssignment {
   /** The label that identifies this assignment (e.g., "myns/data"). */
@@ -75,12 +83,23 @@ export class MountPathResolver {
   private assignments: Map<string, MountAssignment> = new Map();
   private persistPath: string;
   private projectId: string;
+  private containerVars?: ContainerVariables;
 
   constructor(
     private workspaceFolder: string,
     private settings: LaceSettings,
-    private declarations: Record<string, LaceMountDeclaration> = {},
+    declarations: Record<string, LaceMountDeclaration> = {},
+    containerVars?: ContainerVariables,
   ) {
+    this.containerVars = containerVars;
+    // Deep-copy declarations and resolve variables in targets
+    this.declarations = {};
+    for (const [label, decl] of Object.entries(declarations)) {
+      this.declarations[label] = {
+        ...decl,
+        target: this.resolveTargetVariables(decl.target),
+      };
+    }
     this.persistPath = join(
       workspaceFolder,
       ".lace",
@@ -89,6 +108,30 @@ export class MountPathResolver {
     this.projectId = deriveProjectId(workspaceFolder);
     this.load();
   }
+
+  /**
+   * Resolve devcontainer spec variables in a mount target string.
+   * Substitutes ${_REMOTE_USER} and ${containerWorkspaceFolder} when
+   * containerVars are available. Returns the target unchanged otherwise.
+   */
+  private resolveTargetVariables(target: string): string {
+    let resolved = target;
+    if (this.containerVars) {
+      resolved = resolved.replace(
+        /\$\{_REMOTE_USER\}/g,
+        this.containerVars.remoteUser,
+      );
+      if (this.containerVars.containerWorkspaceFolder) {
+        resolved = resolved.replace(
+          /\$\{containerWorkspaceFolder\}/g,
+          this.containerVars.containerWorkspaceFolder,
+        );
+      }
+    }
+    return resolved;
+  }
+
+  private declarations: Record<string, LaceMountDeclaration>;
 
   /** Whether this resolver has declarations loaded. */
   hasDeclarations(): boolean {

@@ -90,6 +90,15 @@ discover_projects() {
     # falling back to Config.User, then to "node" default.
     # Config.User is the container's default process user, which may be "root"
     # even when the SSH-accessible user is different (e.g., "vscode").
+    #
+    # NOTE: This implements the same resolution semantics as extractRemoteUser()
+    # in packages/lace/src/lib/devcontainer.ts, which resolves the remote user
+    # at config-generation time from source files. This operates at runtime from
+    # container metadata. Both follow the same three-tier resolution:
+    # explicit remoteUser > inspected/parsed user > default.
+    # The defaults differ: this defaults to "node" (lace convention); TypeScript
+    # defaults to "root" (devcontainer spec). See the proposal at
+    # cdocs/proposals/2026-03-07-remote-user-resolution-in-mount-targets.md.
     user=""
     metadata=$(docker inspect "$container_id" --format '{{index .Config.Labels "devcontainer.metadata"}}' 2>/dev/null || echo "")
     if [[ -n "$metadata" ]]; then

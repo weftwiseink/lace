@@ -87,11 +87,13 @@ describe("Scenario C1: mount auto-injection from feature metadata", () => {
     const mounts = extended.mounts as string[];
 
     // Assert: mounts array contains the auto-injected claude-code/config mount
+    // Target should be resolved: image-based config with no remoteUser defaults to "root"
     expect(mounts).toBeDefined();
     const claudeMount = mounts.find((m) => m.includes(".claude"));
     expect(claudeMount).toBeDefined();
     expect(claudeMount).toContain(`source=${claudeDir}`);
-    expect(claudeMount).toContain("target=/home/${_REMOTE_USER}/.claude");
+    expect(claudeMount).toContain("target=/home/root/.claude");
+    expect(claudeMount).not.toContain("${_REMOTE_USER}");
     expect(claudeMount).toContain("type=bind");
 
     // Assert: no port allocation (claude-code declares no ports)

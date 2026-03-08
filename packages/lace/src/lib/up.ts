@@ -7,6 +7,7 @@ import {
   readDevcontainerConfigMinimal,
   extractRepoMounts,
   extractPrebuildFeatures,
+  extractRemoteUser,
   DevcontainerConfigError,
 } from "./devcontainer";
 import { runResolveMounts } from "./resolve-mounts";
@@ -40,7 +41,7 @@ import {
   extractPrebuildFeaturesRaw,
   type TemplateResolutionResult,
 } from "./template-resolver";
-import { MountPathResolver } from "./mount-resolver";
+import { MountPathResolver, type ContainerVariables } from "./mount-resolver";
 import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
@@ -318,7 +319,21 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     );
   }
 
-  // Step 5: Validate mount declarations
+  // Step 5: Determine container remote user for variable resolution in mount targets.
+  // This resolves ${_REMOTE_USER} and ${containerWorkspaceFolder} in declaration
+  // targets so that mount specs contain concrete paths (not template strings).
+  // Done before conflict validation so that targets like /home/${_REMOTE_USER}/.claude
+  // and /home/node/.claude are correctly detected as conflicts when remoteUser=node.
+  const remoteUser = extractRemoteUser(configMinimal.raw, configMinimal.configDir);
+  const containerVars: ContainerVariables = {
+    remoteUser,
+    containerWorkspaceFolder:
+      typeof configMinimal.raw.workspaceFolder === "string"
+        ? configMinimal.raw.workspaceFolder
+        : undefined,
+  };
+
+  // Step 5.5: Validate mount declarations
   if (Object.keys(mountDeclarations).length > 0) {
     // Build set of known feature short IDs for namespace validation
     const features = (configForResolution.features ?? {}) as Record<string, unknown>;
@@ -329,7 +344,19 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
     try {
       validateMountNamespaces(mountDeclarations, featureShortIds);
-      validateMountTargetConflicts(mountDeclarations);
+      // Validate conflicts on resolved targets so that template variables
+      // like ${_REMOTE_USER} are compared as concrete paths.
+      const resolvedDeclarations = Object.fromEntries(
+        Object.entries(mountDeclarations).map(([label, decl]) => {
+          let target = decl.target;
+          target = target.replace(/\$\{_REMOTE_USER\}/g, containerVars.remoteUser);
+          if (containerVars.containerWorkspaceFolder) {
+            target = target.replace(/\$\{containerWorkspaceFolder\}/g, containerVars.containerWorkspaceFolder);
+          }
+          return [label, { ...decl, target }];
+        }),
+      );
+      validateMountTargetConflicts(resolvedDeclarations);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       result.exitCode = 1;
@@ -363,7 +390,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       throw err;
     }
   }
-  const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations);
+
+  const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations, containerVars);
 
   // Step 7.5: Validate sourceMustBe declarations before template resolution
   if (Object.keys(mountDeclarations).length > 0) {

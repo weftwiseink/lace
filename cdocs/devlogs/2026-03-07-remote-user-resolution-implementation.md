@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/mount-resolver
 type: devlog
 state: live
-status: wip
+status: review_ready
 related_to:
   - cdocs/proposals/2026-03-07-remote-user-resolution-in-mount-targets.md
 ---

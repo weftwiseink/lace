@@ -434,7 +434,7 @@ do_connect() {
   local port="$2"
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "wezterm cli spawn -- ssh -p $port -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$LACE_KNOWN_HOSTS node@localhost"
+    echo "wezterm cli spawn -- ssh -t -p $port -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$LACE_KNOWN_HOSTS node@localhost 'cd \"\${CONTAINER_WORKSPACE_FOLDER:-\$HOME}\" 2>/dev/null || cd; exec \$SHELL -l'"
     echo "wezterm cli set-tab-title --pane-id <id> $project"
     exit 0
   fi
@@ -489,6 +489,12 @@ except: pass
   # pick up SSH key changes after config hot-reload. Direct SSH via the CLI
   # avoids this issue entirely.
   #
+  # The remote command cd's to CONTAINER_WORKSPACE_FOLDER before starting an
+  # interactive login shell. This replaces the default_cwd behavior that the
+  # wezterm-mux-server used to provide. The -t flag forces PTY allocation,
+  # which is required when passing a remote command that starts an interactive
+  # shell. The env var is single-quoted so it expands on the remote side.
+  #
   # After spawning, pin the tab title so it shows the project name instead
   # of the SSH hostname. The format-tab-title handler in the wezterm config
   # checks tab_title first, so this survives OSC title changes from TUIs.
@@ -500,8 +506,10 @@ except: pass
     -o "IdentitiesOnly=yes" \
     -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS" \
     -o "StrictHostKeyChecking=no" \
+    -t \
     -p "$port" \
-    "$user@localhost" 2>/dev/null) && {
+    "$user@localhost" \
+    'cd "${CONTAINER_WORKSPACE_FOLDER:-$HOME}" 2>/dev/null || cd; exec $SHELL -l' 2>/dev/null) && {
     wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
     info "tab created for $project (pane $pane_id)"
   } || {

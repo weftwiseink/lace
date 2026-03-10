@@ -1,6 +1,6 @@
 // IMPLEMENTATION_VALIDATION
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -13,6 +13,7 @@ import {
   createBareRepoWorkspace,
   createNormalCloneWorkspace,
 } from "../../__tests__/helpers/scenario-utils";
+import { clearClassificationCache } from "../workspace-detector";
 
 let testDir: string;
 
@@ -20,6 +21,7 @@ beforeEach(() => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   testDir = join(tmpdir(), `lace-test-workspace-layout-${suffix}`);
   mkdirSync(testDir, { recursive: true });
+  clearClassificationCache();
 });
 
 afterEach(() => {
@@ -330,6 +332,61 @@ describe("applyWorkspaceLayout", () => {
     expect(result.message).toContain("git worktree repair");
     expect(result.classification).toBeDefined();
     expect(result.classification!.type).toBe("worktree");
+  });
+
+  it("returns error when repo has unsupported git extensions", () => {
+    const { bareDir, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "ext-project",
+      ["main"],
+    );
+    // Write a config with extensions.relativeWorktrees
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = 1\n\tbare = true\n[extensions]\n\trelativeWorktrees = true\n`,
+      "utf-8",
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("git extensions");
+    expect(result.message).toContain("relativeworktrees");
+    expect(result.message).toContain("--skip-validation");
+    expect(result.classification).toBeDefined();
+    expect(result.classification!.type).toBe("worktree");
+  });
+
+  it("succeeds when repo has no unsupported extensions", () => {
+    const { bareDir, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "clean-project",
+      ["main"],
+    );
+    // Write a config with formatversion 0 (no extensions)
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = 0\n\tbare = true\n`,
+      "utf-8",
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    expect(result.status).toBe("applied");
+    const extWarnings = result.warnings.filter((w) =>
+      w.includes("unsupported-extension"),
+    );
+    expect(extWarnings).toHaveLength(0);
   });
 
   it("succeeds when worktree uses relative gitdir path", () => {

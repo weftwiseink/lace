@@ -120,6 +120,25 @@ export function applyWorkspaceLayout(
     };
   }
 
+  // Unsupported git extensions will cause fatal errors inside the container — fatal error
+  const extensionWarnings = result.warnings.filter(
+    (w) => w.code === "unsupported-extension",
+  );
+  if (extensionWarnings.length > 0) {
+    const details = extensionWarnings.map((w) => w.message).join("\n  ");
+    const remediation =
+      extensionWarnings[0].remediation ?? "Upgrade git in the container.";
+    return {
+      status: "error",
+      message:
+        `Repository uses git extensions that the container's git may not support:\n  ${details}\n` +
+        `${remediation}\n` +
+        "Or bypass with --skip-validation if you know the container's git supports these extensions.",
+      warnings,
+      classification,
+    };
+  }
+
   // Validate layout matches
   if (classification.type === "normal-clone") {
     return {

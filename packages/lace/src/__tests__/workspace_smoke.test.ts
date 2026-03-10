@@ -118,6 +118,25 @@ function createRealBareWorktreeRepo(
     worktrees[wtName] = worktreeDir;
   }
 
+  // Strip extensions set by the host git (e.g., relativeWorktrees from
+  // worktree.useRelativePaths = true in ~/.gitconfig). These extensions
+  // would trigger the unsupported-extension check in workspace-detector
+  // and cause workspace layout to fail in tests. The test repos don't need
+  // these extensions — they're synthetic and never enter a real container.
+  try {
+    execSync(
+      `git -C "${bareDir}" config --remove-section extensions`,
+      { stdio: "pipe" },
+    );
+    // Reset repositoryformatversion to 0 if it was bumped for extensions
+    execSync(
+      `git -C "${bareDir}" config core.repositoryformatversion 0`,
+      { stdio: "pipe" },
+    );
+  } catch {
+    // No extensions section — nothing to remove
+  }
+
   return { root, worktrees, bareDir };
 }
 

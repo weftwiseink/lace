@@ -37,7 +37,11 @@ export type WorkspaceClassification =
 
 /** Warnings emitted during workspace classification. */
 export interface ClassificationWarning {
-  code: "absolute-gitdir" | "standard-bare" | "prunable-worktree";
+  code:
+    | "absolute-gitdir"
+    | "standard-bare"
+    | "prunable-worktree"
+    | "unsupported-extension";
   message: string;
   remediation?: string;
 }
@@ -171,6 +175,13 @@ function classifyWorkspaceUncached(absPath: string): ClassificationResult {
     // Also check sibling worktrees for absolute paths (excluding current to avoid duplicates)
     warnings.push(...checkAbsolutePaths(bareRoot, basename(absPath)));
 
+    // Check for git extensions that may not be supported by the container's git.
+    // The bare git dir (containing the config) is the parent of the worktrees/ dir.
+    const bareGitDir = findBareGitDir(resolvedPath);
+    if (bareGitDir) {
+      warnings.push(...checkGitExtensions(bareGitDir));
+    }
+
     return {
       classification: {
         type: "worktree",
@@ -184,6 +195,9 @@ function classifyWorkspaceUncached(absPath: string): ClassificationResult {
 
   // The .git file points to .bare (or similar) — this is the BARE-ROOT
   if (existsSync(join(resolvedPath, "HEAD"))) {
+    // Check for git extensions that may not be supported by the container's git.
+    warnings.push(...checkGitExtensions(resolvedPath));
+
     return {
       classification: { type: "bare-root", bareRepoRoot: absPath },
       warnings,
@@ -294,6 +308,150 @@ export function checkAbsolutePaths(
     }
   } catch {
     /* if we can't read the directory, skip the supplemental check */
+  }
+
+  return warnings;
+}
+
+/**
+ * Find the bare git directory (containing HEAD, config, worktrees/) from a
+ * resolved worktree path. Given /project/.bare/worktrees/main, returns
+ * /project/.bare. This is the directory where the git config file lives.
+ */
+function findBareGitDir(resolvedWorktreePath: string): string | null {
+  let current = resolvedWorktreePath;
+
+  while (current !== dirname(current)) {
+    if (basename(current) === "worktrees") {
+      const bareGitDir = dirname(current);
+      if (existsSync(join(bareGitDir, "HEAD"))) {
+        return bareGitDir;
+      }
+    }
+    current = dirname(current);
+  }
+
+  return null;
+}
+
+// ── Git Config Extension Detection ──
+
+/**
+ * Minimum git versions required for known repository extensions.
+ * Extensions not in this map are still flagged — the message just cannot
+ * specify the minimum version. The map enhances error messages, not detection.
+ *
+ * Does not handle: multiline values (trailing backslash continuation),
+ * quoted strings, or include directives ([include] / [includeIf]).
+ * These features are not used by repositoryformatversion or extensions.* keys.
+ */
+export const GIT_EXTENSION_MIN_VERSIONS: Record<string, string> = {
+  objectformat: "2.36.0",
+  worktreeconfig: "2.20.0",
+  relativeworktrees: "2.48.0",
+};
+
+/** Result of parsing a git config file for extension information. */
+export interface GitConfigExtensions {
+  /** Value of core.repositoryformatversion (0 if absent). */
+  formatVersion: number;
+  /** Map of extension name (lowercased) to its value. */
+  extensions: Record<string, string>;
+}
+
+/**
+ * Parse a git config file to extract repositoryformatversion and extensions.
+ * Uses a simple line-by-line parser that tracks the current section.
+ * Only extracts the specific keys needed for extension compatibility checking.
+ *
+ * Git config keys are case-insensitive; this parser lowercases them for
+ * consistent matching. Section names are also lowercased.
+ *
+ * @param configContent The raw content of the git config file.
+ * @returns Parsed format version and extensions map.
+ */
+export function parseGitConfigExtensions(configContent: string): GitConfigExtensions {
+  let currentSection = "";
+  let formatVersion = 0;
+  const extensions: Record<string, string> = {};
+
+  for (const rawLine of configContent.split("\n")) {
+    const line = rawLine.trim();
+
+    // Skip blank lines and comments
+    if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+
+    // Section header: [section] or [section "subsection"]
+    const sectionMatch = line.match(/^\[([^\s\]]+)(?:\s+"[^"]*")?\]$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1].toLowerCase();
+      continue;
+    }
+
+    // Key-value pair: key = value
+    const kvMatch = line.match(/^([^=]+?)\s*=\s*(.*)$/);
+    if (!kvMatch) continue;
+
+    const key = kvMatch[1].trim().toLowerCase();
+    const value = kvMatch[2].trim();
+
+    if (currentSection === "core" && key === "repositoryformatversion") {
+      const parsed = parseInt(value, 10);
+      if (!isNaN(parsed)) {
+        formatVersion = parsed;
+      }
+    } else if (currentSection === "extensions") {
+      extensions[key] = value;
+    }
+  }
+
+  return { formatVersion, extensions };
+}
+
+/**
+ * Check a bare repo's git config for extensions that may not be supported
+ * by the container's git version. Emits `unsupported-extension` warnings
+ * for each unrecognized extension.
+ *
+ * Only checks repos with repositoryformatversion >= 1 (version 0 repos
+ * do not use the extensions namespace).
+ *
+ * @param bareGitDir Path to the bare git directory (e.g., /path/to/project/.bare)
+ * @returns Array of warnings for unsupported extensions.
+ */
+export function checkGitExtensions(
+  bareGitDir: string,
+): ClassificationWarning[] {
+  const warnings: ClassificationWarning[] = [];
+
+  const configPath = join(bareGitDir, "config");
+  if (!existsSync(configPath)) return warnings;
+
+  let configContent: string;
+  try {
+    configContent = readFileSync(configPath, "utf-8");
+  } catch {
+    return warnings;
+  }
+
+  const { formatVersion, extensions } = parseGitConfigExtensions(configContent);
+
+  // Version 0 repos do not use extensions — nothing to check
+  if (formatVersion < 1) return warnings;
+
+  for (const [extName, _value] of Object.entries(extensions)) {
+    const minVersion = GIT_EXTENSION_MIN_VERSIONS[extName];
+    const versionHint = minVersion ? ` (requires git ${minVersion}+)` : "";
+
+    warnings.push({
+      code: "unsupported-extension",
+      message:
+        `Repository uses git extension "${extName}"${versionHint} ` +
+        "but the container's git may not support it.",
+      remediation:
+        'Set version to "latest" in the git prebuild feature: ' +
+        '"ghcr.io/devcontainers/features/git:1": { "version": "latest" }',
+    });
   }
 
   return warnings;

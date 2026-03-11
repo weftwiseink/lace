@@ -7,6 +7,11 @@ type: devlog
 state: live
 status: review_ready
 tags: [weftwise, devcontainer, mounts, features, git-extensions, post-migration, cleanup]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-03-11T22:15:00-06:00
+  round: 1
 related_to:
   - cdocs/proposals/2026-03-11-weftwise-devcontainer-post-migration-fixes.md
   - cdocs/reviews/2026-03-11-review-of-weftwise-devcontainer-post-migration-fixes-r2.md
@@ -109,6 +114,15 @@ explicitly.
 > because the review agent focused on the high-level mount resolution contract
 > without tracing the `parseDockerfileUser` → ARG variable → fallback chain.
 > The `_REMOTE_USER` resolution proposal tests all used literal `USER` values.
+
+### Phase 3: `--skip-validation` required for `lace up --rebuild`
+
+Both weftwise and lace `lace up --rebuild` required `--skip-validation` because
+the git extension check (`relativeWorktrees` requires 2.48+) runs against the
+**current** prebuild image before the new one is built. The prebuild's old git
+(Debian 2.39.x) fails validation, but the rebuilt image installs `"latest"`
+(2.53.0). This is the known chicken-and-egg issue documented in the proposal's
+Edge Case E1 and the companion `rebuild-prebuild-before-validation` proposal.
 
 ### Phase 3: `lace restore` behavior
 

@@ -65,6 +65,8 @@ export interface UpOptions {
   cacheDir?: string;
   /** Skip host-side validation (downgrade errors to warnings) */
   skipValidation?: boolean;
+  /** Force rebuild of prebuild image (bypass cache) */
+  rebuild?: boolean;
 }
 
 // Documented in CONTRIBUTING.md -- update if changing this pattern
@@ -104,6 +106,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     skipMetadataValidation = false,
     cacheDir,
     skipValidation = false,
+    rebuild = false,
   } = options;
 
   const result: UpResult = {
@@ -557,6 +560,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     const prebuildResult = runPrebuild({
       workspaceRoot: workspaceFolder,
       subprocess,
+      force: rebuild,
     });
     result.phases.prebuild = {
       exitCode: prebuildResult.exitCode,

@@ -21,9 +21,10 @@ ENV DEVCONTAINER=true
 # - Playwright MCP for screenshot capture
 # - Electron headless testing
 #
+# NOTE: git is NOT installed here; it is provided by the devcontainer feature
+#   ghcr.io/devcontainers/features/git:1 (see .lace/prebuild/devcontainer.json)
 # NOTE: psmisc provides fuser for killing zombie processes on ports
 RUN apt-get update && apt-get install -y \
-    git \
     curl \
     psmisc \
     sudo \

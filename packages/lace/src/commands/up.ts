@@ -53,6 +53,11 @@ export const upCommand = defineCommand({
       description: "Generate config only; skip the actual devcontainer up invocation",
       required: false,
     },
+    "rebuild": {
+      type: "boolean",
+      description: "Force rebuild of prebuild image (bypass cache)",
+      default: false,
+    },
   },
   async run({ args, rawArgs }) {
     // Extract workspace-folder if provided
@@ -61,6 +66,7 @@ export const upCommand = defineCommand({
     const skipMetadataValidation = args["skip-metadata-validation"] ?? false;
     const skipValidation = args["skip-validation"] ?? false;
     const skipDevcontainerUp = args["skip-devcontainer-up"] ?? false;
+    const rebuild = args["rebuild"] ?? false;
 
     // Pass remaining args to devcontainer
     // Filter out our own args
@@ -71,7 +77,7 @@ export const upCommand = defineCommand({
         skipNext = false;
         continue;
       }
-      if (arg === "--workspace-folder" || arg === "--no-cache" || arg === "--skip-metadata-validation" || arg === "--skip-validation" || arg === "--skip-devcontainer-up") {
+      if (arg === "--workspace-folder" || arg === "--no-cache" || arg === "--skip-metadata-validation" || arg === "--skip-validation" || arg === "--skip-devcontainer-up" || arg === "--rebuild") {
         if (arg === "--workspace-folder") {
           skipNext = true;
         }
@@ -90,6 +96,7 @@ export const upCommand = defineCommand({
       skipMetadataValidation,
       skipValidation,
       skipDevcontainerUp,
+      rebuild,
     };
 
     const result = await runUp(options);

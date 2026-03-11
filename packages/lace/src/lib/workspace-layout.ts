@@ -104,42 +104,9 @@ export function applyWorkspaceLayout(
 
   const { classification } = result;
 
-  // Absolute gitdir paths will not resolve inside the container — fatal error
-  const absoluteGitdirWarnings = result.warnings.filter(
-    (w) => w.code === "absolute-gitdir",
-  );
-  if (absoluteGitdirWarnings.length > 0) {
-    const names = absoluteGitdirWarnings.map((w) => w.message).join("\n  ");
-    return {
-      status: "error",
-      message:
-        `Worktree(s) use absolute gitdir paths that will not resolve inside the container:\n  ${names}\n` +
-        "Run `git worktree repair --relative-paths` (requires git 2.48+) or recreate the worktree(s).",
-      warnings,
-      classification,
-    };
-  }
-
-  // Unsupported git extensions will cause fatal errors inside the container — fatal error
-  const extensionWarnings = result.warnings.filter(
-    (w) => w.code === "unsupported-extension",
-  );
-  if (extensionWarnings.length > 0) {
-    const details = extensionWarnings.map((w) => w.message).join("\n  ");
-    const remediation =
-      extensionWarnings[0].remediation ?? "Upgrade git in the container.";
-    return {
-      status: "error",
-      message:
-        `Repository uses git extensions that the container's git may not support:\n  ${details}\n` +
-        `${remediation}\n` +
-        "Or bypass with --skip-validation if you know the container's git supports these extensions.",
-      warnings,
-      classification,
-    };
-  }
-
-  // Validate layout matches
+  // ── Hard classification checks ──
+  // These mean the workspace fundamentally doesn't match bare-worktree layout.
+  // We can't compute mount paths, so bail before config mutation.
   if (classification.type === "normal-clone") {
     return {
       status: "error",
@@ -167,6 +134,9 @@ export function applyWorkspaceLayout(
     };
   }
 
+  // ── Config mutation ──
+  // Applied before soft validation checks so that --skip-validation still
+  // gets a working config (workspaceMount, workspaceFolder, containerEnv).
   let bareRepoRoot: string;
   let worktreeName: string | null;
 
@@ -206,6 +176,45 @@ export function applyWorkspaceLayout(
     mergeVscodeSettings(config, {
       "git.repositoryScanMaxDepth": wsConfig.postCreate.scanDepth,
     });
+  }
+
+  // ── Soft validation checks ──
+  // Config is already mutated above, so --skip-validation can proceed with
+  // correct workspaceMount/workspaceFolder even if these checks fail.
+
+  // Absolute gitdir paths will not resolve inside the container
+  const absoluteGitdirWarnings = result.warnings.filter(
+    (w) => w.code === "absolute-gitdir",
+  );
+  if (absoluteGitdirWarnings.length > 0) {
+    const names = absoluteGitdirWarnings.map((w) => w.message).join("\n  ");
+    return {
+      status: "error",
+      message:
+        `Worktree(s) use absolute gitdir paths that will not resolve inside the container:\n  ${names}\n` +
+        "Run `git worktree repair --relative-paths` (requires git 2.48+) or recreate the worktree(s).",
+      warnings,
+      classification,
+    };
+  }
+
+  // Unsupported git extensions will cause fatal errors inside the container
+  const extensionWarnings = result.warnings.filter(
+    (w) => w.code === "unsupported-extension",
+  );
+  if (extensionWarnings.length > 0) {
+    const details = extensionWarnings.map((w) => w.message).join("\n  ");
+    const remediation =
+      extensionWarnings[0].remediation ?? "Upgrade git in the container.";
+    return {
+      status: "error",
+      message:
+        `Repository uses git extensions that the container's git may not support:\n  ${details}\n` +
+        `${remediation}\n` +
+        "Or bypass with --skip-validation if you know the container's git supports these extensions.",
+      warnings,
+      classification,
+    };
   }
 
   return {

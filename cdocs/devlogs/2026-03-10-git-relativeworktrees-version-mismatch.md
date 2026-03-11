@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-10T17:30:00-08:00
 task_list: lace/workspace-validation
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 related_to:
   - cdocs/proposals/2026-03-10-git-relativeworktrees-version-mismatch.md
 ---

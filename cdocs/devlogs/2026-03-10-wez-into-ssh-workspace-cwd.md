@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-10T17:25:00-08:00
 task_list: lace/wez-into
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 related_to:
   - cdocs/proposals/2026-03-10-wez-into-ssh-workspace-cwd.md
 ---

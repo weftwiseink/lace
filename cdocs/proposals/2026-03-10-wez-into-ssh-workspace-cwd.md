@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-10T14:45:00-08:00
 task_list: lace/wez-into
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: result_accepted
 tags: [wez-into, ssh, workspace, cwd, bugfix, dx]
 last_reviewed:
   status: accepted

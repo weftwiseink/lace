@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-07T12:00:00-06:00
 task_list: lace/agent-terminal-interaction
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [analysis, wezterm, mcp, security, agent-tools, pane-interaction, lace]
 ---
 

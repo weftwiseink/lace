@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-10T15:00:00-06:00
 task_list: lace/workspace-validation
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: result_accepted
 tags: [git, worktree, devcontainer, version-mismatch, host-validation, extensions, relativeWorktrees]
 related_to:
   - cdocs/proposals/2026-02-15-workspace-validation-and-layout.md

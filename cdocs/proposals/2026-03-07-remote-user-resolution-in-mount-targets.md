@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-07T14:00:00-08:00
 task_list: lace/mount-resolver
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: result_accepted
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6"

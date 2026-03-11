@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-07T09:15:00-08:00
 task_list: lace/weftwise-migration
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [investigation, migration, weftwise, docker-build, devcontainer, failure-analysis]
 related_to:
   - cdocs/proposals/2026-03-03-weftwise-devcontainer-lace-migration.md

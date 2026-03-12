@@ -4,6 +4,7 @@ import {
   deriveProjectName,
   sanitizeContainerName,
   hasRunArgsFlag,
+  resolveContainerName,
 } from "../project-name";
 import type { WorkspaceClassification } from "../workspace-detector";
 
@@ -165,5 +166,39 @@ describe("hasRunArgsFlag", () => {
 
   it("does not match similar prefix in equals form", () => {
     expect(hasRunArgsFlag(["--namespace=x"], "--name")).toBe(false);
+  });
+});
+
+// ── resolveContainerName ── (T13c)
+
+describe("resolveContainerName", () => {
+  it("uses custom --name from runArgs (space form)", () => {
+    expect(
+      resolveContainerName("foo", { runArgs: ["--name", "bar"] }),
+    ).toBe("bar");
+  });
+
+  it("uses custom --name from runArgs (equals form)", () => {
+    expect(
+      resolveContainerName("foo", { runArgs: ["--name=bar"] }),
+    ).toBe("bar");
+  });
+
+  it("falls back to sanitizeContainerName when no --name in runArgs", () => {
+    expect(
+      resolveContainerName("foo.bar", { runArgs: [] }),
+    ).toBe(sanitizeContainerName("foo.bar"));
+  });
+
+  it("falls back to sanitizeContainerName when runArgs is missing", () => {
+    expect(
+      resolveContainerName("my project", {}),
+    ).toBe(sanitizeContainerName("my project"));
+  });
+
+  it("ignores --namespace (not --name)", () => {
+    expect(
+      resolveContainerName("foo", { runArgs: ["--namespace", "bar"] }),
+    ).toBe(sanitizeContainerName("foo"));
   });
 });

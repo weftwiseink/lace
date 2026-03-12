@@ -566,3 +566,46 @@ describe("prebuild: image-based rebuild after previous prebuild", () => {
     expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:jammy");
   });
 });
+
+// ── T14-T15: --no-cache flag tests ──
+
+describe("runPrebuild: --no-cache when force is true (T14)", () => {
+  it("passes --no-cache to devcontainer build when force is true", () => {
+    setupWorkspace(STANDARD_JSON, STANDARD_DOCKERFILE);
+    const mock = createMock();
+
+    const result = runPrebuild({
+      workspaceRoot,
+      subprocess: mock,
+      force: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Find the devcontainer build call
+    const buildCall = mockCalls.find(
+      (c) => c.command === "devcontainer" && c.args[0] === "build",
+    );
+    expect(buildCall).toBeDefined();
+    expect(buildCall!.args).toContain("--no-cache");
+  });
+});
+
+describe("runPrebuild: no --no-cache when force is false (T15)", () => {
+  it("does not pass --no-cache when force is not set", () => {
+    setupWorkspace(STANDARD_JSON, STANDARD_DOCKERFILE);
+    const mock = createMock();
+
+    const result = runPrebuild({
+      workspaceRoot,
+      subprocess: mock,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // Find the devcontainer build call
+    const buildCall = mockCalls.find(
+      (c) => c.command === "devcontainer" && c.args[0] === "build",
+    );
+    expect(buildCall).toBeDefined();
+    expect(buildCall!.args).not.toContain("--no-cache");
+  });
+});

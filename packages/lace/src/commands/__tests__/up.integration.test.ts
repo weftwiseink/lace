@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { runUp } from "@/lib/up";
 import type { RunSubprocess } from "@/lib/subprocess";
 import { clearMetadataCache, type FeatureMetadata } from "@/lib/feature-metadata";
+import { clearClassificationCache } from "@/lib/workspace-detector";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -173,6 +174,7 @@ beforeEach(() => {
   mockCalls = [];
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
+  clearClassificationCache();
 
   // Set LACE_SETTINGS to point to our test settings location
   process.env.LACE_SETTINGS = join(
@@ -2173,5 +2175,257 @@ describe("lace up: inferred mount validation — warns on missing workspaceMount
     ).toBe(true);
 
     warnSpy.mockRestore();
+  });
+});
+
+// ── Post-container git verification integration tests (T9-T13b) ──
+
+/** Create a bare-repo worktree layout in the given root with extensions. */
+function setupBareWorktreeWithExtensions(
+  root: string,
+  opts: { extensions?: boolean; configVersion?: number } = {},
+) {
+  const { extensions = true, configVersion = 1 } = opts;
+  const bareDir = join(root, ".bare");
+  mkdirSync(join(bareDir, "objects"), { recursive: true });
+  mkdirSync(join(bareDir, "refs"), { recursive: true });
+  writeFileSync(join(bareDir, "HEAD"), "ref: refs/heads/main\n", "utf-8");
+  writeFileSync(join(root, ".git"), "gitdir: ./.bare\n", "utf-8");
+
+  if (extensions) {
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = ${configVersion}\n\tbare = true\n[extensions]\n\trelativeWorktrees = true\n`,
+      "utf-8",
+    );
+  }
+
+  // Create a worktree directory
+  const worktreeDir = join(root, "main");
+  const worktreeGitStateDir = join(bareDir, "worktrees", "main");
+  mkdirSync(worktreeDir, { recursive: true });
+  mkdirSync(worktreeGitStateDir, { recursive: true });
+  writeFileSync(join(worktreeDir, ".git"), "gitdir: ../.bare/worktrees/main\n", "utf-8");
+  writeFileSync(join(worktreeGitStateDir, "commondir"), "../..\n", "utf-8");
+  writeFileSync(join(worktreeGitStateDir, "gitdir"), join(worktreeDir, ".git") + "\n", "utf-8");
+
+  return { worktreeDir, bareDir };
+}
+
+/** Create a mock subprocess that handles docker exec for git --version. */
+function createVerificationMock(
+  gitVersionOutput: string,
+  gitExitCode = 0,
+): RunSubprocess {
+  return (command, args, opts) => {
+    mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    // Handle docker exec <container> git --version
+    if (
+      command === "docker" &&
+      args[0] === "exec" &&
+      args.includes("git") &&
+      args.includes("--version")
+    ) {
+      return {
+        exitCode: gitExitCode,
+        stdout: gitVersionOutput,
+        stderr: "",
+      };
+    }
+
+    // Default: succeed for devcontainer commands
+    return {
+      exitCode: 0,
+      stdout: '{"imageName":["test"]}',
+      stderr: "",
+    };
+  };
+}
+
+describe("lace up: T9 -- post-container verification passes with adequate git", () => {
+  it("runs verification and passes when container git is adequate", async () => {
+    const { worktreeDir } = setupBareWorktreeWithExtensions(workspaceRoot);
+    clearClassificationCache();
+
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: { workspace: { layout: "bare-worktree" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createVerificationMock("git version 2.53.0"),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.containerVerification).toBeDefined();
+    expect(result.phases.containerVerification?.exitCode).toBe(0);
+    expect(result.phases.containerVerification?.message).toContain("2.53.0");
+  });
+});
+
+describe("lace up: T10 -- post-container verification fails with old git", () => {
+  it("fails verification when container git is too old", async () => {
+    const { worktreeDir } = setupBareWorktreeWithExtensions(workspaceRoot);
+    clearClassificationCache();
+
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: { workspace: { layout: "bare-worktree" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createVerificationMock("git version 2.39.5"),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.phases.containerVerification).toBeDefined();
+    expect(result.phases.containerVerification?.exitCode).toBe(1);
+    expect(result.phases.containerVerification?.message).toContain("2.48.0");
+  });
+});
+
+describe("lace up: T11 -- skip-validation bypasses verification failure", () => {
+  it("downgrades verification failure with --skip-validation", async () => {
+    const { worktreeDir } = setupBareWorktreeWithExtensions(workspaceRoot);
+    clearClassificationCache();
+
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: { workspace: { layout: "bare-worktree" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createVerificationMock("git version 2.39.5"),
+      skipValidation: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.containerVerification).toBeDefined();
+    expect(result.phases.containerVerification?.exitCode).toBe(0);
+    expect(result.phases.containerVerification?.message).toContain("(downgraded)");
+  });
+});
+
+describe("lace up: T12 -- no extensions skips verification", () => {
+  it("does not run verification when workspace has no extensions", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.containerVerification).toBeUndefined();
+    // No docker exec call should have been made
+    expect(
+      mockCalls.some(
+        (c) => c.command === "docker" && c.args[0] === "exec",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("lace up: T13 -- non-prebuild config with extensions runs verification", () => {
+  it("runs verification for non-prebuild config with extensions", async () => {
+    const { worktreeDir } = setupBareWorktreeWithExtensions(workspaceRoot);
+    clearClassificationCache();
+
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    // image-based config (no prebuild)
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: { workspace: { layout: "bare-worktree" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createVerificationMock("git version 2.53.0"),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.containerVerification?.exitCode).toBe(0);
+    // Verify docker exec was called
+    expect(
+      mockCalls.some(
+        (c) => c.command === "docker" && c.args[0] === "exec",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("lace up: T13b -- custom --name in runArgs targets correct container", () => {
+  it("uses custom --name from runArgs for docker exec", async () => {
+    const { worktreeDir } = setupBareWorktreeWithExtensions(workspaceRoot);
+    clearClassificationCache();
+
+    const worktreeDevcontainerDir = join(worktreeDir, ".devcontainer");
+    mkdirSync(worktreeDevcontainerDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDevcontainerDir, "devcontainer.json"),
+      JSON.stringify({
+        image: "node:24-bookworm",
+        runArgs: ["--name", "my-custom"],
+        customizations: {
+          lace: { workspace: { layout: "bare-worktree" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runUp({
+      workspaceFolder: worktreeDir,
+      subprocess: createVerificationMock("git version 2.53.0"),
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.phases.containerVerification?.exitCode).toBe(0);
+    // Verify docker exec was called with "my-custom" as the container name
+    const dockerExecCall = mockCalls.find(
+      (c) => c.command === "docker" && c.args[0] === "exec",
+    );
+    expect(dockerExecCall).toBeDefined();
+    expect(dockerExecCall!.args[1]).toBe("my-custom");
   });
 });

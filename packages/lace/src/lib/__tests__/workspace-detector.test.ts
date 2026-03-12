@@ -15,7 +15,11 @@ import {
   parseGitConfigExtensions,
   checkGitExtensions,
   clearClassificationCache,
+  compareVersions,
+  verifyContainerGitVersion,
+  getDetectedExtensions,
 } from "../workspace-detector";
+import type { RunSubprocess } from "../subprocess";
 import {
   createBareRepoWorkspace,
   createNormalCloneWorkspace,
@@ -588,5 +592,210 @@ describe("classifyWorkspace extension detection", () => {
       (w) => w.code === "unsupported-extension",
     );
     expect(extWarnings).toHaveLength(0);
+  });
+});
+
+// ── compareVersions ── (T1)
+
+describe("compareVersions", () => {
+  it("returns positive when a > b", () => {
+    expect(compareVersions("2.53.0", "2.48.0")).toBeGreaterThan(0);
+  });
+
+  it("returns zero when a == b", () => {
+    expect(compareVersions("2.48.0", "2.48.0")).toBe(0);
+  });
+
+  it("returns negative when a < b", () => {
+    expect(compareVersions("2.39.5", "2.48.0")).toBeLessThan(0);
+  });
+
+  it("handles major version difference", () => {
+    expect(compareVersions("3.0.0", "2.48.0")).toBeGreaterThan(0);
+  });
+
+  it("treats missing patch as 0", () => {
+    expect(compareVersions("2.48", "2.48.0")).toBe(0);
+  });
+});
+
+// ── verifyContainerGitVersion ── (T1b, T2, T3, T4, T5, T6)
+
+describe("verifyContainerGitVersion", () => {
+  function mockSubprocess(stdout: string, exitCode = 0): RunSubprocess {
+    return () => ({ exitCode, stdout, stderr: "" });
+  }
+
+  it("T1b: parses version with suffixes (Apple Git)", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true" },
+      mockSubprocess("git version 2.48.0 (Apple Git-140)"),
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.gitVersion).toBe("2.48.0");
+  });
+
+  it("T2: passes with adequate git version", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true" },
+      mockSubprocess("git version 2.53.0"),
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.gitVersion).toBe("2.53.0");
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0].supported).toBe(true);
+  });
+
+  it("T3: fails with inadequate git version", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true" },
+      mockSubprocess("git version 2.39.5"),
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.gitVersion).toBe("2.39.5");
+    expect(result.checks).toHaveLength(1);
+    expect(result.checks[0].supported).toBe(false);
+    expect(result.checks[0].message).toContain("Set version");
+  });
+
+  it("T4: handles git not installed (non-zero exit)", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true" },
+      mockSubprocess("", 1),
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.gitVersion).toBeNull();
+    expect(result.checks[0].message).toContain("git may not be installed");
+  });
+
+  it("T5: unknown extension passes (no minimum version known)", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true", somefutureext: "true" },
+      mockSubprocess("git version 2.53.0"),
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.checks).toHaveLength(2);
+    const unknownCheck = result.checks.find((c) => c.extension === "somefutureext");
+    expect(unknownCheck).toBeDefined();
+    expect(unknownCheck!.supported).toBe(true);
+    expect(unknownCheck!.message).toContain("no known minimum");
+  });
+
+  it("T6: mixed extensions -- one fails, one passes", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true", worktreeconfig: "true" },
+      mockSubprocess("git version 2.30.0"),
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.checks).toHaveLength(2);
+
+    const rtCheck = result.checks.find((c) => c.extension === "relativeworktrees");
+    expect(rtCheck!.supported).toBe(false);
+
+    const wtcCheck = result.checks.find((c) => c.extension === "worktreeconfig");
+    expect(wtcCheck!.supported).toBe(true);
+  });
+
+  it("handles unexpected git version output", () => {
+    const result = verifyContainerGitVersion(
+      "test-container",
+      { relativeworktrees: "true" },
+      mockSubprocess("some garbage output"),
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.gitVersion).toBeNull();
+    expect(result.checks[0].message).toContain("Unexpected git version output");
+  });
+});
+
+// ── getDetectedExtensions ── (T7, T7b)
+
+describe("getDetectedExtensions", () => {
+  it("T7: returns extensions for worktree with extensions", () => {
+    const { bareDir, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "ext-project",
+      ["main"],
+    );
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = 1\n\tbare = true\n[extensions]\n\trelativeWorktrees = true\n`,
+      "utf-8",
+    );
+
+    const result = classifyWorkspace(worktrees.main);
+    const extensions = getDetectedExtensions(result, worktrees.main);
+
+    expect(extensions).not.toBeNull();
+    expect(extensions).toEqual({ relativeworktrees: "true" });
+  });
+
+  it("T7: returns extensions for bare-root with extensions", () => {
+    const { root, bareDir } = createBareRepoWorkspace(
+      testDir,
+      "bare-ext-project",
+      ["main"],
+    );
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = 1\n\tbare = true\n[extensions]\n\trelativeWorktrees = true\n`,
+      "utf-8",
+    );
+
+    const result = classifyWorkspace(root);
+    const extensions = getDetectedExtensions(result, root);
+
+    expect(extensions).not.toBeNull();
+    expect(extensions).toEqual({ relativeworktrees: "true" });
+  });
+
+  it("T7b: returns null for normal clone", () => {
+    const root = createNormalCloneWorkspace(testDir, "normal-clone");
+
+    const result = classifyWorkspace(root);
+    const extensions = getDetectedExtensions(result, root);
+
+    expect(extensions).toBeNull();
+  });
+
+  it("returns null when no extensions in config", () => {
+    const { bareDir, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "no-ext-project",
+      ["main"],
+    );
+    writeFileSync(
+      join(bareDir, "config"),
+      `[core]\n\trepositoryformatversion = 0\n\tbare = true\n`,
+      "utf-8",
+    );
+
+    const result = classifyWorkspace(worktrees.main);
+    const extensions = getDetectedExtensions(result, worktrees.main);
+
+    expect(extensions).toBeNull();
+  });
+
+  it("returns null when .git file is missing", () => {
+    const root = join(testDir, "no-git");
+    mkdirSync(root, { recursive: true });
+
+    const result = classifyWorkspace(root);
+    const extensions = getDetectedExtensions(result, root);
+
+    expect(extensions).toBeNull();
   });
 });

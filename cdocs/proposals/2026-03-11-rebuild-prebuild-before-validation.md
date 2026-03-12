@@ -2,93 +2,92 @@
 first_authored:
   by: "@claude-opus-4-6"
   at: 2026-03-11T12:00:00-06:00
-last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6"
-  at: 2026-03-11T13:00:00-06:00
-  round: 1
 task_list: lace/up-pipeline
 type: proposal
-state: live
-status: review_ready
-tags: [lace-up, pipeline-ordering, rebuild, prebuild, workspace-validation, git-extensions, docker-no-cache]
+state: archived
+status: superseded
+tags: [lace-up, validation-architecture, prebuild, container-verification, git-extensions, docker-no-cache]
 related_to:
   - cdocs/proposals/2026-03-10-git-relativeworktrees-version-mismatch.md
   - cdocs/proposals/2026-02-15-workspace-validation-and-layout.md
+supersedes_revision: 2
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6"
+  at: 2026-03-11T17:45:00-07:00
+  round: 3
 ---
 
-# Reorder `lace up` Pipeline: Run Prebuild Before Validation When `--rebuild` Is Set
+# Post-Build Container Verification for Git Extension Compatibility
 
-> BLUF: When `--rebuild` is set, `lace up` should run the prebuild phase
-> *before* workspace layout validation (Phase 0a). Currently, the pipeline
-> always runs workspace layout validation first, which checks for git
-> extensions like `relativeWorktrees`. When the user has configured
-> `"version": "latest"` on the git prebuild feature to fix the container's
-> git version, the prebuild must execute first so the rebuilt image has the
-> upgraded git. But validation blocks the pipeline before prebuild can run
-> -- a chicken-and-egg deadlock. The fix is a conditional reorder: when
-> `rebuild` is true, run config reading, prebuild, then validation. Normal
-> `lace up` (no `--rebuild`) retains the current ordering. Validation
-> remains a hard error -- it is not downgraded to a warning.
-> Additionally, when `force` is true in `runPrebuild()`, the
-> `devcontainer build` subprocess must receive `--no-cache` to bypass
-> Docker's build cache. Without this, Docker can reuse stale cached
-> layers (e.g., an old git version) even when the user has changed
-> feature configuration, defeating the purpose of `--rebuild`.
+> BLUF: The current git extension validation is fundamentally broken -- it
+> detects that the host repo uses extensions, then unconditionally assumes
+> the container can't handle them, producing false positives that block
+> the pipeline. The fix is to replace the guesswork with an actual check:
+> after prebuild produces a Docker image, run `docker run --rm <tag> git
+> --version` to get the real git version, then compare against known
+> minimum versions per extension. This introduces a general "post-build
+> container verification" phase to the pipeline for checks that need
+> container information, complementing the existing pre-build static
+> checks. Additionally, `--rebuild` should pass `--no-cache` to
+> `devcontainer build` so Docker layer caching doesn't defeat feature
+> version upgrades.
 
 ## Objective
 
-Unblock `lace up --rebuild` when the repository uses git extensions that
-require a newer git version than the container's current image provides.
-The user has already configured the fix (git feature with `"version":
-"latest"` in `prebuildFeatures`), but the pipeline cannot reach the
-prebuild phase because validation rejects the workspace first.
+Replace the broken git extension validation (which always fails when
+extensions are present) with a post-build verification that checks the
+actual container image's git version. This eliminates the false-positive
+failures, the chicken-and-egg deadlock with `--rebuild`, and the need for
+`--skip-validation` as a permanent workaround.
 
 ## Background
 
-### The Chicken-and-Egg Problem
+### The Broken Validation
 
-The `lace up` pipeline in `runUp()` (`packages/lace/src/lib/up.ts`) runs
-phases in this order:
+The current git extension check in `checkGitExtensions()`
+(`workspace-detector.ts:422-458`) works as follows:
 
-1. **Read config** (minimal parse of devcontainer.json)
-2. **Phase 0a: Workspace layout** (`applyWorkspaceLayout`) -- classifies
-   the workspace, checks for absolute gitdir paths, checks for
-   unsupported git extensions, and mutates the config with
-   workspaceMount/workspaceFolder
-3. **Phase 0b: Host validation** (`runHostValidation`) -- file-existence
-   checks from `customizations.lace.validate`
-4. **Metadata fetch + validation** -- fetch OCI metadata for features,
-   validate options and port declarations
-5. **Template resolution** -- auto-inject and resolve `${lace.port()}`
-   and `${lace.mount()}` templates
-6. **Prebuild** -- build the prebuild image with `devcontainer build`
-7. **Resolve mounts** -- clone/check repo mounts
-8. **Generate extended config** -- write `.lace/devcontainer.json`
-9. **Devcontainer up** -- invoke `devcontainer up`
+```typescript
+for (const [extName, _value] of Object.entries(extensions)) {
+    warnings.push({
+      code: "unsupported-extension",
+      message:
+        `Repository uses git extension "${extName}"${versionHint} ` +
+        "but the container's git may not support it.",
+    });
+}
+```
 
-The git extension validation (added in the `2026-03-10-git-relativeworktrees-version-mismatch`
-proposal) runs in Phase 0a. It detects that the repository uses
-`extensions.relativeWorktrees` (requiring git 2.48+) and emits a fatal
-error because the container's current prebuild image has git 2.39.x.
+It flags **every** extension unconditionally. The
+`GIT_EXTENSION_MIN_VERSIONS` map (which knows that `relativeWorktrees`
+requires git 2.48+) is only used for the error message text, never for
+actual comparison. There is no code that queries or compares against the
+container's git version. The check is a "you have extensions, assume the
+worst" alarm.
 
-The fix for the container's git version is to set `"version": "latest"`
-on the `ghcr.io/devcontainers/features/git:1` prebuild feature. But this
-fix lives inside the prebuild image, which is rebuilt in Phase 6.
-Validation in Phase 0a blocks the pipeline before Phase 6 executes.
+This means:
+- A repo with `relativeWorktrees` always fails validation, even if the
+  container has git 2.53.
+- After `lace up --rebuild` fixes the container's git, the next normal
+  `lace up` still fails (validation doesn't know the image was fixed).
+- The only workarounds are `--skip-validation` (which suppresses ALL
+  validation) or `--rebuild` every time.
 
-The user cannot reach the prebuild to apply the fix because validation
-rejects the workspace based on the *current* (stale) image state.
+### The Chicken-and-Egg (Now Moot)
 
-### What `--rebuild` Means
+The prior revision of this proposal focused on a pipeline reorder to work
+around the false positive: run prebuild before validation when
+`--rebuild` is set. This added conditional phase reordering, an
+`errorCode` field for error discrimination, and targeted downgrade logic.
+All of that complexity exists to work around a validation check that
+doesn't actually validate anything.
 
-The `--rebuild` flag (`UpOptions.rebuild`) passes `force: true` to
-`runPrebuild()`, which bypasses the prebuild cache and forces a full
-`devcontainer build`. This is the mechanism the user invokes after
-changing prebuild feature configuration (e.g., adding `"version":
-"latest"` to the git feature).
+The right fix is to make the check actually check: query the container
+image's git version after prebuild and compare it against the minimum
+required by each detected extension.
 
-### Docker Build Cache Problem
+### Docker Build Cache Problem (Still Relevant)
 
 Even when `force: true` bypasses the lace-level prebuild cache (the
 `contextsChanged` check), Docker's own build cache can cause the
@@ -98,182 +97,359 @@ the `devcontainer build` command is currently invoked without
 is configured with `"version": "latest"`, Docker sees the same
 Dockerfile instructions and feature install layer, considers them
 unchanged, and reuses the cached layer -- which still contains the old
-git version. The user hit this exact scenario: `--rebuild` was set,
-lace's prebuild cache was bypassed, but Docker served the cached layer
-with git 2.39.x instead of building a fresh layer with the latest git.
+git version.
 
-The workaround was `docker builder prune -f`, which nukes the entire
-build cache. The proper fix is to pass `--no-cache` to
-`devcontainer build` when `force: true`, ensuring Docker rebuilds all
-layers from scratch. This makes `--rebuild` truly mean "rebuild
-everything."
+The fix is to pass `--no-cache` to `devcontainer build` when
+`options.force` is true. This is independent of the validation rework
+and was correctly identified in the prior revision.
 
-### Why Not Downgrade to Warnings?
+### Current Validation Architecture
 
-The user explicitly rejected downgrading validation errors to warnings.
-The git extension check catches a real problem: if the container's git
-cannot handle `extensions.relativeWorktrees`, all git operations inside
-the container will fail with a fatal error. The validation is valuable
-and should remain a hard blocker under normal operation.
+The `lace up` pipeline has two pre-build validation phases:
 
-The issue is specifically the ordering: when `--rebuild` is set, the
-user is actively fixing the problem. The pipeline should let them.
+| Phase | Checks | Nature |
+|-------|--------|--------|
+| **Phase 0a** (workspace layout) | Classification, config mutation, absolute gitdir paths, git extensions | Filesystem-only |
+| **Phase 0b** (host validation) | File existence (`customizations.lace.validate.fileExists`) | Filesystem-only |
 
-### What Phases Depend on What
+All checks are static -- they read host files and config, never query
+containers. This is appropriate for most checks (classification,
+absolute paths, file existence). But the git extension check is trying to
+answer a question about the container ("does the container's git support
+this extension?") using only host-side information. It cannot succeed.
 
-Analysis of `runUp()` phase dependencies:
+### Two Categories of Validation
 
-| Phase | Depends On | Produces |
-|-------|-----------|----------|
-| Read config (minimal) | Nothing | `configMinimal.raw` |
-| Workspace layout (0a) | `configMinimal.raw`, filesystem | Config mutations (workspaceMount, workspaceFolder, postCreateCommand), `projectName` |
-| Host validation (0b) | `configMinimal.raw` | Pass/fail |
-| Metadata fetch | `configMinimal.raw` (feature IDs) | `metadataMap` |
-| Template resolution | `configMinimal.raw`, `metadataMap` | `templateResult`, `configForResolution` |
-| Read config (full) | `configMinimal.raw` (needs Dockerfile) | `config` (for prebuild) |
-| **Prebuild** | `configMinimal.raw` (prebuild features), filesystem | Rebuilt Docker image, rewritten Dockerfile/image |
-| Resolve mounts | `configMinimal.raw`, filesystem | `mountSpecs`, `symlinkCommand` |
-| Generate config | All above | `.lace/devcontainer.json` |
-| Devcontainer up | Generated config | Running container |
+This rework formalizes a distinction that was implicit:
 
-Key insight: **Prebuild does not depend on workspace layout validation.**
-Prebuild reads the devcontainer.json, extracts prebuild features, and
-runs `devcontainer build`. It does not use `workspaceMount`,
-`workspaceFolder`, `projectName`, or any output from Phase 0a/0b.
+1. **Pre-build static checks**: questions answerable from host filesystem
+   and config alone. These run before any Docker operations and fail
+   fast. Examples: workspace classification, absolute gitdir paths, host
+   file existence, mount namespace conflicts.
 
-Conversely, **workspace layout validation does not depend on prebuild.**
-It reads git config files on the host filesystem. The prebuild image's
-git version is irrelevant to the host-side check.
-
-However, the *purpose* of the validation is to prevent launching a
-container with an inadequate git version. When `--rebuild` is forcing a
-rebuild with an upgraded git feature, the validation should run *after*
-the rebuild to check whether the problem is now resolved -- but since
-the validation checks the *host* repo config (not the container), it
-will still detect the extensions. The difference is that after a
-successful rebuild, the user's prebuild image now contains a git version
-that supports the extensions, so the validation concern is addressed.
-
-> NOTE: The validation currently has no way to know whether the rebuilt
-> image's git supports the detected extensions. It checks the host repo
-> config and assumes the container's git cannot handle unrecognized
-> extensions. The `--rebuild` reorder is a pragmatic fix: if the user is
-> actively rebuilding, trust that they are addressing the issue. A future
-> enhancement could inspect the rebuilt image's git version, but that is
-> out of scope.
+2. **Post-build container verification**: questions that require an
+   actual container image. These run after prebuild produces a Docker
+   image and verify that the image meets the repository's requirements.
+   Example: git version supports detected extensions.
 
 ## Proposed Solution
 
-### Approach: Conditional Phase Reorder with Deferred Validation
+### Approach: Move Extension Check to Post-Build Verification
 
-When `rebuild` is true AND `hasPrebuildFeatures` is true, reorder the
-early pipeline phases so that prebuild runs before workspace layout
-validation. The rest of the pipeline remains unchanged.
+Remove the git extension ERROR from `applyWorkspaceLayout` in Phase 0a.
+Add a new post-build container verification phase after prebuild. The
+new phase uses `docker run` to query the actual image and make a real
+determination.
 
-#### Normal Pipeline (no `--rebuild`)
-
-```
-Read config -> Phase 0a (workspace layout) -> Phase 0b (host validation)
--> Metadata -> Templates -> Prebuild -> Mounts -> Generate -> Up
-```
-
-#### Rebuild Pipeline (`--rebuild`)
+### Pipeline After This Change
 
 ```
-Read config -> Prebuild -> Phase 0a (workspace layout) -> Phase 0b (host validation)
--> Metadata -> Templates -> Mounts -> Generate -> Up
+Read config
+-> Phase 0a: Workspace layout (static: classification, mutations,
+   absolute-gitdir) -- extension check REMOVED from here
+-> Phase 0b: Host validation (static: file existence)
+-> Metadata + Templates + Mount validation
+-> Prebuild (devcontainer build)
+-> NEW: Post-build container verification (docker run checks)
+-> Resolve mounts -> Generate config -> Devcontainer up
 ```
 
-The only change is that prebuild moves from after templates to before
-Phase 0a.
-
-#### Why Prebuild Can Move Earlier
-
-Prebuild needs:
-1. `configMinimal.raw` (to extract prebuild features) -- available after
-   config read
-2. The workspace filesystem (Dockerfile path) -- always available
-3. `rebuild` flag -- passed through from options
-
-Prebuild does NOT need:
-- Workspace layout mutations (workspaceMount, workspaceFolder)
-- Host validation results
-- Feature metadata
-- Template resolution results
-- Resolved mounts
-
-This means prebuild can safely run immediately after config reading.
-
-#### Why Validation Still Runs After Prebuild
-
-Even though the prebuild has updated the container image, the workspace
-layout validation still runs. This serves two purposes:
-
-1. It validates other workspace layout concerns (absolute gitdir paths,
-   layout type mismatches) that prebuild does not fix.
-2. For the git extension check specifically: when `--rebuild` is set, the
-   validation still detects the extensions but the user has already taken
-   action (rebuilding with upgraded git). The proposal includes skipping
-   the `unsupported-extension` error specifically when `--rebuild` was
-   used and prebuild succeeded, since the user is actively addressing it.
+The extension check moves from a blind guess in Phase 0a to an informed
+verification after prebuild. No pipeline reorder is needed. `--rebuild`
+does not require special handling. Subsequent `lace up` runs check the
+actual cached prebuild image and pass if the git version is adequate.
 
 ### Implementation Detail
 
-#### Pipeline Reorder in `runUp()`
+#### 1. Remove Extension Error from `applyWorkspaceLayout`
 
-In `runUp()`, add a conditional block between config reading (line ~138)
-and Phase 0a (line ~140). The `hasPrebuildFeatures` check must be
-extracted early (before its current position at line ~207):
+In `workspace-layout.ts`, remove the error block at lines 201-218 (the
+`unsupported-extension` check that causes the hard error). The extension
+warnings from `checkGitExtensions` are still collected via the general
+warning loop (lines 99-103) and appear in `layoutResult.warnings` as
+informational messages. They are no longer fatal.
+
+The hard classification checks (normal-clone, not-git, standard-bare,
+malformed) and the absolute-gitdir check remain unchanged -- they are
+genuinely pre-build static checks that don't need container info.
 
 ```typescript
-// Extract early to gate the conditional reorder
-const hasPrebuildFeatures =
-  extractPrebuildFeatures(configMinimal.raw).kind === "features";
-let prebuildCompleted = false;
-
-// When --rebuild is set and prebuild features exist, run prebuild FIRST
-// to break the chicken-and-egg with git extension validation.
-if (rebuild && hasPrebuildFeatures) {
-  // Run prebuild early (before validation)
-  const earlyPrebuildResult = runPrebuild({
-    workspaceRoot: workspaceFolder,
-    subprocess,
-    force: true,
-  });
-  if (earlyPrebuildResult.exitCode !== 0) {
-    result.phases.prebuild = {
-      exitCode: earlyPrebuildResult.exitCode,
-      message: earlyPrebuildResult.message,
-    };
-    result.exitCode = earlyPrebuildResult.exitCode;
-    result.message = `Prebuild failed: ${earlyPrebuildResult.message}`;
-    return result;
-  }
-  result.phases.prebuild = {
-    exitCode: 0,
-    message: earlyPrebuildResult.message,
-  };
-  prebuildCompleted = true;
-}
-
-// Phase 0a: Workspace layout (runs after prebuild when --rebuild)
-// Phase 0b: Host validation
-// ... rest of pipeline, with prebuild phase skipped if already done
+// REMOVE this block from applyWorkspaceLayout (lines 201-218):
+// const extensionWarnings = result.warnings.filter(
+//   (w) => w.code === "unsupported-extension",
+// );
+// if (extensionWarnings.length > 0) { ... return error ... }
 ```
 
-The prebuild code itself is already factored as a call to
-`runPrebuild()`. The early invocation uses the same function with the
-same parameters. A boolean flag tracks whether prebuild already ran so
-the later prebuild phase is skipped.
+After this change, `applyWorkspaceLayout` returns `status: "applied"`
+even when extensions are present. The extension info remains available
+via the `classifyWorkspace` cache for the post-build phase to use.
 
-#### Pass `--no-cache` to `devcontainer build` When `force` Is True
+#### 2. Add `verifyContainerGitVersion` Function
 
-In `runPrebuild()` (`packages/lace/src/lib/prebuild.ts`, around line
-287), the `devcontainer build` subprocess is invoked without
-`--no-cache`. When `options.force` is true, `--no-cache` must be added
-to the build args to bypass Docker's build cache. Without this, Docker
-can reuse stale cached layers even though lace's prebuild cache was
-bypassed, defeating the purpose of `--rebuild`.
+New function in `workspace-detector.ts` (co-located with
+`checkGitExtensions` and `GIT_EXTENSION_MIN_VERSIONS` since it uses
+both):
+
+```typescript
+export interface ContainerGitVerificationResult {
+  /** Whether all detected extensions are supported by the image's git. */
+  passed: boolean;
+  /** Git version string from the container (e.g., "2.53.0"), or null if
+   *  git is not installed or version could not be determined. */
+  gitVersion: string | null;
+  /** Per-extension check results. */
+  checks: Array<{
+    extension: string;
+    requiredVersion: string | null;
+    supported: boolean;
+    message: string;
+  }>;
+}
+
+/**
+ * Verify that a Docker image's git version supports all detected
+ * repository extensions.
+ *
+ * Runs `docker run --rm <imageTag> git --version` to get the actual
+ * version, then compares against GIT_EXTENSION_MIN_VERSIONS.
+ *
+ * Extensions not in the minimum-versions map are flagged as warnings
+ * (unknown minimum) but do not fail the check.
+ */
+export function verifyContainerGitVersion(
+  imageTag: string,
+  detectedExtensions: Record<string, string>,
+  subprocess: RunSubprocess,
+): ContainerGitVerificationResult {
+  // Query the image's git version
+  const versionResult = subprocess("docker", [
+    "run", "--rm", imageTag, "git", "--version",
+  ]);
+
+  if (versionResult.exitCode !== 0) {
+    return {
+      passed: false,
+      gitVersion: null,
+      checks: [{
+        extension: "(git binary)",
+        requiredVersion: null,
+        supported: false,
+        message:
+          "Could not determine git version in prebuild image. " +
+          "git may not be installed. Add the git prebuild feature: " +
+          '"ghcr.io/devcontainers/features/git:1": { "version": "latest" }',
+      }],
+    };
+  }
+
+  // Parse "git version 2.53.0" -> "2.53.0"
+  const versionMatch = versionResult.stdout
+    .trim()
+    .match(/git version (\d+\.\d+\.\d+)/);
+  if (!versionMatch) {
+    return {
+      passed: false,
+      gitVersion: null,
+      checks: [{
+        extension: "(git binary)",
+        requiredVersion: null,
+        supported: false,
+        message:
+          `Unexpected git version output: "${versionResult.stdout.trim()}"`,
+      }],
+    };
+  }
+
+  const gitVersion = versionMatch[1];
+  const checks = [];
+  let passed = true;
+
+  for (const [extName, _value] of Object.entries(detectedExtensions)) {
+    const requiredVersion = GIT_EXTENSION_MIN_VERSIONS[extName] ?? null;
+
+    if (!requiredVersion) {
+      // Unknown extension -- warn but don't fail
+      checks.push({
+        extension: extName,
+        requiredVersion: null,
+        supported: true,
+        message:
+          `Extension "${extName}" has no known minimum git version. ` +
+          `Container has git ${gitVersion}.`,
+      });
+      continue;
+    }
+
+    const supported = compareVersions(gitVersion, requiredVersion) >= 0;
+    if (!supported) passed = false;
+
+    checks.push({
+      extension: extName,
+      requiredVersion,
+      supported,
+      message: supported
+        ? `Extension "${extName}" requires git ${requiredVersion}+, ` +
+          `container has ${gitVersion}. OK.`
+        : `Extension "${extName}" requires git ${requiredVersion}+, ` +
+          `but container has ${gitVersion}. ` +
+          'Set version to "latest" in the git prebuild feature.',
+    });
+  }
+
+  return { passed, gitVersion, checks };
+}
+
+/**
+ * Compare two semver-like version strings (major.minor.patch).
+ * Returns negative if a < b, zero if equal, positive if a > b.
+ */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+```
+
+#### 3. Add `getDetectedExtensions` Helper
+
+Export a helper from `workspace-detector.ts` that returns the extension
+map from a classification result, keeping the coupling between detection
+and consumption explicit:
+
+```typescript
+/**
+ * Extract detected git extensions from a classification result.
+ * Returns null if no extensions are present or the classification
+ * type does not have a bare git directory.
+ *
+ * Internally re-reads the bare repo's git config (OS page-cached
+ * from the classification pass) to avoid threading the extension map
+ * through the warning system.
+ */
+export function getDetectedExtensions(
+  result: ClassificationResult,
+): Record<string, string> | null {
+  const { classification } = result;
+  if (
+    classification.type !== "worktree" &&
+    classification.type !== "bare-root"
+  ) {
+    return null;
+  }
+
+  const bareGitDir = classification.bareRepoRoot;
+  const configPath = join(bareGitDir, "config");
+  if (!existsSync(configPath)) return null;
+
+  let configContent: string;
+  try {
+    configContent = readFileSync(configPath, "utf-8");
+  } catch {
+    return null;
+  }
+
+  const { formatVersion, extensions } =
+    parseGitConfigExtensions(configContent);
+  if (formatVersion < 1) return null;
+  if (Object.keys(extensions).length === 0) return null;
+
+  return extensions;
+}
+```
+
+This eliminates: (a) the fragile coupling to warning codes in `up.ts`,
+(b) the `getBareGitDir` helper that would duplicate the private
+`findBareGitDir`, and (c) direct git config re-parsing in `up.ts`.
+
+#### 4. Integrate Post-Build Verification into `runUp()`
+
+In `up.ts`, after the prebuild phase (line ~579) and before resolve
+mounts (line ~581), add the post-build verification:
+
+```typescript
+// Phase: Post-build container verification
+// Only runs when: (a) repo has git extensions AND (b) prebuild produced
+// an image tag. Uses getDetectedExtensions (which reads the cached
+// classification) to get the extension map, then queries the actual image.
+if (hasPrebuildFeatures && prebuildResult?.prebuildTag) {
+  const classResult = classifyWorkspace(workspaceFolder);
+  const extensions = getDetectedExtensions(classResult);
+
+  if (extensions) {
+    const verification = verifyContainerGitVersion(
+      prebuildResult.prebuildTag,
+      extensions,
+      subprocess,
+    );
+
+    const verificationMsg = verification.passed
+      ? `Container git ${verification.gitVersion} supports all ` +
+        `detected extensions`
+      : verification.checks
+          .filter((c) => !c.supported)
+          .map((c) => c.message)
+          .join("\n");
+
+    if (!verification.passed && !skipValidation) {
+      result.phases.containerVerification = {
+        exitCode: 1,
+        message: verificationMsg,
+      };
+      result.exitCode = 1;
+      result.message =
+        `Container verification failed: ${verificationMsg}`;
+      return result;
+    }
+
+    if (!verification.passed && skipValidation) {
+      // Follow the workspace layout convention: exitCode 0 with
+      // "(downgraded)" suffix when --skip-validation bypasses failure.
+      result.phases.containerVerification = {
+        exitCode: 0,
+        message: `${verificationMsg} (downgraded)`,
+      };
+      console.warn(
+        `Warning: ${verificationMsg} ` +
+          "(continuing due to --skip-validation)",
+      );
+    }
+
+    if (verification.passed) {
+      result.phases.containerVerification = {
+        exitCode: 0,
+        message: verificationMsg,
+      };
+      console.log(verificationMsg);
+    }
+  }
+}
+```
+
+The `containerVerification` phase needs to be added to the `UpResult`
+phases interface:
+
+```typescript
+export interface UpResult {
+  exitCode: number;
+  message: string;
+  phases: {
+    workspaceLayout?: { exitCode: number; message: string };
+    hostValidation?: { exitCode: number; message: string };
+    containerVerification?: { exitCode: number; message: string };
+    // ... existing phases
+  };
+}
+```
+
+#### 5. Pass `--no-cache` to `devcontainer build` When `force` Is True
+
+Unchanged from the prior revision. In `runPrebuild()`
+(`prebuild.ts:287-298`):
 
 ```typescript
 const buildArgs = [
@@ -286,9 +462,6 @@ const buildArgs = [
   prebuildTag,
 ];
 
-// When force-rebuilding, bypass Docker's build cache so that features
-// with floating tags (e.g., "version": "latest") are re-fetched and
-// reinstalled from scratch.
 if (options.force) {
   buildArgs.push("--no-cache");
 }
@@ -296,463 +469,511 @@ if (options.force) {
 const buildResult = run("devcontainer", buildArgs, { cwd: workspaceRoot });
 ```
 
-This ensures that `--rebuild` produces a truly clean image. Without
-`--no-cache`, a user who changes `"version": "latest"` on the git
-feature and runs `lace up --rebuild` may still get the old git version
-because Docker cached the feature install layer.
+#### 6. Expose Prebuild Tag for Verification
 
-### Handling the Validation After Early Prebuild
-
-When prebuild runs early due to `--rebuild`, the workspace layout
-validation (Phase 0a) still executes. For the `unsupported-extension`
-error specifically, the validation should be relaxed when prebuild has
-already succeeded with `--rebuild`:
-
-- The `applyWorkspaceLayout` function does not change. It still returns
-  `status: "error"` for unsupported extensions.
-- In `runUp()`, when `rebuild` is true and prebuild succeeded, the
-  `unsupported-extension` error from workspace layout is downgraded to a
-  warning. Other workspace layout errors (absolute gitdir, layout
-  mismatch) remain fatal.
-
-This is NOT a general downgrade of validation. It is a targeted
-relaxation: "you said `--rebuild`, prebuild succeeded, so we trust you
-fixed the git version issue."
-
-To avoid fragile string-matching on error messages, add a structured
-`errorCode` field to `WorkspaceLayoutResult`. This is a minimal,
-backwards-compatible change to `workspace-layout.ts`:
+The post-build verification needs the prebuild image tag. Currently,
+`runPrebuild` computes the tag internally and returns it only in the
+message string. The `PrebuildResult` interface needs a `prebuildTag`
+field:
 
 ```typescript
-export interface WorkspaceLayoutResult {
-  status: "skipped" | "applied" | "error";
+export interface PrebuildResult {
+  exitCode: number;
   message: string;
-  warnings: string[];
-  classification?: WorkspaceClassification;
-  /** Structured error code when status === "error". */
-  errorCode?: "absolute-gitdir" | "unsupported-extension" | "layout-mismatch" | "detection-failed";
+  /** The Docker image tag built (or reactivated from cache). */
+  prebuildTag?: string;
 }
 ```
 
-Each existing error return in `applyWorkspaceLayout` sets the
-appropriate `errorCode`. Then `runUp()` discriminates on the code
-rather than the message string:
+The specific return paths in `runPrebuild` that must set `prebuildTag`:
+- Fresh build success (line ~341): `prebuildTag` set to the built tag
+- Cache reactivation (line ~241): `prebuildTag` set to the reactivated
+  tag
+- Up-to-date cache hit (lines ~214, ~225): `prebuildTag` set to the
+  existing tag
 
-```typescript
-if (layoutResult.status === "error" && rebuild && prebuildCompleted) {
-  if (layoutResult.errorCode === "unsupported-extension") {
-    console.warn(`Warning: ${layoutResult.message} (continuing due to --rebuild)`);
-    result.phases.workspaceLayout = { exitCode: 0, message: `${layoutResult.message} (rebuild override)` };
-  } else {
-    // Non-extension errors remain fatal even with --rebuild
-    result.phases.workspaceLayout = { exitCode: 1, message: layoutResult.message };
-    result.exitCode = 1;
-    result.message = `Workspace layout failed: ${layoutResult.message}`;
-    return result;
-  }
-}
-```
-
-> NOTE: This relaxes the constraint "Do NOT modify workspace-layout.ts"
-> minimally -- only adding an optional field to the return type and
-> setting it in each error branch. The function's behavior and existing
-> return values do not change. This is much safer than string-matching
-> on error messages, which would silently break if the wording changes.
+Paths that should NOT set `prebuildTag`:
+- Dry-run (returns planned actions, no image produced)
+- Build failure (image not usable)
+- No prebuild features / empty features (early returns)
 
 ## Important Design Decisions
 
-### Decision: Conditional Reorder, Not Two Separate Pipeline Functions
+### Decision: Post-Build Verification, Not Pipeline Reorder
 
-**Decision:** Add a conditional early-prebuild block within the existing
-`runUp()` function rather than creating two separate pipeline paths
-(e.g., `runUpNormal()` and `runUpRebuild()`).
+**Decision:** Replace the broken pre-build extension check with a
+post-build verification phase that queries the actual image, rather than
+reordering the pipeline to work around the broken check.
 
-**Why:** The two pipelines differ in exactly one phase's position.
-Creating two separate functions would duplicate the entire pipeline logic
-and create a maintenance burden where changes to one path must be
-mirrored in the other. A conditional block with a `prebuildCompleted`
-flag is minimal, clear, and keeps all pipeline logic in one place.
+**Why:** The prior approach (pipeline reorder + targeted downgrade) added
+complexity to work around a validation that doesn't actually validate. It
+also left a false-positive problem on subsequent runs (E3 in the prior
+revision). By making the check query real data, the pipeline stays
+simple, `--rebuild` needs no special handling, and subsequent runs
+correctly pass when the image is adequate.
 
-### Decision: Prebuild Moves Before ALL Validation, Not Just Extension Check
+### Decision: `docker run --rm` for Version Check
 
-**Decision:** When `--rebuild` triggers early prebuild, it runs before
-both Phase 0a (workspace layout) and Phase 0b (host validation), not
-just before the git extension check.
+**Decision:** Use `docker run --rm <tag> git --version` to query the
+prebuild image's git version.
 
-**Why:** The prebuild does not depend on any validation output. Moving it
-before all validation is simpler and more robust than trying to run
-partial validation, then prebuild, then remaining validation. The
-validation phases are fast (filesystem reads) so running them after
-prebuild adds negligible latency. This also future-proofs against new
-validation checks that might have similar chicken-and-egg issues.
+**Why:**
+- It tests the actual image that will be used.
+- `docker run --rm` creates a temporary container, runs one command, and
+  destroys it. Latency is ~1-3 seconds (image layers are already local
+  from prebuild). This only runs when the host repo has extensions.
+- Alternative: `docker inspect` to read image metadata. But this doesn't
+  tell us the git version -- features install binaries at build time, not
+  as metadata.
+- Alternative: Parse devcontainer feature version from config. But this
+  only tells us what was requested, not what was installed (e.g.,
+  `"latest"` resolves to a specific version at build time).
 
-### Decision: Only Skip Extension Errors, Not All Layout Errors
+### Decision: Extension Detection Stays in `workspace-detector.ts`
 
-**Decision:** After early prebuild with `--rebuild`, only the
-`unsupported-extension` workspace layout error is downgraded. Other
-layout errors (absolute gitdir paths, layout type mismatch) remain
-fatal.
+**Decision:** Keep `checkGitExtensions` and `GIT_EXTENSION_MIN_VERSIONS`
+in `workspace-detector.ts`. Add `verifyContainerGitVersion` and
+`compareVersions` to the same module.
 
-**Why:** The `--rebuild` flag specifically addresses the "container git
-version is too old" problem. It does not fix absolute gitdir paths
-(which are a host filesystem issue) or layout mismatches (which are
-configuration errors). Downgrading those errors would mask real problems
-that `--rebuild` cannot fix.
+**Why:** The detection (parsing git config for extensions) and the
+verification (checking if a version supports them) are two sides of the
+same concern. Co-locating them keeps the `GIT_EXTENSION_MIN_VERSIONS`
+map as the single source of truth for both detection messages and version
+comparison. If more post-build checks are added in the future, a
+dedicated `container-verification.ts` module could be extracted, but
+premature extraction for a single check adds unnecessary indirection.
 
-### Decision: Do Not Parse the Rebuilt Image's Git Version
+### Decision: Verification Phase Respects `--skip-validation`
 
-**Decision:** After early prebuild, do not inspect the rebuilt Docker
-image to verify that its git version now supports the detected
-extensions. Instead, trust that the user's configuration change
-(e.g., `"version": "latest"`) addresses the issue.
+**Decision:** The post-build container verification phase is gated by
+`--skip-validation`, same as other validation checks.
 
-**Why:** Inspecting the image's git version would require running
-`docker run <image> git --version`, which adds latency and complexity.
-The prebuild succeeded, meaning the `devcontainer build` with the
-updated git feature completed without error. If the user configured
-`"version": "latest"`, the image has git 2.48+. If the user configured
-an insufficient version, the problem will surface at container startup
--- the same failure mode as any other misconfiguration. The validation
-warning still appears to alert the user.
+**Why:** Consistent behavior. If the user says "skip validation," all
+validation is skipped -- both pre-build and post-build. This avoids a
+confusing UX where some checks respect the flag and others don't.
 
-### Decision: Reorder Applies Only When Both `--rebuild` AND `hasPrebuildFeatures`
+### Decision: Non-Prebuild Configs Skip Verification
 
-**Decision:** The early prebuild only triggers when `rebuild` is true AND
-the config has prebuild features. If `--rebuild` is set but there are no
-prebuild features, the normal pipeline runs.
+**Decision:** If the config has no `prebuildFeatures`, the post-build
+verification phase is skipped entirely. Extension warnings remain as
+informational messages in the workspace layout phase output.
 
-**Why:** Without prebuild features, there is nothing to rebuild. The
-`--rebuild` flag is meaningless in that case. Running the normal pipeline
-avoids confusing behavior where `--rebuild` changes phase ordering for
-no reason.
+**Why:** Without prebuild features, there is no prebuild image to query.
+The git version comes from whatever the Dockerfile installs, and the
+full image isn't available until `devcontainer up` completes. Running
+`docker run` on the base image wouldn't give the right answer (features
+modify the image). For non-prebuild configs, the user controls git
+installation directly; the informational warning is sufficient.
+
+### Decision: Unknown Extensions Warn, Don't Fail
+
+**Decision:** Extensions not in `GIT_EXTENSION_MIN_VERSIONS` produce a
+warning ("no known minimum version") but do not fail the check.
+
+**Why:** If a new git extension is added to a repo but our map doesn't
+have the minimum version, failing would be a false positive. The warning
+surfaces the unknown extension for the user to evaluate. The map can be
+updated in future releases.
 
 ## Stories
 
-### S1: User Adds Git Feature to Fix Extension Mismatch
+### S1: User with Extensions and Adequate Git Feature
 
 The user's bare-repo has `extensions.relativeWorktrees = true`. Their
-existing prebuild image has git 2.39.x. They add `"version": "latest"`
-to the git prebuild feature and run `lace up --rebuild`.
+prebuild image includes `ghcr.io/devcontainers/features/git:1` with
+`"version": "latest"` (installs git 2.53).
 
-**Current behavior:** Pipeline fails at Phase 0a with "Repository uses
-git extensions that the container's git may not support."
+**Current behavior:** Phase 0a fails with "git may not support it."
 
-**Expected behavior:** Prebuild runs first (building an image with git
-2.48+), then validation runs with the extension warning downgraded to a
-message. Container starts successfully.
+**Expected behavior:** Phase 0a passes (extension check removed).
+Prebuild runs. Post-build verification runs `docker run --rm <tag> git
+--version`, gets "2.53.0", compares against "2.48.0" requirement, logs
+"Container git 2.53.0 supports all detected extensions." Pipeline
+continues.
 
-### S2: User Runs Normal `lace up` After Fixing
+### S2: User with Extensions and Old Git Feature
 
-After S1 succeeds and the prebuild image is cached, the user runs
-`lace up` (no `--rebuild`). The prebuild phase sees the cache is fresh
-and skips. Validation still detects the extensions but the prebuild
-image now has the right git.
+Same as S1 but the git feature has `"version": "2.39"`.
 
-**Problem:** The validation will still fail because it cannot know the
-image's git version.
+**Expected behavior:** Phase 0a passes. Prebuild runs. Post-build
+verification gets "2.39.x", compares against "2.48.0", fails with
+'Extension "relativeworktrees" requires git 2.48+, but container has
+2.39.x. Set version to "latest" in the git prebuild feature.'
 
-**Handling:** This is an existing limitation. The user can use
-`--skip-validation` for subsequent runs. A future enhancement could
-check the prebuild image's git version. See Edge Cases E3.
+### S3: Subsequent `lace up` After Fixing
 
-### S3: Normal `lace up` Without Extensions
+After S1 succeeds, the user runs `lace up` (no `--rebuild`). Prebuild
+cache is fresh, prebuild is a no-op (returns cached tag). Post-build
+verification still runs `docker run --rm <cached-tag> git --version`
+and passes.
 
-A user without git extensions runs `lace up`. No workspace layout
-errors. Pipeline runs in the normal order.
+**This is the key improvement over the prior revision.** No
+`--skip-validation` needed. No false positives.
 
-**Expected behavior:** Identical to current behavior. No changes.
+### S4: User Runs `lace up --rebuild` to Upgrade Git
+
+The user changes git feature from `"version": "2.39"` to `"latest"` and
+runs `lace up --rebuild`. Prebuild rebuilds with `--no-cache`. Post-
+build verification checks the new image and passes.
+
+### S5: Normal `lace up` Without Extensions
+
+A user without git extensions runs `lace up`. No extension warnings from
+workspace classification. Post-build verification phase is skipped (no
+extensions to check). Pipeline identical to current behavior.
+
+### S6: User Without Prebuild Features
+
+A user with git extensions but no `prebuildFeatures` runs `lace up`.
+Phase 0a emits informational extension warnings. Post-build verification
+is skipped (no prebuild image to check). Pipeline continues. If git
+inside the container is too old, operations fail at runtime (same as any
+other Dockerfile misconfiguration).
 
 ## Edge Cases / Challenging Scenarios
 
-### E1: Early Prebuild Fails
+### E1: `docker run` Fails (Image Missing or Docker Error)
 
-The user runs `lace up --rebuild` but the prebuild fails (e.g., network
-error downloading git source, Docker build error).
+The `docker run --rm <tag> git --version` command fails (non-zero exit).
 
-**Handling:** The pipeline returns the prebuild error immediately, same
-as it would if prebuild failed in its normal position. Validation never
-runs. The `prebuildCompleted` flag remains false.
+**Handling:** The verification treats this as "git not installed" and
+fails with guidance to add the git prebuild feature. The error message
+is actionable. `--skip-validation` can bypass if the user knows git is
+available through another mechanism.
 
-### E2: Workspace Has Non-Extension Errors
+### E2: Prebuild Image Has git But No `git --version` Output
 
-The user runs `lace up --rebuild` on a workspace with both unsupported
-extensions AND absolute gitdir paths.
+The `git --version` output doesn't match the expected format.
 
-**Handling:** Prebuild runs first and succeeds. Validation then runs.
-`applyWorkspaceLayout` checks absolute gitdir paths BEFORE extensions
-(lines 108-121 vs 124-140 in `workspace-layout.ts`). When both are
-present, only the absolute-gitdir error is returned -- the extension
-check never executes. The `errorCode` is `"absolute-gitdir"`, not
-`"unsupported-extension"`, so `runUp()` treats it as fatal even with
-`--rebuild`. The user must fix the absolute paths first. Once fixed,
-a subsequent `lace up --rebuild` would then hit the extension check,
-which would be downgraded.
+**Handling:** Treated as verification failure with the raw output
+included in the error message for debugging. Unlikely in practice since
+`git --version` is standardized, but handled gracefully.
 
-### E3: Subsequent `lace up` Without `--rebuild` Still Fails Validation
+### E3: Extensions and Absolute Gitdir Paths
 
-After a successful `lace up --rebuild`, the user runs `lace up` for
-routine use. The prebuild cache is fresh so prebuild is a no-op. But
-validation still detects the git extensions and fails because the
-pipeline runs in normal order (validation before prebuild) and the
-extension check has no way to know the image's git is adequate.
+The workspace has both git extensions and absolute gitdir paths.
 
-**Handling:** This is a known limitation. The user must use
-`--skip-validation` for subsequent runs until a future enhancement adds
-image-aware validation. Document this in the CLI output when the
-`--rebuild` override triggers:
+**Handling:** Phase 0a catches the absolute-gitdir error (hard error,
+unchanged). Pipeline stops before reaching prebuild or post-build
+verification. The user fixes the gitdir paths first, then on the next
+run, the extension check occurs in the post-build phase.
 
-```
-Warning: Repository uses git extensions... (continuing due to --rebuild)
-  Note: Subsequent runs without --rebuild will need --skip-validation
-  until the container's git version can be verified automatically.
-```
+### E4: `--no-cache` Build Takes Longer
 
-> NOTE: A future enhancement could persist a marker (e.g., in
-> `.lace/prebuild/metadata.json`) recording that the last successful
-> rebuild used a git feature with `"version": "latest"`. The validation
-> phase could read this marker and suppress the extension warning
-> automatically. This is out of scope for this proposal but would
-> eliminate the need for `--skip-validation` on subsequent runs.
+When `force` is true, `--no-cache` rebuilds all Docker layers.
 
-### E4: `--rebuild` Without Prebuild Features
+**Handling:** Expected and acceptable. The user explicitly requested
+`--rebuild`. The `--no-cache` flag only applies when `force` is true;
+normal runs benefit from Docker's build cache.
 
-The user runs `lace up --rebuild` on a config that has no
-`prebuildFeatures`. The `hasPrebuildFeatures` check is false, so the
-early prebuild block is skipped. The pipeline runs in normal order.
-Validation runs normally and may fail.
+### E5: Post-Build Verification Latency
 
-**Handling:** This is correct behavior. `--rebuild` without prebuild
-features is effectively a no-op for the prebuild phase. The pipeline
-should not change ordering for no reason.
+`docker run --rm <tag> git --version` adds ~1-3 seconds to the pipeline.
 
-### E5: Config Has Prebuild Features But No Git Feature
+**Handling:** This only runs when the host repo has git extensions AND
+prebuild features are configured. For repos without extensions (the
+common case), the check is skipped entirely. The latency is negligible
+compared to the prebuild itself.
 
-The user runs `lace up --rebuild` on a config that has prebuild features
-(e.g., claude-code) but not the git feature. Prebuild runs early and
-succeeds, but the rebuilt image still has old git.
+### E6: Prebuild Returns Cached Tag (No Actual Build)
 
-**Handling:** The extension warning is still downgraded because
-`--rebuild` was set and prebuild succeeded. But the container will still
-have git 2.39.x and git operations will fail inside the container. The
-user will discover this at runtime. The warning message should be clear:
+When prebuild is a no-op (cache is fresh), it returns the cached
+prebuild tag. The post-build verification still runs `docker run` on
+that tag.
 
-```
-Warning: Repository uses git extensions that the container's git may
-  not support. The prebuild was rebuilt with --rebuild but may not
-  include a git version that supports these extensions.
-```
+**Handling:** This is correct. The cached image still exists locally
+(prebuild verified this at `prebuild.ts:201-202`). The `docker run` uses
+the local image and completes in ~1 second. This ensures that even
+cached images are verified against the current repo's extensions --
+important if the user added new extensions since the last prebuild.
 
-This is a user configuration error, not a pipeline ordering issue. The
-pipeline correctly allowed the rebuild and warned about the remaining
-risk.
+### E7: Concurrent Prebuild Image Deletion
 
-### E6: `--no-cache` Build Takes Longer Than Cached Build
+Between prebuild and post-build verification, someone deletes the
+Docker image.
 
-When `force` is true, `--no-cache` causes `devcontainer build` to
-rebuild all layers from scratch, including downloading base images and
-re-running feature install scripts. This is significantly slower than a
-cached build.
+**Handling:** `docker run` fails with a "no such image" error. The
+verification reports this as a failure. The user can re-run `lace up`
+(prebuild will detect the missing image and rebuild). This is a race
+condition that is theoretically possible but practically irrelevant.
 
-**Handling:** This is expected and acceptable. The user explicitly
-requested `--rebuild`, which signals intent to pay the cost of a full
-rebuild. The alternative (cached builds silently serving stale layers)
-is worse because it defeats the purpose of `--rebuild` and forces the
-user to manually run `docker builder prune -f`. The `--no-cache` flag
-only applies when `force` is true; normal prebuild runs (including cache
-misses without `--force`) still benefit from Docker's build cache.
+### E8: Non-Prebuild Config with Extensions
 
-### E7: Workspace Layout Mutations Needed Before Prebuild
+No prebuild features. Extensions detected. The post-build verification
+phase is skipped because there's no image to query.
 
-In the current pipeline, workspace layout mutations (workspaceMount,
-workspaceFolder, postCreateCommand) happen in Phase 0a before everything
-else. Prebuild does NOT use any of these mutations -- it reads the
-devcontainer.json directly and operates on the Dockerfile/image field.
-The mutations only affect the generated extended config.
+**Handling:** The extension warnings appear as informational messages in
+the workspace layout output. The user is informed that extensions were
+detected. If the Dockerfile's git doesn't support them, operations fail
+at runtime. This is a conscious trade-off: without prebuild, we have no
+image to query before `devcontainer up`. Adding a post-`devcontainer up`
+check is possible but would require a running container and is out of
+scope.
 
-**Handling:** No issue. Prebuild is self-contained and does not depend on
-workspace layout mutations. The mutations still happen in Phase 0a, just
-after prebuild instead of before it.
+### E9: Image with Custom ENTRYPOINT
+
+The prebuild image has a custom ENTRYPOINT that interferes with
+`docker run --rm <tag> git --version` (e.g., an entrypoint script that
+expects specific arguments or reads from stdin).
+
+**Handling:** Prebuild images are built from well-known base images
+(node, python, etc.) with standard entrypoints. The devcontainer feature
+install process does not typically modify the entrypoint. If a custom
+entrypoint does interfere, the `docker run` call fails (non-zero exit)
+and falls into E1 handling. The user can use `--skip-validation` to
+bypass. If this becomes a recurring problem, the `docker run` invocation
+could use `--entrypoint git` to override.
 
 ## Test Plan
 
-### Unit Tests in `up.integration.test.ts`
+### Unit Tests in `workspace-detector.test.ts`
 
-**T1: `--rebuild` reorders prebuild before validation**
+**T1: `compareVersions` basic cases**
 
-Create a workspace with:
-- Bare-repo layout with `extensions.relativeWorktrees = true` in git config
-- `workspace.layout: "bare-worktree"` in devcontainer.json
-- Prebuild features configured
-- `rebuild: true`
+```
+"2.53.0" >= "2.48.0" -> true
+"2.48.0" >= "2.48.0" -> true
+"2.39.5" >= "2.48.0" -> false
+"3.0.0"  >= "2.48.0" -> true
+"2.48"   >= "2.48.0" -> true (missing patch treated as 0)
+```
 
-Verify:
-- `result.exitCode === 0`
-- `result.phases.prebuild.exitCode === 0`
-- `result.phases.workspaceLayout.exitCode === 0`
-- `result.phases.workspaceLayout.message` contains "rebuild override"
-- Mock calls show `devcontainer build` was called before any validation
-  failure
+**T1b: `verifyContainerGitVersion` parses version with suffixes**
 
-**T2: Normal `lace up` still fails validation with extensions**
-
-Same workspace as T1 but with `rebuild: false`.
+Mock subprocess returns `git version 2.48.0 (Apple Git-140)`.
+Extensions: `{ relativeworktrees: "true" }`.
 
 Verify:
-- `result.exitCode === 1`
-- `result.phases.workspaceLayout.exitCode === 1`
-- `result.phases.workspaceLayout.message` contains "git extensions"
-- `result.phases.prebuild` is undefined (never reached)
+- `result.passed === true`
+- `result.gitVersion === "2.48.0"` (suffix stripped by regex)
 
-**T3: `--rebuild` with prebuild failure returns error**
+**T2: `verifyContainerGitVersion` with adequate git**
 
-Same workspace as T1 but with a mock subprocess that fails
-`devcontainer build`.
+Mock subprocess returns `git version 2.53.0`.
+Extensions: `{ relativeworktrees: "true" }`.
 
 Verify:
-- `result.exitCode !== 0`
-- `result.phases.prebuild.exitCode !== 0`
-- `result.phases.workspaceLayout` is undefined (skipped because prebuild
-  failed early)
+- `result.passed === true`
+- `result.gitVersion === "2.53.0"`
+- Single check with `supported === true`
 
-**T4: `--rebuild` does not downgrade non-extension errors**
+**T3: `verifyContainerGitVersion` with inadequate git**
 
-Create a workspace with absolute gitdir paths (not git extensions) and
-`rebuild: true`.
-
-Verify:
-- `result.exitCode === 1`
-- `result.phases.workspaceLayout.exitCode === 1`
-- `result.phases.workspaceLayout.message` contains "absolute gitdir"
-- Prebuild ran successfully before the error
-
-**T5: `--rebuild` without prebuild features uses normal ordering**
-
-Create a workspace with git extensions but no prebuild features, and
-`rebuild: true`.
+Mock subprocess returns `git version 2.39.5`.
+Extensions: `{ relativeworktrees: "true" }`.
 
 Verify:
-- Pipeline fails at workspace layout (normal ordering)
-- No early prebuild attempted
-- `result.phases.prebuild` is undefined
+- `result.passed === false`
+- `result.gitVersion === "2.39.5"`
+- Single check with `supported === false`
+- Check message includes remediation
 
-**T6: Normal `lace up` without extensions is unchanged**
+**T4: `verifyContainerGitVersion` with git not installed**
 
-Existing test coverage -- verify no regression for workspaces without
-git extensions.
-
-### Unit Tests in `prebuild.integration.test.ts`
-
-**T7: `runPrebuild` with `force: true` passes `--no-cache` to `devcontainer build`**
-
-Call `runPrebuild({ force: true, ... })` with a mock subprocess runner.
+Mock subprocess returns exit code 1.
 
 Verify:
-- The mock subprocess was called with `devcontainer` and args that
-  include `--no-cache`
-- The `--no-cache` flag appears after `build` in the args array
+- `result.passed === false`
+- `result.gitVersion === null`
+- Check message includes "git may not be installed"
 
-**T8: `runPrebuild` without `force` does NOT pass `--no-cache`**
+**T5: `verifyContainerGitVersion` with unknown extension**
 
-Call `runPrebuild({ force: false, ... })` (or `runPrebuild({})`) with a
-mock subprocess runner, using a setup where the prebuild cache is stale
-so the build actually runs.
+Mock subprocess returns `git version 2.53.0`.
+Extensions: `{ relativeworktrees: "true", somefutureext: "true" }`.
 
 Verify:
-- The mock subprocess was called with `devcontainer` and args that do
-  NOT include `--no-cache`
+- `result.passed === true` (unknown extensions don't fail)
+- Two checks: one `supported === true`, one with "no known minimum"
+
+**T6: `verifyContainerGitVersion` with multiple extensions, mixed**
+
+Mock subprocess returns `git version 2.30.0`.
+Extensions: `{ relativeworktrees: "true", worktreeconfig: "true" }`.
+(relativeWorktrees needs 2.48+, worktreeconfig needs 2.20+)
+
+Verify:
+- `result.passed === false`
+- Two checks: relativeWorktrees fails, worktreeconfig passes
 
 ### Unit Tests in `workspace-layout.test.ts`
 
-Minimal changes: verify that `applyWorkspaceLayout` returns the correct
-`errorCode` for each error type. The existing tests already assert on
-`status` and `message`; add assertions that `errorCode` is set to the
-expected value (`"absolute-gitdir"`, `"unsupported-extension"`,
-`"layout-mismatch"`, `"detection-failed"`) in each error case.
+**T7: `applyWorkspaceLayout` no longer errors on extensions**
+
+Create a workspace with `extensions.relativeWorktrees = true` and
+`workspace.layout: "bare-worktree"`.
+
+Verify:
+- `result.status === "applied"` (was `"error"`)
+- Extension info appears as warning in `result.warnings`
+- Config mutations (workspaceMount, workspaceFolder) are applied
+
+### Integration Tests in `up.integration.test.ts`
+
+**T8: Pipeline with extensions runs post-build verification**
+
+Create a workspace with extensions and prebuild features. Mock
+subprocess to return:
+- `devcontainer build`: exit 0
+- `docker run --rm <tag> git --version`: "git version 2.53.0"
+
+Verify:
+- `result.exitCode === 0`
+- `result.phases.containerVerification.exitCode === 0`
+- `result.phases.containerVerification.message` contains "2.53.0"
+
+**T9: Pipeline fails post-build verification when git too old**
+
+Same setup but mock `docker run` returns "git version 2.39.5".
+
+Verify:
+- `result.exitCode === 1`
+- `result.phases.containerVerification.exitCode === 1`
+- `result.phases.containerVerification.message` contains remediation
+
+**T10: Pipeline skips verification without prebuild features**
+
+Create a workspace with extensions but no prebuild features.
+
+Verify:
+- `result.phases.containerVerification` is undefined
+- Extension info appears in workspace layout warnings
+
+**T11: `--skip-validation` bypasses post-build verification failure**
+
+Same as T9 but with `skipValidation: true`.
+
+Verify:
+- `result.exitCode === 0` (pipeline continues)
+- `result.phases.containerVerification.exitCode === 0` (downgraded,
+  following the workspace layout convention where `--skip-validation`
+  sets exitCode 0 with "(downgraded)" message suffix)
+- `result.phases.containerVerification.message` contains "(downgraded)"
+- Warning logged to stderr
+
+**T12: Pipeline without extensions skips verification entirely**
+
+Normal workspace without extensions and with prebuild features.
+
+Verify:
+- `result.phases.containerVerification` is undefined
+- No `docker run` call in subprocess mock log
+
+### Unit Tests in `prebuild.integration.test.ts`
+
+**T13: `runPrebuild` with `force: true` passes `--no-cache`**
+
+Mock subprocess. Call `runPrebuild({ force: true })`.
+
+Verify:
+- `devcontainer build` args include `--no-cache`
+
+**T14: `runPrebuild` without `force` omits `--no-cache`**
+
+Mock subprocess. Call `runPrebuild({})` with stale cache.
+
+Verify:
+- `devcontainer build` args do NOT include `--no-cache`
+
+**T15: `runPrebuild` returns `prebuildTag` in result**
+
+Verify:
+- `result.prebuildTag` is set to the expected tag string
 
 ## Implementation Phases
 
-### Phase 1: Add Early Prebuild Block in `runUp()` and `--no-cache` in `runPrebuild()`
+### Phase 1: Core Verification Function + Remove Extension Error
+
+**Changes:**
+- `packages/lace/src/lib/workspace-detector.ts`:
+  - Add `compareVersions()` function.
+  - Add `ContainerGitVerificationResult` interface.
+  - Add `verifyContainerGitVersion()` function.
+  - Add `getDetectedExtensions()` helper (returns extension map from a
+    `ClassificationResult`, using the bare repo root from the
+    classification to read the git config internally).
+  - Add import for `RunSubprocess` type.
+- `packages/lace/src/lib/workspace-layout.ts`:
+  - Remove the `unsupported-extension` error block (lines 201-218).
+  - The general warning collection (lines 99-103) still includes
+    extension warnings as informational messages.
+- `packages/lace/src/lib/prebuild.ts`:
+  - Add `prebuildTag?: string` to `PrebuildResult`.
+  - Set `prebuildTag` in each return path that produces/reactivates an
+    image: fresh build success (line ~341), cache reactivation (line
+    ~241), up-to-date cache hit (lines ~214, ~225). Dry-run and failure
+    paths do NOT set it.
+  - Add `--no-cache` to `devcontainer build` args when `options.force`
+    is true.
+
+**Constraints:**
+- Do NOT change hard classification checks in `workspace-layout.ts`.
+- Do NOT change absolute-gitdir check in `workspace-layout.ts`.
+- Do NOT change `checkGitExtensions` (detection still works the same,
+  just no longer causes errors).
+- Do NOT change host-validator.ts.
+
+**Success criteria:**
+- `applyWorkspaceLayout` returns `status: "applied"` for workspaces with
+  extensions (was `"error"`).
+- `verifyContainerGitVersion` correctly passes/fails based on actual
+  version comparison.
+- `getDetectedExtensions` returns the extension map for bare-worktree
+  classifications with extensions, null otherwise.
+- `runPrebuild` returns the `prebuildTag` in its result.
+- `--no-cache` is passed when `force` is true.
+- All existing tests updated to reflect that extension check is no
+  longer an error in Phase 0a (test assertions that expected
+  `status: "error"` for extensions now expect `status: "applied"`).
+
+### Phase 2: Integrate Post-Build Verification into Pipeline
 
 **Changes:**
 - `packages/lace/src/lib/up.ts`:
-  - Between config reading (line ~138) and Phase 0a (line ~140), add a
-    conditional early-prebuild block. This requires extracting
-    `hasPrebuildFeatures` earlier than its current location (line ~207,
-    which is after both validation phases). Move the
-    `extractPrebuildFeatures` call into the early block:
-    ```typescript
-    const hasPrebuildFeatures =
-      extractPrebuildFeatures(configMinimal.raw).kind === "features";
-    if (rebuild && hasPrebuildFeatures) { ... }
-    ```
-  - Inside the early block: run `runPrebuild()` with `force: true`.
-  - Track `prebuildCompleted` boolean.
-  - In the existing prebuild phase (line ~558), skip if
-    `prebuildCompleted` is true.
-  - In the Phase 0a handling, add a branch: if `rebuild &&
-    prebuildCompleted` and `layoutResult.errorCode ===
-    "unsupported-extension"`, downgrade to a warning instead of
-    returning an error.
-  - The full config read (needed for prebuild's Dockerfile parsing) must
-    also move into the early block when applicable.
-  - The `hasPrebuildFeatures` extraction at line ~207 can remain (it is
-    idempotent and still needed for the normal-path prebuild phase
-    guard), or be replaced with a reference to the already-computed
-    value.
-- `packages/lace/src/lib/prebuild.ts`:
-  - In `runPrebuild()`, conditionally add `--no-cache` to the
-    `devcontainer build` args when `options.force` is true. This ensures
-    Docker rebuilds all layers from scratch, preventing stale cached
-    layers from serving old feature versions (e.g., git 2.39.x when
-    `"version": "latest"` was configured).
+  - Add `containerVerification` to `UpResult.phases` interface.
+  - After the prebuild phase (line ~579), add the post-build
+    verification block using `getDetectedExtensions()` (from
+    `workspace-detector.ts`) and `verifyContainerGitVersion`.
+  - Gate on `hasPrebuildFeatures`, presence of `prebuildResult.prebuildTag`,
+    and non-null return from `getDetectedExtensions`.
+  - Respect `--skip-validation` for the new phase (downgrade convention:
+    exitCode 0 with "(downgraded)" suffix, matching workspace layout).
+  - Use `prebuildResult.prebuildTag` from Phase 1.
 
 **Constraints:**
-- `workspace-layout.ts`: Only add an optional `errorCode` field to
-  `WorkspaceLayoutResult` and set it in each existing error return. Do
-  NOT change the function's behavior, control flow, or existing return
-  values.
-- Do NOT modify `workspace-detector.ts`.
-- Do NOT change behavior when `rebuild` is false.
-- Do NOT add new options or flags.
+- Pipeline ordering does not change (no conditional reorder).
+- No new CLI flags.
+- The verification only fires when extensions are detected AND prebuild
+  produced an image.
 
 **Success criteria:**
-- `lace up --rebuild` succeeds on a workspace with
-  `extensions.relativeWorktrees` and a git prebuild feature with
-  `"version": "latest"`.
-- `lace up` (without `--rebuild`) still fails validation on the same
-  workspace.
-- When `force: true`, the `devcontainer build` subprocess receives
-  `--no-cache` in its args.
-- When `force: false` (or unset), the `devcontainer build` subprocess
-  does NOT receive `--no-cache`.
-- All existing tests pass without modification.
+- `lace up` on a workspace with extensions + adequate prebuild git:
+  passes post-build verification.
+- `lace up` on a workspace with extensions + inadequate prebuild git:
+  fails post-build verification with actionable message.
+- `lace up` on a workspace without extensions: verification skipped.
+- `lace up --skip-validation` on a workspace with extensions +
+  inadequate git: verification downgraded to warning.
+- All existing tests pass.
 
-### Phase 2: Add Integration and Unit Tests
+### Phase 3: Integration and Unit Tests
 
 **Changes:**
-- `packages/lace/src/commands/__tests__/up.integration.test.ts`: Add
-  tests T1-T6 as described in the Test Plan section.
-- `packages/lace/src/commands/__tests__/prebuild.integration.test.ts`:
-  Add tests T7-T8 to verify `--no-cache` is conditionally passed to
-  `devcontainer build` (using existing mock subprocess infrastructure).
-- May need a helper to create bare-repo fixtures with git extension
-  configs (similar to existing `createBareRepoWorkspace` helper).
+- Add tests T1-T15 (including T1b) as described in the Test Plan.
+- Update existing `workspace-layout.test.ts` tests that assert
+  `status: "error"` for extension scenarios to assert `status: "applied"`.
+- Review `workspace_smoke.test.ts` (~lines 121-138) which strips
+  extensions from test repos to avoid the current error. After this
+  change, that workaround is no longer necessary for the extension
+  check. It may be retained for test isolation reasons but should be
+  documented as optional.
 
 **Constraints:**
 - Use existing test infrastructure (mock subprocess, temp directories).
-- Tests must be self-contained (no dependency on host git version).
+- Tests must be self-contained (no dependency on host git version or
+  Docker availability).
 
 **Success criteria:**
 - All new tests pass.
-- All existing tests pass.
-- Test coverage confirms the conditional reorder triggers only when
-  expected.
-
-### Phase 3 (future, out of scope): Persistent Prebuild Git Version Marker
-
-Record the git feature version from the last successful prebuild in
-`.lace/prebuild/metadata.json`. During workspace layout validation,
-check this marker to suppress the `unsupported-extension` error
-automatically without requiring `--rebuild` or `--skip-validation` on
-subsequent runs. This eliminates the UX friction described in Edge Case
-E3.
+- All existing tests pass (with assertion updates).
+- Coverage confirms post-build verification triggers only when expected.

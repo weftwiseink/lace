@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-11T21:30:00-06:00
 task_list: lace/weftwise-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 tags: [weftwise, devcontainer, mounts, features, git-extensions, post-migration, cleanup]
 last_reviewed:
   status: accepted

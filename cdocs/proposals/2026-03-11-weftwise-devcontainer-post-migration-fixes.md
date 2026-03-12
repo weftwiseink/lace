@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-11T18:00:00-06:00
 task_list: lace/weftwise-migration
 type: proposal
-state: live
-status: implementation_accepted
+state: archived
+status: result_accepted
 tags: [weftwise, devcontainer, mounts, features, git-extensions, post-migration, cleanup]
 last_reviewed:
   status: accepted

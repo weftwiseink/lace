@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-11T19:30:00-06:00
 task_list: lace/weftwise-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, stale_assumptions, missing_coverage, architecture, weftwise, devcontainer]
 ---

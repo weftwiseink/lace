@@ -51,3 +51,27 @@ export function hasRunArgsFlag(runArgs: string[], flag: string): boolean {
     (arg) => arg === flag || arg.startsWith(`${flag}=`),
   );
 }
+
+/**
+ * Resolve the actual Docker container name that lace will use.
+ * Mirrors the logic in generateExtendedConfig (up.ts:764-769):
+ * if the user has --name in runArgs, use their value;
+ * otherwise, use sanitizeContainerName(projectName).
+ */
+export function resolveContainerName(
+  projectName: string,
+  extendedConfig: Record<string, unknown>,
+): string {
+  const runArgs = (extendedConfig.runArgs ?? []) as string[];
+  for (let i = 0; i < runArgs.length; i++) {
+    // Handle --name value (space-separated)
+    if (runArgs[i] === "--name" && i + 1 < runArgs.length) {
+      return runArgs[i + 1];
+    }
+    // Handle --name=value (equals-separated)
+    if (runArgs[i].startsWith("--name=")) {
+      return runArgs[i].slice("--name=".length);
+    }
+  }
+  return sanitizeContainerName(projectName);
+}

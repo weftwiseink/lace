@@ -45,8 +45,8 @@ import { MountPathResolver, type ContainerVariables } from "./mount-resolver";
 import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
-import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag } from "./project-name";
-import { classifyWorkspace } from "./workspace-detector";
+import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag, resolveContainerName } from "./project-name";
+import { classifyWorkspace, getDetectedExtensions, verifyContainerGitVersion } from "./workspace-detector";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -83,6 +83,7 @@ export interface UpResult {
     resolveMounts?: { exitCode: number; message: string };
     generateConfig?: { exitCode: number; message: string };
     devcontainerUp?: { exitCode: number; stdout: string; stderr: string };
+    containerVerification?: { exitCode: number; message: string };
   };
 }
 
@@ -651,6 +652,71 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     result.message = `devcontainer up failed: ${upResult.stderr}`;
     console.error(upResult.stderr);
     return result;
+  }
+
+  // ── Phase: Post-container verification ──
+  // Runs after devcontainer up on the running container.
+  // Covers all configs (prebuild and non-prebuild) uniformly.
+  {
+    const classResult = classifyWorkspace(workspaceFolder);
+    const extensions = getDetectedExtensions(classResult, workspaceFolder);
+
+    if (extensions) {
+      // Read the generated extended config to resolve the container name
+      const extendedConfigPath = join(workspaceFolder, ".lace", "devcontainer.json");
+      let configExtended: Record<string, unknown> = {};
+      try {
+        configExtended = JSON.parse(readFileSync(extendedConfigPath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        // Fall back to empty config -- resolveContainerName will use sanitized projectName
+      }
+
+      const containerName = resolveContainerName(projectName, configExtended);
+
+      const verification = verifyContainerGitVersion(
+        containerName,
+        extensions,
+        subprocess,
+      );
+
+      const verificationMsg = verification.passed
+        ? `Container git ${verification.gitVersion} supports all ` +
+          `detected extensions`
+        : verification.checks
+            .filter((c) => !c.supported)
+            .map((c) => c.message)
+            .join("\n");
+
+      if (!verification.passed && !skipValidation) {
+        result.phases.containerVerification = {
+          exitCode: 1,
+          message: verificationMsg,
+        };
+        result.exitCode = 1;
+        result.message =
+          `Container verification failed: ${verificationMsg}`;
+        return result;
+      }
+
+      if (!verification.passed && skipValidation) {
+        result.phases.containerVerification = {
+          exitCode: 0,
+          message: `${verificationMsg} (downgraded)`,
+        };
+        console.warn(
+          `Warning: ${verificationMsg} ` +
+            "(continuing due to --skip-validation)",
+        );
+      }
+
+      if (verification.passed) {
+        result.phases.containerVerification = {
+          exitCode: 0,
+          message: verificationMsg,
+        };
+        console.log(verificationMsg);
+      }
+    }
   }
 
   result.message = "lace up completed successfully";

@@ -284,19 +284,21 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     `Features: ${Object.keys(prebuildFeatures).join(", ")}`,
   );
 
-  const buildResult = run(
-    "devcontainer",
-    [
-      "build",
-      "--workspace-folder",
-      prebuildDir,
-      "--config",
-      join(prebuildDir, "devcontainer.json"),
-      "--image-name",
-      prebuildTag,
-    ],
-    { cwd: workspaceRoot },
-  );
+  const buildArgs = [
+    "build",
+    "--workspace-folder",
+    prebuildDir,
+    "--config",
+    join(prebuildDir, "devcontainer.json"),
+    "--image-name",
+    prebuildTag,
+  ];
+
+  if (options.force) {
+    buildArgs.push("--no-cache");
+  }
+
+  const buildResult = run("devcontainer", buildArgs, { cwd: workspaceRoot });
 
   if (buildResult.exitCode !== 0) {
     // Atomicity: don't modify the Dockerfile on failure

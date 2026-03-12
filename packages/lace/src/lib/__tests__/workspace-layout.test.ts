@@ -334,7 +334,7 @@ describe("applyWorkspaceLayout", () => {
     expect(result.classification!.type).toBe("worktree");
   });
 
-  it("returns error when repo has unsupported git extensions", () => {
+  it("succeeds with informational warnings when repo has git extensions", () => {
     const { bareDir, worktrees } = createBareRepoWorkspace(
       testDir,
       "ext-project",
@@ -354,12 +354,15 @@ describe("applyWorkspaceLayout", () => {
 
     const result = applyWorkspaceLayout(config, worktrees.main);
 
-    expect(result.status).toBe("error");
-    expect(result.message).toContain("git extensions");
-    expect(result.message).toContain("relativeworktrees");
-    expect(result.message).toContain("--skip-validation");
+    // Extensions are now informational-only (no longer a hard error).
+    // Verification happens post-container via docker exec.
+    expect(result.status).toBe("applied");
+    expect(result.warnings.some((w) => w.includes("relativeworktrees"))).toBe(true);
     expect(result.classification).toBeDefined();
     expect(result.classification!.type).toBe("worktree");
+    // Config mutations should be applied
+    expect(config.workspaceMount).toBeDefined();
+    expect(config.workspaceFolder).toBeDefined();
   });
 
   it("succeeds when repo has no unsupported extensions", () => {

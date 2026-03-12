@@ -1,6 +1,7 @@
 // IMPLEMENTATION_VALIDATION
 import { existsSync, readFileSync, statSync, readdirSync } from "node:fs";
 import { join, resolve, dirname, basename, isAbsolute, sep } from "node:path";
+import type { RunSubprocess } from "./subprocess";
 
 // ── Types ──
 
@@ -318,7 +319,7 @@ export function checkAbsolutePaths(
  * resolved worktree path. Given /project/.bare/worktrees/main, returns
  * /project/.bare. This is the directory where the git config file lives.
  */
-function findBareGitDir(resolvedWorktreePath: string): string | null {
+export function findBareGitDir(resolvedWorktreePath: string): string | null {
   let current = resolvedWorktreePath;
 
   while (current !== dirname(current)) {
@@ -455,4 +456,184 @@ export function checkGitExtensions(
   }
 
   return warnings;
+}
+
+// ── Post-Container Git Version Verification ──
+
+/** Result of verifying a container's git version against detected extensions. */
+export interface ContainerGitVerificationResult {
+  passed: boolean;
+  /** Git version string (e.g., "2.53.0"), or null on failure. */
+  gitVersion: string | null;
+  /** Per-extension check results. */
+  checks: Array<{
+    extension: string;
+    requiredVersion: string | null;
+    supported: boolean;
+    message: string;
+  }>;
+}
+
+/**
+ * Compare two semver-like version strings (major.minor.patch).
+ * Returns negative if a < b, zero if equal, positive if a > b.
+ */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * Verify that a running container's git version supports all detected
+ * repository extensions.
+ *
+ * Runs `docker exec <containerName> git --version` to get the actual
+ * version, then compares against GIT_EXTENSION_MIN_VERSIONS.
+ *
+ * Extensions not in the minimum-versions map produce warnings but do
+ * not fail the check.
+ */
+export function verifyContainerGitVersion(
+  containerName: string,
+  detectedExtensions: Record<string, string>,
+  subprocess: RunSubprocess,
+): ContainerGitVerificationResult {
+  const versionResult = subprocess("docker", [
+    "exec", containerName, "git", "--version",
+  ]);
+
+  if (versionResult.exitCode !== 0) {
+    return {
+      passed: false,
+      gitVersion: null,
+      checks: [{
+        extension: "(git binary)",
+        requiredVersion: null,
+        supported: false,
+        message:
+          "Could not determine git version in container. " +
+          "git may not be installed. Add the git prebuild feature: " +
+          '"ghcr.io/devcontainers/features/git:1": { "version": "latest" }',
+      }],
+    };
+  }
+
+  // Parse "git version 2.53.0" or "git version 2.48.0 (Apple Git-140)"
+  const versionMatch = versionResult.stdout
+    .trim()
+    .match(/git version (\d+\.\d+\.\d+)/);
+  if (!versionMatch) {
+    return {
+      passed: false,
+      gitVersion: null,
+      checks: [{
+        extension: "(git binary)",
+        requiredVersion: null,
+        supported: false,
+        message:
+          `Unexpected git version output: "${versionResult.stdout.trim()}"`,
+      }],
+    };
+  }
+
+  const gitVersion = versionMatch[1];
+  const checks: ContainerGitVerificationResult["checks"] = [];
+  let passed = true;
+
+  for (const [extName, _value] of Object.entries(detectedExtensions)) {
+    const requiredVersion = GIT_EXTENSION_MIN_VERSIONS[extName] ?? null;
+
+    if (!requiredVersion) {
+      checks.push({
+        extension: extName,
+        requiredVersion: null,
+        supported: true,
+        message:
+          `Extension "${extName}" has no known minimum git version. ` +
+          `Container has git ${gitVersion}.`,
+      });
+      continue;
+    }
+
+    const supported = compareVersions(gitVersion, requiredVersion) >= 0;
+    if (!supported) passed = false;
+
+    checks.push({
+      extension: extName,
+      requiredVersion,
+      supported,
+      message: supported
+        ? `Extension "${extName}" requires git ${requiredVersion}+, ` +
+          `container has ${gitVersion}. OK.`
+        : `Extension "${extName}" requires git ${requiredVersion}+, ` +
+          `but container has ${gitVersion}. ` +
+          'Set version to "latest" in the git prebuild feature.',
+    });
+  }
+
+  return { passed, gitVersion, checks };
+}
+
+/**
+ * Extract detected git extensions from a classification result.
+ * Returns null if no extensions are present or the classification
+ * type does not have a bare git directory.
+ *
+ * The workspacePath is needed to resolve the .git file pointer to
+ * the actual bare git directory where the config file lives.
+ * (classification.bareRepoRoot is the workspace root, not the git
+ * directory.)
+ */
+export function getDetectedExtensions(
+  result: ClassificationResult,
+  workspacePath: string,
+): Record<string, string> | null {
+  const { classification } = result;
+  if (
+    classification.type !== "worktree" &&
+    classification.type !== "bare-root"
+  ) {
+    return null;
+  }
+
+  // Resolve the actual bare git directory (where config lives)
+  const dotGitPath = join(workspacePath, ".git");
+  let bareGitDir: string | null = null;
+  try {
+    const pointer = resolveGitdirPointer(dotGitPath);
+    if (classification.type === "worktree") {
+      // pointer.resolvedPath is .bare/worktrees/<name>;
+      // findBareGitDir walks up to .bare
+      bareGitDir = findBareGitDir(pointer.resolvedPath);
+    } else {
+      // bare-root: pointer.resolvedPath IS the bare git dir (.bare)
+      bareGitDir = pointer.resolvedPath;
+    }
+  } catch {
+    return null;
+  }
+
+  if (!bareGitDir) return null;
+
+  const configPath = join(bareGitDir, "config");
+  if (!existsSync(configPath)) return null;
+
+  let configContent: string;
+  try {
+    configContent = readFileSync(configPath, "utf-8");
+  } catch {
+    return null;
+  }
+
+  const { formatVersion, extensions } =
+    parseGitConfigExtensions(configContent);
+  if (formatVersion < 1) return null;
+  if (Object.keys(extensions).length === 0) return null;
+
+  return extensions;
 }

@@ -340,3 +340,94 @@ exclusion.
 > Note: If `flock(1)` is not available on the system, lace degrades
 > gracefully and proceeds without locking, printing:
 > `Warning: flock not available, proceeding without lock.`
+
+---
+
+## 11. Claude Code asks to sign in inside container
+
+**Symptom:** Claude Code shows the onboarding or sign-in wizard inside the
+container, despite `~/.claude` being bind-mounted from the host.
+
+**Cause:** When `CLAUDE_CONFIG_DIR` is set (e.g., to `/home/node/.claude`),
+Claude Code reads `.claude.json` from `$CLAUDE_CONFIG_DIR/.claude.json` —
+inside the config directory. On the host, this file lives at `~/.claude.json`
+— a sibling file outside the `~/.claude/` directory. The directory bind mount
+does not include it, so the container's copy is missing the
+`hasCompletedOnboarding` flag.
+
+**Fix:**
+
+Add a file mount declaration that overlays the host's `.claude.json` into
+the config directory:
+
+```jsonc
+// In customizations.lace.mounts (devcontainer.json)
+"claude-config-json": {
+  "target": "/home/node/.claude/.claude.json",
+  "recommendedSource": "~/.claude.json",
+  "sourceMustBe": "file",
+  "description": "Claude Code state (onboarding, account cache)",
+  "hint": "Run 'claude' on the host first to create this file"
+}
+```
+
+This overlays the host file onto the directory mount. The
+`sourceMustBe: "file"` validation ensures the source exists as a file before
+container creation. See [Tool integration patterns](../README.md#tool-integration-patterns)
+in the README.
+
+---
+
+## 12. Tool plugins or extensions fail to load with path errors
+
+**Symptom:** A tool inside the container reports that plugins, extensions,
+or registries cannot be found, even though the tool's config directory is
+bind-mounted from the host. For Claude Code, this appears as:
+
+```
+Plugin cdocs not found in marketplace clauthier
+```
+
+Other tools may report similar path-not-found errors for registries,
+credential stores, or workspace references.
+
+**Cause:** The tool's config files (bind-mounted from the host) contain
+absolute host paths — project directories, marketplace locations, plugin
+install paths — that do not exist inside the container's filesystem
+namespace. The files arrive via bind mount with the host paths baked in.
+
+**Fix:**
+
+Two approaches depending on the tool:
+
+1. **Prefer network-backed references** when available. For Claude Code
+   plugins, install from a GitHub-backed marketplace instead of a local
+   directory:
+   ```sh
+   claude plugin install cdocs@weft-marketplace --scope project
+   ```
+   GitHub marketplaces cache their manifests inside `~/.claude/`, which is
+   already bind-mounted.
+
+2. **Mirror the host path** using a repo mount with `overrideMount.target`
+   set to the exact host path:
+   ```jsonc
+   // In ~/.config/lace/settings.json
+   {
+     "repoMounts": {
+       "github.com/user/tool-registry": {
+         "overrideMount": {
+           "source": "~/code/tool-registry",
+           "target": "/var/home/user/code/tool-registry"
+         }
+       }
+     }
+   }
+   ```
+   This makes the host path resolve inside the container. The repo must also
+   be declared in `customizations.lace.repoMounts` in the project's
+   devcontainer.json.
+
+> Note: Avoid directly editing bind-mounted config files (like
+> `installed_plugins.json`) to add container-specific paths. The file is
+> shared between host and container — changes from one side affect the other.

@@ -1,0 +1,246 @@
+#!/usr/bin/env nu
+
+# lace-inspect: Summarize lace-relevant aspects of a running devcontainer
+#
+# Usage:
+#   lace-inspect           # inspect all lace containers
+#   lace-inspect lace      # inspect a specific container by name
+#   lace-inspect --raw     # output raw JSON for piping
+
+def parse-env [env_str: string]: string -> record<name: string, value: string> {
+  let idx = ($env_str | str index-of "=")
+  if $idx == -1 {
+    { name: $env_str, value: "" }
+  } else {
+    { name: ($env_str | str substring 0..<$idx), value: ($env_str | str substring ($idx + 1)..) }
+  }
+}
+
+def main [
+  container?: string  # Optional container name or ID to inspect
+  --raw               # Output raw JSON instead of formatted tables
+] {
+  let containers = if $container != null {
+    docker inspect $container | from json
+  } else {
+    let ids = (docker ps --filter "label=lace.project_name" --format "{{.ID}}" | lines | where { $in != "" })
+    if ($ids | is-empty) {
+      print $"(ansi red)No running lace containers found.(ansi reset)"
+      return
+    }
+    $ids | each { |id| docker inspect $id | from json | get 0 }
+  }
+
+  for $c in $containers {
+    let name = ($c.Name | str trim --left --char "/")
+    let id = ($c.Id | str substring 0..12)
+    let status = $c.State.Status
+    let image = $c.Config.Image
+    let project = ($c.Config.Labels | get -o "lace.project_name" | default "unknown")
+
+    if not $raw {
+      print $"\n(ansi cyan_bold)═══ Container: ($name) ═══(ansi reset)"
+      print $"  ID:      ($id)"
+      print $"  Image:   ($image)"
+      print $"  Status:  ($status) \(pid ($c.State.Pid))"
+      print $"  Project: ($project)"
+    }
+
+    # --- Mounts ---
+    let mounts = ($c.Mounts | each { |m|
+      let src_exists = if $m.Type == "bind" {
+        ($m.Source | path exists)
+      } else {
+        true
+      }
+      let src_resolved = if ($m.Type == "bind") and ($m.Source | path exists) {
+        try { $m.Source | path expand --strict } catch { $m.Source }
+      } else {
+        $m.Source
+      }
+      let is_symlink = $src_resolved != $m.Source
+      {
+        type: $m.Type
+        source: $m.Source
+        resolved: (if $is_symlink { $src_resolved } else { null })
+        destination: $m.Destination
+        rw: $m.RW
+        exists: $src_exists
+        is_symlink: $is_symlink
+      }
+    })
+
+    if not $raw {
+      print $"\n  (ansi yellow_bold)Mounts:(ansi reset)"
+      for $m in $mounts {
+        let rw_flag = if $m.rw { "rw" } else { "ro" }
+        let status_icon = if not $m.exists {
+          $"(ansi red)MISSING(ansi reset)"
+        } else if $m.is_symlink {
+          $"(ansi yellow)symlink(ansi reset)"
+        } else {
+          $"(ansi green)ok(ansi reset)"
+        }
+        print $"    ($m.destination)"
+        print $"      <- ($m.source) [($m.type), ($rw_flag)] (($status_icon))"
+        if $m.is_symlink and $m.resolved != null {
+          print $"        -> resolves to: ($m.resolved)"
+        }
+      }
+    }
+
+    # --- Ports ---
+    let ports = ($c.NetworkSettings.Ports | transpose port bindings | each { |p|
+      let hb = if $p.bindings != null {
+        $p.bindings | each { |b| $"($b.HostIp):($b.HostPort)" }
+      } else {
+        []
+      }
+      { container_port: $p.port, host_bindings: $hb }
+    } | where { ($in.host_bindings | length) > 0 })
+
+    if not $raw {
+      print $"\n  (ansi yellow_bold)Ports:(ansi reset)"
+      if ($ports | is-empty) {
+        print "    (none)"
+      } else {
+        for $p in $ports {
+          let bindings = ($p.host_bindings | str join ", ")
+          print $"    ($bindings) -> ($p.container_port)"
+        }
+      }
+    }
+
+    # --- Lace/Devcontainer Labels ---
+    let labels = ($c.Config.Labels
+      | transpose key value
+      | where { ($in.key | str starts-with "lace.") or ($in.key | str starts-with "devcontainer.") }
+      | where { $in.key != "devcontainer.metadata" }
+    )
+
+    if not $raw {
+      print $"\n  (ansi yellow_bold)Labels:(ansi reset)"
+      for $l in $labels {
+        let val = if ($l.value | str length) > 80 {
+          $"($l.value | str substring 0..77)..."
+        } else {
+          $l.value
+        }
+        print $"    ($l.key) = ($val)"
+      }
+    }
+
+    # --- Environment (lace/claude relevant) ---
+    let env_all = ($c.Config.Env | each { |e| parse-env $e })
+    let env_filter = ["CLAUDE", "LACE", "CONTAINER_WORKSPACE_FOLDER", "HOME", "NODE_OPTIONS"]
+    let env_relevant = ($env_all | where { |e|
+      $env_filter | any { |prefix| ($e.name | str starts-with $prefix) }
+    })
+
+    if not $raw {
+      print $"\n  (ansi yellow_bold)Environment \(lace-relevant\):(ansi reset)"
+      for $e in $env_relevant {
+        print $"    ($e.name) = ($e.value)"
+      }
+    }
+
+    # --- In-container verification ---
+    if not $raw {
+      print $"\n  (ansi yellow_bold)In-container checks:(ansi reset)"
+
+      let claude_dir = ($env_all | where { $in.name == "CLAUDE_CONFIG_DIR" } | get -o 0.value | default "/home/node/.claude")
+
+      let has_creds = try {
+        docker exec $name bash -c $"test -f ($claude_dir)/.credentials.json && echo 'yes' || echo 'no'" | str trim
+      } catch {
+        "unknown"
+      }
+      let has_config = try {
+        docker exec $name bash -c $"test -f ($claude_dir)/.claude.json && echo 'yes' || echo 'no'" | str trim
+      } catch {
+        "unknown"
+      }
+      let claude_version = try {
+        docker exec $name bash -c "claude --version 2>&1" | str trim
+      } catch {
+        "not installed"
+      }
+
+      # Check oauth details from credentials file
+      let creds_script = 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")),o=d.claudeAiOauth||{};console.log(JSON.stringify({authType:Object.keys(d).join(","),hasAccessToken:!!o.accessToken,hasRefreshToken:!!o.refreshToken,expired:o.expiresAt?Date.now()>o.expiresAt:"n/a",subscriptionType:o.subscriptionType||"unknown"}))'
+      let oauth_info = try {
+        docker exec $name node -e $creds_script $"($claude_dir)/.credentials.json" | from json
+      } catch {
+        { authType: "error", hasAccessToken: false, hasRefreshToken: false, expired: "unknown", subscriptionType: "unknown" }
+      }
+      # Check account info from config
+      let acct_script = 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(d.oauthAccount?.displayName||"none","|",d.oauthAccount?.emailAddress||"none")'
+      let account_info = try {
+        docker exec $name node -e $acct_script $"($claude_dir)/.claude.json" | str trim
+      } catch {
+        "unknown"
+      }
+
+      print $"    claude CLI:           ($claude_version)"
+      print $"    CLAUDE_CONFIG_DIR:    ($claude_dir)"
+      print $"    credentials present:  ($has_creds)"
+      print $"    config present:       ($has_config)"
+      print $"    auth type:            ($oauth_info.authType)"
+      print $"    access token:         ($oauth_info.hasAccessToken)"
+      print $"    refresh token:        ($oauth_info.hasRefreshToken)"
+      print $"    token expired:        ($oauth_info.expired)"
+      print $"    subscription:         ($oauth_info.subscriptionType)"
+      print $"    account:              ($account_info)"
+
+      # Check workspace mount
+      let ws_folder = ($env_all | where { $in.name == "CONTAINER_WORKSPACE_FOLDER" } | get -o 0.value | default "")
+      if $ws_folder != "" {
+        let ws_check = try {
+          docker exec $name bash -c $"test -d '($ws_folder)' && ls '($ws_folder)' | head -5 || echo 'MISSING'" | str trim
+        } catch {
+          "unknown"
+        }
+        print $"    workspace dir:        ($ws_folder) -> ($ws_check)"
+      }
+
+      # Check git inside container
+      let git_check = if $ws_folder != "" {
+        try {
+          docker exec -w $ws_folder $name git rev-parse --short HEAD | str trim
+        } catch {
+          "not a git repo"
+        }
+      } else {
+        "no workspace folder"
+      }
+      print $"    git HEAD:             ($git_check)"
+
+      # Check ssh connectivity
+      let ssh_check = try {
+        docker exec $name bash -c "pgrep -x sshd > /dev/null && echo 'running' || echo 'not running'" | str trim
+      } catch {
+        "unknown"
+      }
+      print $"    sshd:                 ($ssh_check)"
+    }
+
+    # --- Raw output ---
+    if $raw {
+      {
+        name: $name
+        id: $id
+        image: $image
+        status: $status
+        project: $project
+        mounts: $mounts
+        ports: $ports
+        labels: ($labels | reduce -f {} { |it, acc| $acc | merge { ($it.key): $it.value } })
+        env: ($env_relevant | reduce -f {} { |it, acc| $acc | merge { ($it.name): $it.value } })
+      } | to json | print
+    }
+  }
+
+  if not $raw {
+    print ""
+  }
+}

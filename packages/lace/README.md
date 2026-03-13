@@ -508,7 +508,11 @@ The `alias` option provides an explicit name when multiple repos would derive th
 
 ### Settings overrides
 
-User-level settings at `~/.config/lace/settings.json` (or `$LACE_SETTINGS`) can override repo mounts to point at local paths instead of cloning:
+User-level settings at `~/.config/lace/settings.json` (or `$LACE_SETTINGS`) can override repo mounts to point at local paths instead of cloning.
+
+The optional `target` field controls where the repo appears inside the container. Two common reasons to set a custom target:
+- **Semantic paths**: place a dotfiles repo at `~/.dotfiles` instead of the default `/mnt/lace/repos/dotfiles`.
+- **Host-path mirroring**: mount at the exact host path (e.g., `/var/home/user/code/tool-registry`) so that tools which store absolute host paths in bind-mounted config files can still resolve them inside the container. See [Tool integration patterns](#tool-integration-patterns) for details.
 
 ```jsonc
 {
@@ -567,6 +571,8 @@ When `layout: "bare-worktree"` is set, lace inspects the workspace directory's `
 3. **Normal clone detected**: `.git` is a directory (not a file). Lace returns an error — the layout declaration does not match the workspace.
 
 Detection is filesystem-only (no `git` binary required). It parses the `.git` file content and resolves relative paths.
+
+Lace sets `CONTAINER_WORKSPACE_FOLDER` in `containerEnv` to the resolved `workspaceFolder` path. Tools inside the container can use this to determine their working directory without relying on host paths.
 
 ### Example
 
@@ -669,6 +675,56 @@ The `--skip-validation` flag downgrades all `severity: "error"` checks to warnin
 ```sh
 lace up --skip-validation
 ```
+
+## Tool integration patterns
+
+Host-side tools that persist configuration in bind-mounted directories can break inside containers when path assumptions don't hold. This section documents common patterns and fixes.
+
+### Nested file mounts
+
+Some tools look for a config file *inside* a directory that is also a standalone file on the host. When `CLAUDE_CONFIG_DIR` is set to a directory (e.g., `/home/node/.claude`), Claude Code reads `$CLAUDE_CONFIG_DIR/.claude.json` — inside the directory. On the host, that file lives at `~/.claude.json` — a sibling *outside* `~/.claude/`. A directory bind mount of `~/.claude` never includes `~/.claude.json`.
+
+The fix is a second mount declaration with `sourceMustBe: "file"` that overlays the specific file onto the directory mount:
+
+```jsonc
+{
+  "customizations": {
+    "lace": {
+      "mounts": {
+        "claude-config": {
+          "target": "/home/node/.claude",
+          "recommendedSource": "~/.claude",
+          "description": "Claude Code credentials, session data, and settings"
+        },
+        "claude-config-json": {
+          "target": "/home/node/.claude/.claude.json",
+          "recommendedSource": "~/.claude.json",
+          "sourceMustBe": "file",
+          "description": "Claude Code state (onboarding, account cache)",
+          "hint": "Run 'claude' on the host first to create this file"
+        }
+      }
+    }
+  },
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "${lace.mount(project/claude-config).target}"
+  }
+}
+```
+
+**General pattern:** when a tool changes where it looks for a config file based on an env var or directory convention, check whether the host stores that file at a different relative path. If so, add a file mount that overlays it.
+
+### Host-path-dependent tools
+
+Tools that store absolute host paths in their configuration files (plugin registries, marketplace directories, project path mappings) break inside containers because those paths don't exist in the container's filesystem namespace. The config files arrive via bind mount with the host paths baked in.
+
+Two approaches:
+
+1. **Prefer network-backed references.** If the tool supports both local-path and remote (e.g., GitHub) references, use the remote variant. Remote references cache their data inside the config directory, which is already bind-mounted. Example: Claude Code plugins can be installed from a GitHub-backed marketplace (`cdocs@weft-marketplace`) instead of a local directory marketplace (`cdocs@clauthier`).
+
+2. **Mirror the host path with `overrideMount.target`.** For tools that only support local paths, use a repo mount with `overrideMount.target` set to the exact host path. This makes the host path resolve inside the container. See [Settings overrides](#settings-overrides) for syntax.
+
+> NOTE: Avoid modifying bind-mounted config files (like `installed_plugins.json`) to add container-specific path entries. The file is shared between host and container — changes from one side affect the other. Prefer approaches that don't mutate shared state.
 
 ## .gitignore
 

@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "cdocs@clauthier": true
+    "cdocs@clauthier": true,
+    "cdocs@weft-marketplace": true
   }
 }

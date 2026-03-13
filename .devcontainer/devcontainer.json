@@ -34,7 +34,18 @@
         "claude-config": {
           "target": "/home/node/.claude",
           "recommendedSource": "~/.claude",
-          "description": "Claude Code configuration and credentials"
+          "description": "Claude Code credentials, session data, and settings"
+        },
+        // CLAUDE_CONFIG_DIR puts .claude.json inside the .claude/ dir, but the
+        // host's onboarding/account state lives outside it (at ~/.claude.json).
+        // This file mount overlays the host state into the dir mount so
+        // interactive claude doesn't re-prompt for sign-in.
+        "claude-config-json": {
+          "target": "/home/node/.claude/.claude.json",
+          "recommendedSource": "~/.claude.json",
+          "sourceMustBe": "file",
+          "description": "Claude Code state (onboarding, account cache)",
+          "hint": "Run 'claude' on the host first to create this file"
         }
       },
       "prebuildFeatures": {

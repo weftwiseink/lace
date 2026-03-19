@@ -180,6 +180,93 @@ describe("PortAllocator", () => {
     expect(all.map((a) => a.label)).toContain("debug-proxy/debugPort");
   });
 
+  // ── ownedPorts: skip TCP probe for ports held by our container ──
+
+  // Scenario: Saved port in ownedPorts + port blocked = reuses (no reassignment)
+  it("reuses saved port when it is in ownedPorts even if port is blocked", async () => {
+    const blockedPort = 22431;
+
+    const laceDir = join(workspaceRoot, ".lace");
+    mkdirSync(laceDir, { recursive: true });
+    writeFileSync(
+      join(laceDir, "port-assignments.json"),
+      JSON.stringify({
+        assignments: {
+          "wezterm-server/hostSshPort": {
+            label: "wezterm-server/hostSshPort",
+            port: blockedPort,
+            assignedAt: "2026-02-06T00:00:00.000Z",
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    // Block the port with a TCP server
+    const server = net.createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(blockedPort, "localhost", () => resolve());
+    });
+
+    try {
+      const allocator = new PortAllocator(workspaceRoot, new Set([blockedPort]));
+      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
+
+      expect(alloc.port).toBe(blockedPort);
+      expect(alloc.assignedAt).toBe("2026-02-06T00:00:00.000Z");
+    } finally {
+      server.close();
+    }
+  });
+
+  // Scenario: Saved port NOT in ownedPorts + port blocked = reassigns
+  it("reassigns when saved port is blocked and not in ownedPorts", async () => {
+    const blockedPort = 22432;
+
+    const laceDir = join(workspaceRoot, ".lace");
+    mkdirSync(laceDir, { recursive: true });
+    writeFileSync(
+      join(laceDir, "port-assignments.json"),
+      JSON.stringify({
+        assignments: {
+          "wezterm-server/hostSshPort": {
+            label: "wezterm-server/hostSshPort",
+            port: blockedPort,
+            assignedAt: "2026-02-06T00:00:00.000Z",
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const server = net.createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(blockedPort, "localhost", () => resolve());
+    });
+
+    try {
+      // ownedPorts does NOT include blockedPort
+      const allocator = new PortAllocator(workspaceRoot, new Set([99999]));
+      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
+
+      expect(alloc.port).not.toBe(blockedPort);
+      expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
+    } finally {
+      server.close();
+    }
+  });
+
+  // Scenario: Fresh allocation is not affected by ownedPorts
+  it("fresh allocation ignores ownedPorts (no saved assignment to match)", async () => {
+    const allocator = new PortAllocator(workspaceRoot, new Set([22450]));
+    const alloc = await allocator.allocate("new-feature/newPort");
+
+    // Should allocate from range normally, not necessarily 22450
+    expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
+    expect(alloc.port).toBeLessThanOrEqual(LACE_PORT_MAX);
+    expect(alloc.label).toBe("new-feature/newPort");
+  });
+
   // Scenario: Saved file has expected structure
   it("saves assignments in the expected JSON structure", async () => {
     const allocator = new PortAllocator(workspaceRoot);

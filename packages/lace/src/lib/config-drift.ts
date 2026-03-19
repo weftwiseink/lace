@@ -8,10 +8,11 @@ import { join } from "node:path";
  * when changed. Excluded properties:
  * - postStartCommand, postAttachCommand: run on every container start,
  *   no recreation needed.
- * - forwardPorts, appPort: managed by the port allocator, which has its
- *   own persistence. Including them causes false-positive drift warnings
- *   because the allocator reassigns ports when the container's own port
- *   is "in use" during config regeneration.
+ * - forwardPorts, appPort: managed by the port allocator via its own
+ *   persistence (port-assignments.json). The allocator's ownedPorts
+ *   mechanism prevents false-positive reassignment when the container's
+ *   own port is detected as "in use," but these keys remain excluded
+ *   because port values are derived state, not user-authored config.
  */
 const RUNTIME_KEYS = [
   "containerEnv",

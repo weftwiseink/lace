@@ -53,6 +53,38 @@ import {
   deleteRuntimeFingerprint,
 } from "./config-drift";
 
+/**
+ * Query Docker for host ports held by this workspace's running container.
+ * Returns a Set of host port numbers, or an empty set if no container is
+ * running or Docker is unavailable.
+ */
+export function getContainerHostPorts(
+  workspaceFolder: string,
+  subprocess: RunSubprocess,
+): Set<number> {
+  // Find running container by devcontainer label
+  const psResult = subprocess("docker", [
+    "ps", "-q",
+    "--filter", `label=devcontainer.local_folder=${workspaceFolder}`,
+  ]);
+  const containerId = psResult.stdout.trim().split("\n")[0]?.trim();
+  if (!containerId || psResult.exitCode !== 0) return new Set();
+
+  // Get port bindings
+  const portResult = subprocess("docker", ["port", containerId]);
+  if (portResult.exitCode !== 0) return new Set();
+
+  // Parse lines like "2222/tcp -> 0.0.0.0:22425"
+  const ports = new Set<number>();
+  for (const line of portResult.stdout.split("\n")) {
+    const match = line.match(/:(\d+)\s*$/);
+    if (match) {
+      ports.add(Number(match[1]));
+    }
+  }
+  return ports;
+}
+
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
   workspaceFolder?: string;
@@ -439,7 +471,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
 
   // Step 8: Resolve all templates (auto-injected + user-written)
-  const portAllocator = new PortAllocator(workspaceFolder);
+  const ownedPorts = getContainerHostPorts(workspaceFolder, subprocess);
+  const portAllocator = new PortAllocator(workspaceFolder, ownedPorts);
   try {
     templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver);
     portAllocator.save(); // Persist assignments after successful resolution

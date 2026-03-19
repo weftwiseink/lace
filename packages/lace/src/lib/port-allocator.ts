@@ -96,8 +96,10 @@ export interface FeaturePortDeclaration {
 export class PortAllocator {
   private assignments: Map<string, PortAllocation> = new Map();
   private persistPath: string;
+  private readonly ownedPorts: Set<number>;
 
-  constructor(private workspaceFolder: string) {
+  constructor(private workspaceFolder: string, ownedPorts?: Set<number>) {
+    this.ownedPorts = ownedPorts ?? new Set();
     this.persistPath = join(
       workspaceFolder,
       ".lace",
@@ -138,13 +140,13 @@ export class PortAllocator {
   /** Allocate a port for a label. Reuses existing assignment if port is available. */
   async allocate(label: string): Promise<PortAllocation> {
     const existing = this.assignments.get(label);
-    if (existing && (await isPortAvailable(existing.port))) {
+    if (existing && (this.ownedPorts.has(existing.port) || await isPortAvailable(existing.port))) {
       return existing;
     }
 
     if (existing) {
       console.warn(
-        `Port ${existing.port} for "${label}" is in use, reassigning...`,
+        `Port ${existing.port} for "${label}" is in use by another process, reassigning...`,
       );
     }
 
@@ -168,7 +170,11 @@ export class PortAllocator {
     return allocation;
   }
 
-  /** Find first available port in range, skipping already-assigned ports. */
+  /**
+   * Find first available port in range, skipping already-assigned ports.
+   * Intentionally does NOT consult ownedPorts: new labels should get
+   * genuinely free ports, not ports already held by our container.
+   */
   private async findAvailablePort(): Promise<number | null> {
     const usedPorts = new Set(
       Array.from(this.assignments.values()).map((a) => a.port),

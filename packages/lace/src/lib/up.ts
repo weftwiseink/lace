@@ -47,6 +47,11 @@ import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
 import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag, resolveContainerName } from "./project-name";
 import { classifyWorkspace, getDetectedExtensions, verifyContainerGitVersion } from "./workspace-detector";
+import {
+  checkConfigDrift,
+  writeRuntimeFingerprint,
+  deleteRuntimeFingerprint,
+} from "./config-drift";
 
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
@@ -631,6 +636,42 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     return result;
   }
 
+  // Phase: Config drift detection
+  // Read the generated extended config and compare its runtime fingerprint
+  // against the previous run. Warn if drift is detected and --rebuild was
+  // not passed, so the user knows the container may be stale.
+  let currentFingerprint: string | undefined;
+  {
+    const extendedConfigPath = join(workspaceFolder, ".lace", "devcontainer.json");
+    try {
+      const extendedConfig = JSON.parse(
+        readFileSync(extendedConfigPath, "utf-8"),
+      ) as Record<string, unknown>;
+
+      if (rebuild) {
+        deleteRuntimeFingerprint(workspaceFolder);
+      }
+
+      const drift = checkConfigDrift(extendedConfig, workspaceFolder);
+      currentFingerprint = drift.currentFingerprint;
+
+      if (drift.drifted && !rebuild) {
+        console.warn(
+          "Warning: Runtime config has changed since the container was last created.\n" +
+          "Run `lace up --rebuild` to apply the changes, or pass " +
+          "`--remove-existing-container` directly.",
+        );
+      } else if (drift.drifted && rebuild) {
+        console.log(
+          "Runtime config changed; container will be recreated (--rebuild).",
+        );
+      }
+    } catch {
+      // If the config can't be read (shouldn't happen since we just wrote it),
+      // skip drift detection silently.
+    }
+  }
+
   // Phase: Invoke devcontainer up
   if (skipDevcontainerUp) {
     result.message = "lace up completed (devcontainer up skipped)";
@@ -643,6 +684,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     subprocess,
     devcontainerArgs,
     useExtendedConfig: true, // Always use extended config now
+    removeExistingContainer: rebuild,
   });
 
   result.phases.devcontainerUp = upResult;
@@ -652,6 +694,12 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     result.message = `devcontainer up failed: ${upResult.stderr}`;
     console.error(upResult.stderr);
     return result;
+  }
+
+  // Write the runtime fingerprint after successful container creation.
+  // This ensures the fingerprint reflects actual container state.
+  if (currentFingerprint) {
+    writeRuntimeFingerprint(workspaceFolder, currentFingerprint);
   }
 
   // ── Phase: Post-container verification ──
@@ -867,6 +915,7 @@ interface RunDevcontainerUpOptions {
   subprocess: RunSubprocess;
   devcontainerArgs: string[];
   useExtendedConfig: boolean;
+  removeExistingContainer?: boolean;
 }
 
 /**
@@ -875,10 +924,14 @@ interface RunDevcontainerUpOptions {
 function runDevcontainerUp(
   options: RunDevcontainerUpOptions,
 ): SubprocessResult {
-  const { workspaceFolder, subprocess, devcontainerArgs, useExtendedConfig } =
-    options;
+  const { workspaceFolder, subprocess, devcontainerArgs, useExtendedConfig,
+          removeExistingContainer } = options;
 
   const args = ["up"];
+
+  if (removeExistingContainer) {
+    args.push("--remove-existing-container");
+  }
 
   // Use extended config if we generated one
   if (useExtendedConfig) {

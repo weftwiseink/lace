@@ -5,8 +5,13 @@ first_authored:
 task_list: lace/devcontainer-lifecycle
 type: proposal
 state: live
-status: wip
+status: implementation_wip
 tags: [rebuild, config-drift, devcontainer, wez-into, bug-fix]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-03-19T00:00:00-07:00
+  round: 2
 ---
 
 # Fix `--rebuild` Cascading and Add Config Drift Detection
@@ -51,12 +56,12 @@ and run `lace up` (without `--rebuild`) expecting the change to take effect.
 When `rebuild` is true in `UpOptions`, include `--rebuild-container` in the args
 passed to `runDevcontainerUp()`.
 
-> NOTE: We use `--remove-existing-container` rather than `--rebuild` because the
-> `devcontainer` CLI's `--rebuild` flag triggers a full image rebuild which would
-> duplicate the work already done by lace's prebuild phase. The
-> `--remove-existing-container` flag removes the container but reuses the existing
-> image, which is the correct behavior when the prebuild image is already fresh.
-> Verify this distinction against the devcontainer CLI docs before implementation.
+> NOTE(opus/devcontainer-lifecycle): We use `--remove-existing-container` rather
+> than `--rebuild` because the `devcontainer` CLI's `--rebuild` flag triggers a
+> full image rebuild which would duplicate the work already done by lace's prebuild
+> phase. The `--remove-existing-container` flag removes the container but reuses
+> the existing image, which is the correct behavior when the prebuild image is
+> already fresh. Verified against `devcontainer up --help`.
 
 The change is in `runDevcontainerUp()` at `lib/up.ts:875-895`:
 
@@ -157,9 +162,19 @@ const RUNTIME_KEYS = [
   "appPort",
   "remoteUser",
   "postCreateCommand",
-  "postStartCommand",
-  "postAttachCommand",
+  // NOTE(opus/devcontainer-lifecycle): postStartCommand and postAttachCommand
+  // are intentionally excluded. They run on every container start and do not
+  // require container recreation to take effect.
 ] as const;
+
+/** Deterministic JSON serialization with sorted keys at every depth. */
+function sortedStringify(obj: unknown): string {
+  return JSON.stringify(obj, (_, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)))
+      : v
+  );
+}
 
 function computeRuntimeFingerprint(
   config: Record<string, unknown>,
@@ -171,7 +186,7 @@ function computeRuntimeFingerprint(
     }
   }
   return createHash("sha256")
-    .update(JSON.stringify(subset, null, 0))
+    .update(sortedStringify(subset))
     .digest("hex")
     .slice(0, 16);
 }
@@ -232,16 +247,16 @@ fi
 This would let users run `wez-into --start --rebuild clauthier` as a single
 command to pick up config changes after stopping a container.
 
+> NOTE(opus/devcontainer-lifecycle): `--rebuild` should be added to `wez-into`'s
+> option parsing near the `--start` flag and documented in its usage output.
+
 ## Important Design Decisions
 
 1. **`--remove-existing-container` vs `--rebuild` for the devcontainer CLI.**
    The devcontainer CLI's `--rebuild` triggers both container removal AND image
    rebuild, which would duplicate lace's prebuild work. `--remove-existing-container`
    only removes the container and lets it be recreated from the existing image.
-   This is more efficient and avoids redundant builds. However, this needs
-   verification against the CLI docs -- if `--remove-existing-container` is not a
-   supported flag, `--rebuild` may be the only option (and the double image build
-   is acceptable).
+   This is more efficient and avoids redundant builds.
 
 2. **Warning vs auto-rebuild on drift.** Auto-rebuild is tempting but removing a
    running container is destructive. Users may have unsaved state, running
@@ -270,9 +285,8 @@ command to pick up config changes after stopping a container.
 - **Multiple worktrees of the same project:** Each worktree has its own `.lace/`
   directory and its own fingerprint. No collision.
 - **Config changes that are semantically equivalent but serialize differently:**
-  JSON key ordering, whitespace, etc. Using `JSON.stringify` with sorted keys
-  or a canonical serialization would prevent false positives. The initial
-  implementation should use deterministic serialization.
+  Handled by `sortedStringify()`, which recursively sorts keys at every depth
+  before serialization.
 
 ## Test Plan
 
@@ -295,6 +309,9 @@ command to pick up config changes after stopping a container.
 - **Unit test:** Drift detection warns when fingerprint changes and `rebuild` is
   false.
 - **Unit test:** Drift detection does not warn when fingerprint is unchanged.
+- **Unit test:** `computeRuntimeFingerprint` produces the same hash for two
+  configs with identical keys inserted in different order (verifies deterministic
+  serialization).
 - **Integration test:** Change `containerEnv` → `lace up` → observe warning →
   `lace up --rebuild` → verify new env var is present in container.
 
@@ -320,12 +337,15 @@ After implementing each phase:
 2. When the flag is true, push `--remove-existing-container` into the `args`
    array in `runDevcontainerUp()`.
 3. Pass `removeExistingContainer: rebuild` at the call site (`lib/up.ts:641`).
-4. Add unit tests for the new flag handling.
-5. Manually verify with the clauthier project.
+4. Update the `--rebuild` flag description in `commands/up.ts` from
+   "Force rebuild of prebuild image (bypass cache)" to
+   "Force full rebuild: rebuild prebuild image and recreate container".
+5. Add unit tests for the new flag handling.
+6. Manually verify with the clauthier project.
 
-> NOTE: Verify that the `devcontainer` CLI supports `--remove-existing-container`
-> as a flag to `devcontainer up`. If not, use `--rebuild` instead and accept the
-> redundant image build.
+> NOTE(opus/devcontainer-lifecycle): Verified. `devcontainer up --help` confirms
+> `--remove-existing-container` is a supported flag:
+> `--remove-existing-container  Removes the dev container if it already exists.  [boolean] [default: false]`
 
 ### Phase 2: Config drift detection
 

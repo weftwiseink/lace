@@ -624,6 +624,112 @@ describe("lace up: devcontainer up integration", () => {
   });
 });
 
+describe("lace up: --rebuild forwards --remove-existing-container", () => {
+  it("includes --remove-existing-container when rebuild is true", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      rebuild: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const upCall = mockCalls.find(
+      (c) => c.command === "devcontainer" && c.args[0] === "up",
+    );
+    expect(upCall).toBeDefined();
+    expect(upCall?.args).toContain("--remove-existing-container");
+  });
+
+  it("does NOT include --remove-existing-container when rebuild is false", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      rebuild: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const upCall = mockCalls.find(
+      (c) => c.command === "devcontainer" && c.args[0] === "up",
+    );
+    expect(upCall).toBeDefined();
+    expect(upCall?.args).not.toContain("--remove-existing-container");
+  });
+
+  it("does NOT include --remove-existing-container when rebuild is omitted", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const upCall = mockCalls.find(
+      (c) => c.command === "devcontainer" && c.args[0] === "up",
+    );
+    expect(upCall).toBeDefined();
+    expect(upCall?.args).not.toContain("--remove-existing-container");
+  });
+});
+
+describe("lace up: runtime fingerprint lifecycle", () => {
+  it("writes fingerprint after successful devcontainer up", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    const fpPath = join(laceDir, "runtime-fingerprint");
+    expect(existsSync(fpPath)).toBe(true);
+    const fp = readFileSync(fpPath, "utf-8").trim();
+    expect(fp).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("does not write fingerprint when devcontainer up is skipped", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const fpPath = join(laceDir, "runtime-fingerprint");
+    expect(existsSync(fpPath)).toBe(false);
+  });
+
+  it("deletes fingerprint before drift check when rebuild is true", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    // Write an old fingerprint
+    mkdirSync(laceDir, { recursive: true });
+    writeFileSync(join(laceDir, "runtime-fingerprint"), "oldfingerprint12\n", "utf-8");
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      rebuild: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // New fingerprint should be written (not the old one)
+    const fp = readFileSync(join(laceDir, "runtime-fingerprint"), "utf-8").trim();
+    expect(fp).not.toBe("oldfingerprint12");
+    expect(fp).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
 describe("lace up: devcontainer.json missing", () => {
   it("exits with error", async () => {
     // Don't set up workspace

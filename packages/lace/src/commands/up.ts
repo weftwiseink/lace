@@ -55,7 +55,7 @@ export const upCommand = defineCommand({
     },
     "rebuild": {
       type: "boolean",
-      description: "Force rebuild of prebuild image (bypass cache)",
+      description: "Force full rebuild: rebuild prebuild image and recreate container",
       default: false,
     },
   },

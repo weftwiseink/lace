@@ -150,10 +150,18 @@ start_and_connect() {
   # diagnostic instead of a confusing "No such file or directory" + 20s of retries.
   verify_lace_cli "$lace_cli" || exit 1
 
-  info "starting $project via lace up --workspace-folder $workspace_path ..."
+  local rebuild_flag=""
+  if [[ "$REBUILD" == "true" ]]; then
+    rebuild_flag=" --rebuild"
+  fi
+  info "starting $project via lace up --workspace-folder $workspace_path$rebuild_flag ..."
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "lace up --workspace-folder $workspace_path"
+    local dry_args="lace up --workspace-folder $workspace_path"
+    if [[ "$REBUILD" == "true" ]]; then
+      dry_args+=" --rebuild"
+    fi
+    echo "$dry_args"
     echo "# then: wezterm cli spawn -- ssh -p <port> ... node@localhost"
     echo "# then: wezterm cli set-tab-title --pane-id <id> $project"
     exit 0
@@ -179,7 +187,12 @@ start_and_connect() {
 
   local up_exit=0
 
-  "$lace_cli" up --workspace-folder "$workspace_path" 2>&1 \
+  local lace_args=("up" "--workspace-folder" "$workspace_path")
+  if [[ "$REBUILD" == "true" ]]; then
+    lace_args+=("--rebuild")
+  fi
+
+  "${lace_cli}" "${lace_args[@]}" 2>&1 \
     | tee "$up_logfile" >&2 \
     || up_exit=$?
 
@@ -344,11 +357,16 @@ PROJECT=""
 ACTION=""
 DRY_RUN=false
 START=false
+REBUILD=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --start)
       START=true
+      shift
+      ;;
+    --rebuild)
+      REBUILD=true
       shift
       ;;
     --list)
@@ -583,6 +601,7 @@ Usage:
   wez-into <project>          Connect to named project
   wez-into --start <project>  Start a stopped container, then connect
   wez-into --start            Pick from stopped containers to start
+  wez-into --start --rebuild <project>  Start with full rebuild (recreate container)
   wez-into --list             List running project names
   wez-into --status           Show running projects with ports and paths
   wez-into --dry-run <proj>   Print the connect command without executing
@@ -605,6 +624,11 @@ generation, port allocation, lifecycle hooks). After startup, it re-discovers
 the container and connects. If the project is already running, --start has
 no effect (it just connects).
 
+The --rebuild flag (used with --start) passes --rebuild to `lace up`, which
+rebuilds the prebuild image and recreates the container from current config.
+Use this after changing devcontainer.json to pick up runtime config changes
+(environment variables, mounts, workspace folder, etc.).
+
 The --dry-run flag prints the command(s) that would be executed without
 actually running them. When combined with --start, it prints both the
 lace up command and the wezterm cli spawn command.
@@ -616,6 +640,7 @@ Examples:
   wez-into --start lace        Start lace if stopped, then connect
   wez-into --start             Pick from stopped containers to start
   wez-into --start --dry-run lace  Show what --start would do
+  wez-into --start --rebuild lace  Rebuild lace container from current config
   wez-into --list              Show names of running projects
   wez-into --status            Show a table of running projects
   wez-into --dry-run lace      Print the connect command for lace

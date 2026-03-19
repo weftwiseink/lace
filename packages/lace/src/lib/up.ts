@@ -668,7 +668,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       }
     } catch {
       // If the config can't be read (shouldn't happen since we just wrote it),
-      // skip drift detection silently.
+      // skip drift detection silently. Consequence: currentFingerprint remains
+      // undefined, so no fingerprint is written after devcontainer up, and the
+      // next run will not detect drift from this session.
     }
   }
 

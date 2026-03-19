@@ -397,6 +397,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate flag combinations
+if [[ "$REBUILD" == "true" && "$START" != "true" ]]; then
+  info "warning: --rebuild has no effect without --start (ignored)"
+fi
+
 # --- Host key management ---
 # Refresh the host key for a port in the lace known_hosts file.
 # Removes any stale entry (from container recreation) and pre-populates

@@ -142,6 +142,14 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).toBe(fp2);
   });
 
+  it("treats null RUNTIME_KEY value differently from absent key", () => {
+    const fp1 = computeRuntimeFingerprint({ containerEnv: null });
+    const fp2 = computeRuntimeFingerprint({});
+    // null is present in the subset (key exists), while absent is not.
+    // These should differ because the serialization differs.
+    expect(fp1).not.toBe(fp2);
+  });
+
   it("ignores forwardPorts and appPort (managed by port allocator)", () => {
     const fp1 = computeRuntimeFingerprint({
       workspaceFolder: "/workspace",

@@ -728,6 +728,35 @@ describe("lace up: runtime fingerprint lifecycle", () => {
     expect(fp).not.toBe("oldfingerprint12");
     expect(fp).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  it("warns on drift when fingerprint changes and rebuild is false", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    // First run: establish fingerprint
+    await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+    });
+
+    // Modify a runtime-affecting property by writing a different config
+    // that will produce a different fingerprint on next run.
+    // We achieve this by writing a stale fingerprint that won't match.
+    writeFileSync(join(laceDir, "runtime-fingerprint"), "stale_fingerprin\n", "utf-8");
+
+    const warnSpy = vi.spyOn(console, "warn");
+    try {
+      const result = await runUp({
+        workspaceFolder: workspaceRoot,
+        subprocess: createMock(),
+      });
+      expect(result.exitCode).toBe(0);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Runtime config has changed"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("lace up: devcontainer.json missing", () => {

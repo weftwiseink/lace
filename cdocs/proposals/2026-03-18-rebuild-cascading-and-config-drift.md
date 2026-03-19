@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/devcontainer-lifecycle
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_accepted
 tags: [rebuild, config-drift, devcontainer, wez-into, bug-fix]
 last_reviewed:
   status: accepted

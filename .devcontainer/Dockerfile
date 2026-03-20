@@ -36,15 +36,15 @@ RUN mkdir -p /usr/local/share/npm-global && \
 #
 # https://code.claude.com/docs/en/devcontainer
 #
-# Create workspace and config directories and set permissions (as root)
-RUN mkdir -p /workspace /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH} && \
+# Create config directories and set permissions (as root)
+# The workspace directory (/workspaces/lace) is created empty here and populated
+# at runtime by the bind mount. No source files are copied into it.
+RUN mkdir -p /workspaces /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH} && \
     touch ${COMMAND_HISTORY_PATH}/.bash_history && \
-    chown -R ${USERNAME}:${USERNAME} /workspace /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH}
+    chown -R ${USERNAME}:${USERNAME} /workspaces /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH}
 
 # Persist bash history from https://github.com/anthropics/claude-code/blob/main/.devcontainer/Dockerfile
 RUN echo "export PROMPT_COMMAND='history -a' && export HISTFILE=${COMMAND_HISTORY_PATH}/.bash_history" >> /home/${USERNAME}/.bashrc
-
-WORKDIR /workspace
 
 # Install git-delta (as root)
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -76,9 +76,12 @@ USER ${USERNAME}
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 
-# Copy package files and install dependencies as node user
+# Build-time dependency cache (isolated from runtime workspace).
+# Only package metadata is copied; the full source is provided by bind mount at runtime.
+# The pnpm install here pre-warms the pnpm content-addressable store in the image layer.
+WORKDIR /build
 COPY --chown=${USERNAME}:${USERNAME} package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# Copy source files
-COPY --chown=${USERNAME}:${USERNAME} . .
+# Runtime workspace (populated by bind mount, not by COPY)
+WORKDIR /workspaces

@@ -1916,9 +1916,9 @@ describe("lace up: workspace layout — worktree auto-generation", () => {
       readFileSync(join(worktreeDir, ".lace", "devcontainer.json"), "utf-8"),
     );
     expect(generatedConfig.workspaceMount).toBe(
-      `source=${workspaceRoot},target=/workspace,type=bind,consistency=delegated`,
+      `source=${workspaceRoot},target=/workspaces,type=bind,consistency=delegated`,
     );
-    expect(generatedConfig.workspaceFolder).toBe("/workspace/main");
+    expect(generatedConfig.workspaceFolder).toBe("/workspaces/main");
     // postCreateCommand should have safe.directory
     expect(generatedConfig.postCreateCommand).toContain("safe.directory");
   });

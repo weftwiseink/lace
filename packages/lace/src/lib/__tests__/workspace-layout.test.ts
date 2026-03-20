@@ -61,7 +61,7 @@ describe("extractWorkspaceConfig", () => {
     });
     expect(result).toEqual({
       layout: "bare-worktree",
-      mountTarget: "/workspace",
+      mountTarget: "/workspaces",
       postCreate: {
         safeDirectory: true,
         scanDepth: 2,
@@ -129,9 +129,9 @@ describe("applyWorkspaceLayout", () => {
 
     expect(result.status).toBe("applied");
     expect(config.workspaceMount).toBe(
-      `source=${root},target=/workspace,type=bind,consistency=delegated`,
+      `source=${root},target=/workspaces,type=bind,consistency=delegated`,
     );
-    expect(config.workspaceFolder).toBe("/workspace/main");
+    expect(config.workspaceFolder).toBe("/workspaces/main");
   });
 
   it("respects user-set workspaceMount", () => {
@@ -154,7 +154,7 @@ describe("applyWorkspaceLayout", () => {
       "source=/custom/path,target=/custom,type=bind",
     );
     // workspaceFolder should still be auto-generated
-    expect(config.workspaceFolder).toBe("/workspace/main");
+    expect(config.workspaceFolder).toBe("/workspaces/main");
   });
 
   it("respects user-set workspaceFolder", () => {
@@ -176,7 +176,7 @@ describe("applyWorkspaceLayout", () => {
     expect(config.workspaceFolder).toBe("/custom/folder");
     // workspaceMount should still be auto-generated
     expect(config.workspaceMount).toBe(
-      `source=${root},target=/workspace,type=bind,consistency=delegated`,
+      `source=${root},target=/workspaces,type=bind,consistency=delegated`,
     );
   });
 
@@ -272,7 +272,7 @@ describe("applyWorkspaceLayout", () => {
     const result = applyWorkspaceLayout(config, root);
 
     expect(result.status).toBe("applied");
-    expect(config.workspaceFolder).toBe("/workspace");
+    expect(config.workspaceFolder).toBe("/workspaces");
     expect(result.message).toContain("bare-repo root");
   });
 

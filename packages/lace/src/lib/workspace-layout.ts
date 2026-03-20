@@ -61,7 +61,7 @@ export function extractWorkspaceConfig(
   return {
     layout: "bare-worktree",
     mountTarget:
-      typeof ws.mountTarget === "string" ? ws.mountTarget : "/workspace",
+      typeof ws.mountTarget === "string" ? ws.mountTarget : "/workspaces",
     postCreate: {
       safeDirectory:
         postCreate && typeof postCreate.safeDirectory === "boolean"
@@ -92,7 +92,7 @@ export function applyWorkspaceLayout(
     };
   }
 
-  const mountTarget = wsConfig.mountTarget ?? "/workspace";
+  const mountTarget = wsConfig.mountTarget ?? "/workspaces";
   const warnings: string[] = [];
   const result = classifyWorkspace(workspaceFolder);
 

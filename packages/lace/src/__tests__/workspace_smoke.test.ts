@@ -344,9 +344,9 @@ describe.skipIf(!gitAvailable)("workspace smoke tests", () => {
         readFileSync(join(worktreeDir, ".lace", "devcontainer.json"), "utf-8"),
       );
       expect(generated.workspaceMount).toBe(
-        `source=${resolve(repo.root)},target=/workspace,type=bind,consistency=delegated`,
+        `source=${resolve(repo.root)},target=/workspaces,type=bind,consistency=delegated`,
       );
-      expect(generated.workspaceFolder).toBe("/workspace/main");
+      expect(generated.workspaceFolder).toBe("/workspaces/main");
     });
 
     it("generates correct config for bare-root entry", async () => {
@@ -381,7 +381,7 @@ describe.skipIf(!gitAvailable)("workspace smoke tests", () => {
         readFileSync(join(repo.root, ".lace", "devcontainer.json"), "utf-8"),
       );
       // bare-root: workspaceFolder = mountTarget (no worktree suffix)
-      expect(generated.workspaceFolder).toBe("/workspace");
+      expect(generated.workspaceFolder).toBe("/workspaces");
     });
 
     it("injects safe.directory into postCreateCommand", async () => {
@@ -558,7 +558,7 @@ describe.skipIf(!gitAvailable)("workspace smoke tests", () => {
         readFileSync(join(worktreeDir, ".lace", "devcontainer.json"), "utf-8"),
       );
       expect(generated.workspaceMount).toBeDefined();
-      expect(generated.workspaceFolder).toBe("/workspace/main");
+      expect(generated.workspaceFolder).toBe("/workspaces/main");
     });
 
     it("validation failure halts pipeline", async () => {
@@ -661,7 +661,7 @@ describe.skipIf(!gitAvailable)("workspace smoke tests", () => {
         readFileSync(join(worktreeDir, ".lace", "devcontainer.json"), "utf-8"),
       );
       expect(generated.workspaceMount).toBeDefined();
-      expect(generated.workspaceFolder).toBe("/workspace/main");
+      expect(generated.workspaceFolder).toBe("/workspaces/main");
     });
   });
 });

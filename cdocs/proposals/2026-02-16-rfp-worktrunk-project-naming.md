@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-16T13:00:00-06:00
 task_list: worktrunk/project-naming
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [worktrunk, lace-discover, wez-into, naming, container-naming, docker, workspace-detector]
 last_reviewed:
   status: accepted

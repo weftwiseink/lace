@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-11T12:00:00-06:00
 task_list: lace/up-pipeline
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [lace-up, validation-architecture, container-verification, git-extensions, docker-no-cache]
 related_to:
   - cdocs/proposals/2026-03-10-git-relativeworktrees-version-mismatch.md

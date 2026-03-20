@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-01T12:00:00-08:00
 task_list: lace/devcontainer-workflow
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 tags: [devcontainer, wezterm, developer-experience, workflow-automation, automation]
 last_reviewed:

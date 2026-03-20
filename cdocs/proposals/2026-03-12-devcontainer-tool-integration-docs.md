@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-12T16:15:56-07:00
 task_list: lace/docs
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"

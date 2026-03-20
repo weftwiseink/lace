@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-24T14:30:00-06:00
 task_list: lace/wezterm-server
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [ssh, mount-templates, wezterm-server, validation, ux, error-handling, devcontainer, file-mount]
 last_reviewed:
   status: accepted

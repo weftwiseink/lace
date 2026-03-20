@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-03T18:00:00-08:00
 task_list: lace/devcontainer-features
 type: proposal
-state: live
+state: archived
 status: result_accepted
 tags: [testing, neovim, devcontainer-features, mounts, scenario-tests, docker, documentation]
 references:

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-14T22:00:00-08:00
 task_list: lace/template-variables
 type: proposal
-state: live
+state: archived
 status: evolved
 superseded_by: cdocs/proposals/2026-02-15-mount-accessor-api.md
 tags: [mount-resolver, template-variables, settings, extensibility]

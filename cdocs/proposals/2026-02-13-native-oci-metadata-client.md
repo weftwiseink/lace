@@ -26,7 +26,7 @@ revisions:
       - "Clarified Phase 3 scope: only remove subprocess pass-through to fetchAllFeatureMetadata (R1 Finding 21)"
 task_list: lace/feature-metadata
 type: proposal
-state: live
+state: archived
 status: evolved
 superseded_by: cdocs/proposals/2026-02-13-hybrid-oci-metadata-fallback.md
 tags: [feature-metadata, oci, http, native-client, tarball-fallback, performance, zero-dependencies]

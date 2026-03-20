@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-22T16:00:00-05:00
 task_list: lace/wez-into
 type: proposal
-state: live
-status: in_review
+state: archived
+status: implementation_accepted
 tags: [ux, error-handling, wez-into, lace-up, retry, messaging, bash, typescript]
 related_to:
   - cdocs/reports/2026-02-22-wez-into-error-propagation-and-messaging.md

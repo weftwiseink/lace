@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-16T14:00:00-05:00
 task_list: lace/progress-output
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: evolved
 tags: [cli, ux, progress, subprocess, devcontainer]
 ---
 

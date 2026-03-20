@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-14T12:00:00-06:00
 task_list: lace/settings
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: result_accepted
 tags: [settings, cleanup, breaking-change]
 last_reviewed:
   status: accepted

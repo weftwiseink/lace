@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-13T12:30:00-08:00
 task_list: lace/feature-metadata
 type: proposal
-state: live
+state: archived
 status: evolved
 tags: [feature-metadata, oci, error-handling, robustness, nushell, third-party-features]
 references:

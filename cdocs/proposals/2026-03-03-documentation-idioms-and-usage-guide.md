@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-03T12:00:00-08:00
 task_list: lace/documentation
 type: proposal
-state: live
+state: archived
 status: result_accepted
 tags: [documentation, architecture, onboarding, migration, contributing, troubleshooting, idioms]
 last_reviewed:

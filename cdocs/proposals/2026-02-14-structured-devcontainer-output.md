@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-14T09:40:00-08:00
 task_list: lace/structured-output
 type: proposal
-state: live
+state: archived
 status: rejected
 rejection_notes: "Rejected per assessment report. Mixed object/string mount output is worse for legibility than uniform strings. The mount template variable system (RFP at `cdocs/proposals/2026-02-14-mount-template-variables.md`) will reshape the pipeline, making this refactor premature. Valuable findings extracted: `existing.join(\" \")` bug fix, mount string validation (standalone), research report archived."
 last_reviewed:

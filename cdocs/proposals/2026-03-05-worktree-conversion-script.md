@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-05T14:00:00-06:00
 task_list: lace/worktree-tooling
 type: proposal
-state: live
+state: archived
 status: result_accepted
 tags: [worktree, bare-worktree, clone, nushell, git, workspace-layout, dotfiles, chezmoi]
 related_to:

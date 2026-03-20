@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-18T00:00:00-07:00
 task_list: lace/devcontainer-lifecycle
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 tags: [rebuild, config-drift, devcontainer, wez-into, bug-fix]
 last_reviewed:

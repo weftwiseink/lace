@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-13T20:00:00-08:00
 task_list: lace/feature-metadata
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 revisions:
   - at: 2026-02-14T00:00:00-08:00

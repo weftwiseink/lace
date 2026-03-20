@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-25T14:30:00-06:00
 task_list: lace/wezterm-server
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 tags: [wezterm-server, devcontainer, workspace, mux-server, entrypoint, containerEnv, dx, cleanup]
 last_reviewed:

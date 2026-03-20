@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-15T12:00:00-08:00
 task_list: lace/template-variables
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: implementation_accepted
 tags: [mount-resolver, template-variables, settings, api-design, auto-injection, validation]
 last_reviewed:
   status: accepted

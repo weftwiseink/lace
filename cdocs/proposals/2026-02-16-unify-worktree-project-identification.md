@@ -4,8 +4,8 @@ first_authored:
   at: 2026-02-16T23:15:00-06:00
 task_list: worktrunk/project-identification
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [worktree, project-id, mounts, naming, deriveProjectId, mount-resolver, UX, bind-mounts]
 last_reviewed:
   status: accepted

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-15T22:30:00-08:00
 task_list: lace/workspace-validation
 type: proposal
-state: live
+state: archived
 status: implemented
 tags: [testing, smoke-test, workspace, validation, acceptance, e2e]
 last_reviewed:

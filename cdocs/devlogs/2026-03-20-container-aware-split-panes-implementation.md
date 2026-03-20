@@ -37,30 +37,180 @@ Five implementation phases per the proposal:
 
 ### Phase 1: ExecDomain Registration
 
-(updated as work proceeds)
+Added to `lace.wezterm/plugin/init.lua`:
+- Utility helpers: `shell_escape`, `nonempty`, `basename`, `extract_lace_port`
+- ExecDomain infrastructure: `build_ssh_args`, `make_exec_fixup`, `setup_exec_domains`
+- Workspace resolution: `resolve_port_workspaces` (docker inspect for CONTAINER_WORKSPACE_FOLDER)
+- GLOBAL metadata: `lace_plugin_opts`, `lace_port_users`, `lace_port_workspaces`
+- SSH domains renamed from `lace:<port>` to `lace-mux:<port>`
+- `setup_port_domains` now returns `port_users, port_containers` for GLOBAL storage
+
+Config validation: `ls-fonts` parse check passed.
 
 ### Phase 2: Picker and wez-into
 
-(updated as work proceeds)
+Plugin picker tab mode: switched from `mux_win:spawn_tab({ args = ssh_args })` to `mux_win:spawn_tab({ domain = { DomainName = "lace:" .. port } })`.
+Picker also updates `lace_port_users` in GLOBAL at selection time.
+Added `M.get_connection_info(key)` public API.
+
+wez-into `do_connect`: replaced raw SSH spawn with `wezterm cli spawn --domain-name "lace:$port"`.
+Removed `workspace_dir` resolution (now handled by ExecDomain fixup).
+Updated cold-start fallback to `lace-mux:$port`.
+Updated help text and dry-run output.
 
 ### Phase 3: Bypass Bindings
 
-(updated as work proceeds)
+> NOTE(opus/split-pane-regression): The proposal specified `domain = "DefaultDomain"` directly in `act.SplitPane`.
+> This is wrong: `domain` is not a valid SplitPane field.
+> The correct syntax is `command = { domain = "DefaultDomain" }` (domain goes in the SpawnCommand).
+> The `ls-fonts` parse check caught this immediately.
+
+Added Alt+Shift+HJKL bindings with `command = { domain = "DefaultDomain" }`.
+Validated via:
+- `ls-fonts` parse check: passed
+- `show-keys` diff: exactly 4 new SplitPane entries with DefaultDomain
+- `copy_mode` diff: no changes (no regressions)
+- `chezmoi apply`: deployed successfully
 
 ### Phase 4: Documentation
 
-(updated as work proceeds)
+Added Connection Domain Architecture block comment to `plugin/init.lua` (lines 50-79).
+Documents all three domain types, their purposes, and current status.
 
 ### Phase 5: End-to-End Testing
 
-(updated as work proceeds)
+#### Bug Fix: wezterm.GLOBAL String Key Requirement
+
+> NOTE(opus/split-pane-regression): ExecDomain fixup crashed with "can only index objects using string values".
+> `wezterm.GLOBAL` tables only accept string keys, but port numbers were stored as numeric keys.
+> Fix: `tostring(port)` for all GLOBAL table access.
+> This was not documented in WezTerm's Lua API and was only discoverable at runtime.
+
+#### Stale Domain Registry After Config Reload
+
+> NOTE(opus/split-pane-regression): WezTerm's mux server retains domain registrations across config reloads.
+> After renaming SSH domains from `lace:<port>` to `lace-mux:<port>`, the old `lace:<port>` SSH domains
+> persisted in the mux server's registry, shadowing the new ExecDomains with the same name.
+> SIGHUP to the mux server (PID) cleared stale state; the GUI respawned it with fresh config.
+> This is a one-time deployment requirement: existing WezTerm instances need a mux server restart
+> after deploying the domain rename.
+
+#### Test Results (post-fix)
+
+**ExecDomain spawn (lace container, port 22427):**
+```
+SOCKET=UNSET          # Confirms ExecDomain, not SSH mux
+HOST=f73e84ead1d8     # In container
+CWD=/workspaces/lace/main
+USER=node
+```
+
+**Split pane inheritance (split from lace pane):**
+```
+SOCKET=UNSET          # Split also uses ExecDomain
+HOST=f73e84ead1d8     # Same container as parent
+CWD=/workspaces/lace/main
+USER=node
+```
+
+**ExecDomain spawn (clauthier container, port 22426):**
+```
+SOCKET=UNSET
+HOST=e7a6dbd82eb6     # Different container
+CWD=/workspace/lace/main
+USER=node
+```
+
+**Cross-container split isolation (split from clauthier pane):**
+```
+SOCKET=UNSET
+HOST=e7a6dbd82eb6     # Stays in clauthier, not lace
+CWD=/workspace/lace/main
+```
+
+**Config reload resilience:** All 5 panes survived config file touch + reload.
+
+**Bypass bindings (`show-keys` output):**
+```
+{ key = 'H', mods = 'ALT', action = act.SplitPane{ command = { domain = 'DefaultDomain' }, ... } }
+{ key = 'h', mods = 'ALT', action = act.SplitPane{ command = { domain = 'CurrentPaneDomain' }, ... } }
+```
+Both regular (`CurrentPaneDomain`) and bypass (`DefaultDomain`) bindings coexist correctly.
+
+> NOTE(opus/split-pane-regression): Bypass bindings (Alt+Shift+HJKL opening host shell in container tab)
+> require manual keyboard testing, which cannot be automated via `wezterm cli`.
+
+**wez-into dry-run output:**
+```
+wezterm cli spawn --domain-name "lace:$port"
+# Fallback (no mux): wezterm connect "lace-mux:$port" --workspace main
+```
+
+## Debugging Process
+
+### Phase 1: Root Cause Investigation
+
+Initial ExecDomain spawn returned SSH mux socket evidence (`WEZTERM_UNIX_SOCKET` set in pane).
+`wezterm cli spawn --domain-name "lace-mux:22427"` returned "invalid domain name" listing only `lace:*` names.
+This confirmed stale SSH domain registrations shadowing new ExecDomains.
+
+### Phase 2: Pattern Analysis
+
+- Stale domains: old `lace:<port>` SSH domains from pre-rename config
+- New `lace-mux:<port>` SSH domains not visible in mux server registry
+- New `lace:<port>` ExecDomains shadowed by old SSH domains of same name
+
+### Phase 3: Hypothesis Tested
+
+Hypothesis: SIGHUP to mux server clears stale domain state.
+Result: mux server terminated; GUI respawned it with fresh config.
+Post-restart spawn correctly used ExecDomain (SOCKET=UNSET).
+
+Second issue: ExecDomain fixup Lua error "can only index objects using string values".
+Hypothesis: `wezterm.GLOBAL` serializes tables with string-only keys.
+Fix: `tostring(port)` for all GLOBAL table indexing.
+Result: ExecDomain fixup works correctly.
+
+### Phase 4: Fix Implemented
+
+Two fixes applied:
+1. SIGHUP mux server restart (one-time deployment step)
+2. `tostring(port)` for all `wezterm.GLOBAL` table access (commit `2609c3c`)
 
 ## Changes Made
 
 | File | Change |
 |------|--------|
-| (updated as work proceeds) | |
+| `lace.wezterm/plugin/init.lua` | ExecDomain registration, GLOBAL metadata, SSH domain rename, string key fix |
+| `bin/wez-into` | Switched to ExecDomain spawn, updated cold-start fallback |
+| `dotfiles/dot_config/wezterm/wezterm.lua` | Alt+Shift+HJKL bypass bindings |
+
+## Commits
+
+| Repo | Hash | Description |
+|------|------|-------------|
+| lace.wezterm | `6e694ae` | Phase 1: ExecDomain registration |
+| lace.wezterm | `ae61d55` | Phase 2: Picker ExecDomain spawn |
+| lace.wezterm | `8286def` | Phase 4: Connection domain docs |
+| lace.wezterm | `2609c3c` | Fix: string keys for GLOBAL tables |
+| lace/main | `c157a15` | Devlog/proposal status |
+| lace/main | `529debe` | Phase 2: wez-into ExecDomain spawn |
+| dotfiles | `49222f7` | Phase 3: Bypass bindings |
 
 ## Verification
 
-(updated with evidence as phases complete)
+**ExecDomain mechanism:** Verified via `WEZTERM_UNIX_SOCKET=UNSET` in spawned panes (5 panes tested across 2 containers).
+
+**Split inheritance:** Splits from container panes land in the same container (verified hostname match, ExecDomain confirmation).
+
+**Multi-container isolation:** Splits in lace tab stay in lace; splits in clauthier tab stay in clauthier.
+
+**Config validation:**
+- `ls-fonts` parse check: no errors on stderr
+- `show-keys` diff: 8 SplitPane bindings (4 CurrentPaneDomain + 4 DefaultDomain)
+- Config reload: all panes survived
+
+**Remaining manual testing:**
+- Bypass bindings (Alt+Shift+HJKL) require keyboard interaction
+- Picker tab creation flow requires GUI interaction
+- `wez-into` from host shell (requires TTY)

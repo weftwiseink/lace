@@ -6,6 +6,11 @@ task_list: devcontainer/weftwise-migration
 type: devlog
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-sonnet-4-6"
+  at: 2026-03-20T17:15:00-07:00
+  round: 1
 tags: [devcontainer, workspace_paths, weftwise, migration, implementation]
 ---
 
@@ -177,3 +182,24 @@ All 7 test plan items pass:
 > WARN(opus/weftwise-migration): Worktree operations (item 7) are not directly tested.
 > The scripts reference correct paths, but no worktree was created/listed inside the container.
 > This is a manual verification gap.
+> TODO(opus/weftwise-migration): Create and verify a worktree inside the container to close this gap.
+
+### R1 review revisions
+
+Review: `cdocs/reviews/2026-03-20-review-of-weftwise-migration-implementation.md`
+
+**Blocking issue 1: `migrate_devcontainer_volumes.sh` stale `-workspace` references.**
+Lines 72 and 76 retained the old `-workspace` path encoding for the session symlink logic.
+Fixed: updated to `-workspaces-weftwise`.
+
+**Blocking issue 2: Mount overlap between `claude-config-json` and `claude-code/config`.**
+Investigated: the file mount (`~/.claude.json` -> `/home/node/.claude/.claude.json`) and directory mount (`~/.claude` -> `/home/node/.claude`) do overlap.
+Docker preserves the more-specific file mount: verified by checking that the container reads `"numStartups": 154` from `~/.claude.json` (host HOME root), not `"cachedGrowthBookFeatures"` from `~/.claude/.claude.json` (inside the directory mount).
+The two host files contain different data, confirming the file mount is not redundant: it sources the correct onboarding state.
+Added NOTE comment to `devcontainer.json` documenting the overlap and expected behavior.
+
+```
+Host ~/.claude.json      -> "numStartups": 154 (onboarding state)
+Host ~/.claude/.claude.json -> "cachedGrowthBookFeatures" (different file)
+Container reads           -> "numStartups": 154 (file mount wins)
+```

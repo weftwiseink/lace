@@ -5,12 +5,12 @@ first_authored:
 task_list: wezterm/split-pane-regression
 type: devlog
 state: live
-status: wip
+status: review_ready
 last_reviewed:
-  status: revision_requested
+  status: accepted
   by: "@claude-opus-4-6"
-  at: 2026-03-20T16:30:00-07:00
-  round: 1
+  at: 2026-03-20T17:45:00-07:00
+  round: 2
 tags: [wezterm, lace.wezterm, regression, implementation]
 ---
 
@@ -210,7 +210,7 @@ Two fixes applied:
 | File | Change |
 |------|--------|
 | `lace.wezterm/plugin/init.lua` | ExecDomain registration, GLOBAL metadata, SSH domain rename, string key fix |
-| `bin/wez-into` | Switched to ExecDomain spawn, updated cold-start fallback |
+| `bin/wez-into` | Switched to ExecDomain spawn, three-tier fallback chain, removed dead code |
 | `dotfiles/dot_config/wezterm/wezterm.lua` | Alt+Shift+HJKL bypass bindings |
 
 ## Commits
@@ -223,6 +223,7 @@ Two fixes applied:
 | lace.wezterm | `2609c3c` | Fix: string keys for GLOBAL tables |
 | lace/main | `c157a15` | Devlog/proposal status |
 | lace/main | `529debe` | Phase 2: wez-into ExecDomain spawn |
+| lace/main | `03e7966` | Fix: dead code removal, raw SSH fallback, BLUF |
 | dotfiles | `49222f7` | Phase 3: Bypass bindings |
 
 ## Verification

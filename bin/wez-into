@@ -524,37 +524,32 @@ except: pass
   #
   # Falls back to `wezterm connect` with the SSH mux domain if no mux is running.
   local pane_id
+  # Three-tier connection fallback:
+  # 1. ExecDomain spawn (mux running + plugin loaded: container-aware splits)
+  # 2. Raw SSH spawn (mux running + plugin not loaded: no split inheritance)
+  # 3. wezterm connect (cold start: opens new window via SSH mux domain)
+  local ssh_args=(
+    ssh
+    -o "IdentityFile=$LACE_SSH_KEY"
+    -o "IdentitiesOnly=yes"
+    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
+    -o "StrictHostKeyChecking=no"
+    -t
+    -p "$port"
+    "${user}@localhost"
+  )
+
   pane_id=$(wezterm cli spawn --domain-name "lace:$port" 2>/dev/null) && {
     wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
     info "tab created for $project (pane $pane_id, domain lace:$port)"
+  } || pane_id=$(wezterm cli spawn -- "${ssh_args[@]}" 2>/dev/null) && {
+    wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
+    info "tab created via raw SSH (pane $pane_id, no split inheritance)"
   } || {
-    # ExecDomain spawn failed (domain not registered, no mux connection, etc.)
-    # Try wezterm connect with SSH mux domain (requires plugin + in-container mux server)
-    info "ExecDomain spawn failed, trying wezterm connect..."
-    if wezterm connect "lace-mux:$port" --workspace main &>/dev/null & then
-      disown
-      info "connected via lace-mux:$port"
-    else
-      # Final fallback: raw SSH args (works even if plugin is not loaded)
-      info "domain connect failed, falling back to raw SSH..."
-      local ssh_args=(
-        ssh
-        -o "IdentityFile=$LACE_SSH_KEY"
-        -o "IdentitiesOnly=yes"
-        -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
-        -o "StrictHostKeyChecking=no"
-        -t
-        -p "$port"
-        "${user}@localhost"
-      )
-      pane_id=$(wezterm cli spawn -- "${ssh_args[@]}" 2>/dev/null) && {
-        wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
-        info "tab created via raw SSH (pane $pane_id)"
-      } || {
-        err "all connection methods failed for $project on port $port"
-        exit 1
-      }
-    fi
+    # No mux connection: cold start with wezterm connect (opens new window)
+    info "no running mux, falling back to wezterm connect..."
+    wezterm connect "lace-mux:$port" --workspace main &>/dev/null &
+    disown
   }
 }
 

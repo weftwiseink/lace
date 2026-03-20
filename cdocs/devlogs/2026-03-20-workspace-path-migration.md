@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-20T13:36:00-07:00
 task_list: devcontainer/workspace-path-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [devcontainer, workspace_paths, migration]
 ---
 

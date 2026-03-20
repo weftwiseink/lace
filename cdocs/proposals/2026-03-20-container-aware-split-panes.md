@@ -5,7 +5,7 @@ first_authored:
 task_list: wezterm/split-pane-regression
 type: proposal
 state: live
-status: wip
+status: review_ready
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6"
@@ -93,18 +93,21 @@ Register ExecDomains for the lace port range alongside existing SSH domains.
 Each ExecDomain's fixup wraps the spawn command with SSH args.
 
 ```lua
---- Build the SSH argument table for a given port and user.
+--- Build the SSH argument table for a given port, user, and optional workspace.
 -- Reads ssh_key and known_hosts from wezterm.GLOBAL.lace_plugin_opts.
+-- When workspace is provided, the remote command cd's to it before starting
+-- a login shell. Without workspace, starts a plain login shell.
 -- @param port number
 -- @param user string
+-- @param workspace string|nil  Container workspace path
 -- @return table of SSH args, or nil if plugin opts unavailable
-local function build_ssh_args(port, user)
+local function build_ssh_args(port, user, workspace)
   local opts = wezterm.GLOBAL.lace_plugin_opts or {}
   if not opts.ssh_key then
     wezterm.log_warn("lace: ssh_key not in GLOBAL, cannot build SSH args")
     return nil
   end
-  return {
+  local args = {
     "ssh",
     "-o", "IdentityFile=" .. opts.ssh_key,
     "-o", "IdentitiesOnly=yes",
@@ -114,20 +117,26 @@ local function build_ssh_args(port, user)
     "-p", tostring(port),
     user .. "@localhost",
   }
+  if workspace then
+    table.insert(args, "cd " .. shell_escape(workspace) .. " 2>/dev/null || cd; exec $SHELL -l")
+  end
+  return args
 end
 
 --- Create an ExecDomain fixup function for a given port.
 -- The fixup replaces the spawn command's args with SSH into the container.
--- User is resolved at spawn time from GLOBAL (populated at config load and
--- picker invocation), falling back to the default username.
+-- User and workspace are resolved at spawn time from GLOBAL (populated at
+-- config load and picker invocation), falling back to defaults.
 -- @param port number
 -- @param default_user string
 -- @return fixup function(cmd) -> cmd
 local function make_exec_fixup(port, default_user)
   return function(cmd)
     local port_users = wezterm.GLOBAL.lace_port_users or {}
+    local port_workspaces = wezterm.GLOBAL.lace_port_workspaces or {}
     local user = port_users[port] or default_user
-    local ssh_args = build_ssh_args(port, user)
+    local workspace = port_workspaces[port]
+    local ssh_args = build_ssh_args(port, user, workspace)
     if ssh_args then
       cmd.args = ssh_args
     end
@@ -190,12 +199,47 @@ local function resolve_port_names()
   end
   return port_names
 end
+
+--- Resolve workspace paths for active container ports.
+-- Queries Docker inspect for CONTAINER_WORKSPACE_FOLDER env var,
+-- falling back to the container's WorkingDir.
+-- Mirrors wez-into's resolve_workspace_folder logic.
+-- @param port_containers table mapping port -> container_id
+-- @return table mapping port -> workspace_path
+local function resolve_port_workspaces(port_containers)
+  local workspaces = {}
+  for port, container_id in pairs(port_containers) do
+    -- Try CONTAINER_WORKSPACE_FOLDER env var first
+    local env_ok, env_out = wezterm.run_child_process({
+      "docker", "inspect", container_id,
+      "--format", '{{range .Config.Env}}{{println .}}{{end}}',
+    })
+    if env_ok and env_out then
+      local ws = env_out:match("CONTAINER_WORKSPACE_FOLDER=([^\n]+)")
+      if ws and ws ~= "" then
+        workspaces[port] = ws
+      end
+    end
+    -- Fall back to WorkingDir
+    if not workspaces[port] then
+      local wd_ok, wd_out = wezterm.run_child_process({
+        "docker", "inspect", container_id, "--format", "{{.Config.WorkingDir}}",
+      })
+      if wd_ok and wd_out then
+        local wd = wd_out:gsub("%s+", "")
+        if wd ~= "" then workspaces[port] = wd end
+      end
+    end
+  end
+  return workspaces
+end
 ```
 
-> NOTE(opus/split-pane-regression): `extract_lace_port` and `basename` and `nonempty` are small helpers factored out for legibility.
+> NOTE(opus/split-pane-regression): `extract_lace_port`, `basename`, `nonempty`, and `shell_escape` are small helpers factored out for legibility.
 > `extract_lace_port(ports_str)` finds the first port in `M.PORT_MIN..M.PORT_MAX` matching `(%d+)->2222/tcp`.
 > `basename(path)` returns the last path component.
 > `nonempty(s)` returns `s` if it is a non-empty string, else `nil`.
+> `shell_escape(s)` wraps a string for safe use in a shell command (single-quoting).
 
 In `apply_to_config`:
 
@@ -209,6 +253,11 @@ wezterm.GLOBAL.lace_plugin_opts = {
 
 -- Store port -> user map for ExecDomain fixups
 wezterm.GLOBAL.lace_port_users = port_users
+
+-- Store port -> workspace path map for ExecDomain fixups.
+-- Resolved via docker inspect (CONTAINER_WORKSPACE_FOLDER or WorkingDir).
+local port_containers = resolve_port_containers()  -- port -> container_id
+wezterm.GLOBAL.lace_port_workspaces = resolve_port_workspaces(port_containers)
 ```
 
 ### 3. Picker and wez-into changes
@@ -238,10 +287,8 @@ pane_id=$(wezterm cli spawn --domain-name "lace:$port")
 
 This simplifies wez-into's `do_connect` significantly: no SSH arg construction, no key path passing, no user resolution at the CLI level.
 
-> NOTE(opus/split-pane-regression): The current wez-into `do_connect` includes `cd "$cd_target"` to start in the workspace directory.
-> With ExecDomain, the fixup does not include a `cd`.
-> The container's login shell profile should handle this (many devcontainers set `WORKDIR` or `HOME` to the workspace).
-> If not, this can be added to the fixup by reading workspace path from GLOBAL, or as a follow-up enhancement.
+The ExecDomain fixup includes `cd <workspace> && exec $SHELL -l` in the SSH args, with workspace paths resolved at config load from `CONTAINER_WORKSPACE_FOLDER` (or `WorkingDir` fallback) via `docker inspect`.
+This preserves the current wez-into behavior where shells start in the workspace directory.
 
 ### 4. Public connection metadata API
 
@@ -289,10 +336,9 @@ Update `format_tab_title` to recognize the `lace:` ExecDomain pattern (which mat
 local port = tonumber(domain:match("^lace:(%d+)$"))
 ```
 
-### 6. SSH domain naming
+### 6. SSH domain naming and cold-start fallback
 
 Rename the existing SSH domains from `lace:<port>` to `lace-mux:<port>` to avoid collision with ExecDomain names.
-Update the workspace mode path and cold-start fallback to use the new name.
 
 ```lua
 -- SSH domains (for workspace mode and cold-start fallback)
@@ -303,11 +349,20 @@ table.insert(config.ssh_domains, {
 })
 ```
 
-Update wez-into cold-start fallback:
+**Critical: update all references to the old SSH domain name.**
+`wezterm connect` is for mux domains; using it with an ExecDomain name would fail.
+Three locations in wez-into require updates:
+
+1. Cold-start fallback (current line 576):
 ```bash
-# Cold start (no running mux):
+# Before: wezterm connect "lace:$port" --workspace main &>/dev/null &
+# After:
 wezterm connect "lace-mux:$port" --workspace main &>/dev/null &
 ```
+
+2. Help text (current line 624): update documented command to show `lace-mux:<port>`.
+
+3. Workspace mode picker path in `plugin/init.lua`: update `DomainName = "lace:" .. port` to `"lace-mux:" .. port`.
 
 ## Important Design Decisions
 
@@ -336,12 +391,11 @@ SSH domains are renamed to `lace-mux:<port>` but retained for:
 `domain = "DefaultDomain"` in the bypass bindings uses whatever domain WezTerm considers default (the unix mux in the current config).
 This is more resilient than hardcoding `"unix"`: if the default domain changes, the bypass follows.
 
-### wez-into CWD handling
+### Workspace CWD in the fixup
 
-The current wez-into resolves workspace CWD host-side via `docker inspect` and passes it in the SSH command.
-With ExecDomain, the fixup does not include workspace CWD by default.
-The container's login shell or `WORKDIR` should handle initial CWD.
-If this proves insufficient, workspace path can be stored in GLOBAL and included in the fixup.
+The ExecDomain fixup includes `cd <workspace> && exec $SHELL -l` using workspace paths stored in `lace_port_workspaces` (resolved at config load via `docker inspect`).
+This mirrors wez-into's `resolve_workspace_folder` logic.
+Both initial tabs and splits start in the workspace directory.
 
 ## Edge Cases
 
@@ -362,11 +416,10 @@ Matches the existing pattern of 75 SSH domain registrations.
 ExecDomains are lightweight (just a name + Lua function reference, no network connection).
 Config load time impact is negligible.
 
-### wez-into CWD loss
+### Workspace path stale after container rebuild
 
-The current `cd "$cd_target"` in the SSH command is not replicated by the ExecDomain fixup.
-The user lands in the container's default directory (typically the workspace via `WORKDIR`).
-If this is a problem, a follow-up can add CWD to the fixup via GLOBAL metadata.
+If a container is rebuilt and its workspace path changes, `lace_port_workspaces` has stale data until config reload.
+The `cd <workspace> 2>/dev/null || cd` pattern handles this gracefully: if the path doesn't exist, the shell falls back to the home directory.
 
 ### Plugin not loaded
 
@@ -385,13 +438,14 @@ No harm, just redundant.
 
 1. Start a lace devcontainer.
 2. Open picker (Leader+W), select project (creates tab in ExecDomain).
-3. Verify: `pane:get_domain_name()` shows `lace:<port>` (check via debug overlay or log).
+3. Verify: `pane:get_domain_name()` shows `lace:<port>` (check via tab title resolution or log).
 4. Press Alt-J.
 5. **Verify**: new split pane shows container prompt (`hostname` or `whoami`).
-6. Press Alt-L.
-7. **Verify**: horizontal split also lands in container.
-8. Navigate between splits with Ctrl-H/J/K/L.
-9. **Verify**: smart-splits navigation works as before.
+6. **Verify**: `pwd` shows the workspace directory (not home).
+7. Press Alt-L.
+8. **Verify**: horizontal split also lands in container, also at workspace CWD.
+9. Navigate between splits with Ctrl-H/J/K/L.
+10. **Verify**: smart-splits navigation works as before.
 
 ### Bypass: local splits in container tabs
 
@@ -418,6 +472,15 @@ No harm, just redundant.
 2. Config reload (Leader+R).
 3. Press Alt-J.
 4. **Verify**: split still lands in container (GLOBAL persists, ExecDomains re-registered).
+
+### Multi-container routing
+
+1. Start two lace devcontainers (different projects).
+2. Open picker, connect to both (two tabs).
+3. In project A tab, press Alt-J.
+4. **Verify**: split lands in project A's container (check `hostname`).
+5. Switch to project B tab, press Alt-J.
+6. **Verify**: split lands in project B's container (different hostname).
 
 ### Cold-start fallback
 
@@ -447,10 +510,11 @@ For wezterm.lua:
 
 **Files**: `~/code/weft/lace.wezterm/plugin/init.lua`
 
-1. Add helper functions: `build_ssh_args(port, user)`, `make_exec_fixup(port, default_user)`, `extract_lace_port(ports_str)`, `nonempty(s)`, `basename(path)`.
+1. Add helper functions: `build_ssh_args(port, user, workspace)`, `make_exec_fixup(port, default_user)`, `extract_lace_port(ports_str)`, `nonempty(s)`, `basename(path)`, `shell_escape(s)`.
 2. Add `setup_exec_domains(config, opts)`: registers ExecDomains for `M.PORT_MIN..M.PORT_MAX`.
 3. Add `resolve_port_names()`: queries Docker for project name -> port mapping.
-4. In `apply_to_config`: call `setup_exec_domains`, store `lace_plugin_opts` and `lace_port_users` in GLOBAL.
+4. Add `resolve_port_workspaces(port_containers)`: queries Docker inspect for `CONTAINER_WORKSPACE_FOLDER` / `WorkingDir`.
+5. In `apply_to_config`: call `setup_exec_domains`, store `lace_plugin_opts`, `lace_port_users`, and `lace_port_workspaces` in GLOBAL.
 5. Rename SSH domains from `lace:<port>` to `lace-mux:<port>`.
 6. Update workspace mode path to use `lace-mux:` prefix.
 
@@ -462,7 +526,7 @@ For wezterm.lua:
 
 1. Plugin picker tab mode: change `mux_win:spawn_tab({ args = ssh_args })` to `mux_win:spawn_tab({ domain = { DomainName = "lace:" .. port } })`.
 2. wez-into `do_connect`: change `wezterm cli spawn -- ssh ...` to `wezterm cli spawn --domain-name "lace:$port"`.
-3. Update wez-into cold-start fallback to use `lace-mux:$port`.
+3. **Critical**: Update wez-into cold-start fallback (line 576) from `wezterm connect "lace:$port"` to `wezterm connect "lace-mux:$port"`. Also update help text (line 624).
 4. Add fallback in wez-into: if `--domain-name` fails (domain not registered), fall back to raw SSH args.
 5. Update picker `lace_connection_info` cache alongside existing `lace_discovery_cache`.
 6. Export `M.get_connection_info(key)` public API.

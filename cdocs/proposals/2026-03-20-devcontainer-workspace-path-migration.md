@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-20T12:00:00-07:00
 task_list: devcontainer/workspace-path-migration
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [devcontainer, workspace_paths, migration]
 ---
 

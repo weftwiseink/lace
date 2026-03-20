@@ -8,7 +8,7 @@ import type { WorkspaceClassification } from "./workspace-detector";
 export interface WorkspaceConfig {
   /** Layout type. Currently only "bare-worktree" or false (disabled). */
   layout: "bare-worktree" | false;
-  /** Container mount target path (default: "/workspace"). */
+  /** Container mount target path (default: "/workspaces"). */
   mountTarget?: string;
   /** Post-creation configuration. */
   postCreate?: {

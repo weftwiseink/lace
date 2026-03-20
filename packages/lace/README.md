@@ -439,11 +439,11 @@ Lace allocates a host port and maps asymmetrically to portless's default port 13
 Start services through portless using the `{service}.{worktree}` naming convention:
 
 ```sh
-# In worktree: /workspace/main
+# In worktree: /workspaces/lace/main
 portless web.main next dev
 # → http://web.main.localhost:22435
 
-# In worktree: /workspace/add-websockets
+# In worktree: /workspaces/lace/add-websockets
 portless web.add-websockets next dev
 # → http://web.add-websockets.localhost:22435
 ```
@@ -544,7 +544,7 @@ Add a `workspace` block to `customizations.lace`:
     "lace": {
       "workspace": {
         "layout": "bare-worktree",   // "bare-worktree" | false
-        "mountTarget": "/workspace", // container mount path (default: "/workspace")
+        "mountTarget": "/workspaces", // container mount path (default: "/workspaces")
         "postCreate": {
           "safeDirectory": true,     // inject safe.directory '*' (default: true)
           "scanDepth": 2             // git.repositoryScanMaxDepth (default: 2)
@@ -558,7 +558,7 @@ Add a `workspace` block to `customizations.lace`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `layout` | `"bare-worktree" \| false` | required | Layout type to detect and configure. |
-| `mountTarget` | `string` | `"/workspace"` | Container mount target for the bare-repo root. |
+| `mountTarget` | `string` | `"/workspaces"` | Container mount target for the bare-repo root. |
 | `postCreate.safeDirectory` | `boolean` | `true` | Inject `git config --global --add safe.directory '*'` into `postCreateCommand`. |
 | `postCreate.scanDepth` | `number` | `2` | Set `git.repositoryScanMaxDepth` in VS Code settings. |
 
@@ -594,8 +594,8 @@ For a worktree at `/home/user/code/project/main` with bare-repo root at `/home/u
 ```jsonc
 {
   "image": "node:24-bookworm",
-  "workspaceMount": "source=/home/user/code/project,target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace/main",
+  "workspaceMount": "source=/home/user/code/project,target=/workspaces,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspaces/main",
   "postCreateCommand": "git config --global --add safe.directory '*'"
 }
 ```

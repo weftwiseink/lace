@@ -233,8 +233,8 @@ and `postCreateCommand`.
 **Before (manual configuration):**
 ```jsonc
 {
-  "workspaceMount": "source=/home/user/code/project,target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace/main",
+  "workspaceMount": "source=/home/user/code/project,target=/workspaces,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspaces/main",
   "postCreateCommand": "git config --global --add safe.directory '*'"
 }
 ```

@@ -483,17 +483,11 @@ do_connect() {
   local project="$1"
   local port="$2"
 
-  # Resolve the container workspace folder for the SSH cd target.
-  # Prefer container env/WorkingDir over relying on CONTAINER_WORKSPACE_FOLDER
-  # being set in the shell environment (it may be missing if lace up ran with
-  # --skip-validation, which skips workspace layout config mutation).
-  local workspace_dir
-  workspace_dir=$(resolve_workspace_folder "$project")
-
   if [[ "$DRY_RUN" == "true" ]]; then
-    local cd_target="${workspace_dir:-\$HOME}"
-    echo "wezterm cli spawn -- ssh -t -p $port -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$LACE_KNOWN_HOSTS node@localhost 'cd \"$cd_target\" 2>/dev/null || cd; exec \$SHELL -l'"
+    echo "wezterm cli spawn --domain-name \"lace:$port\""
     echo "wezterm cli set-tab-title --pane-id <id> $project"
+    echo "# ExecDomain fixup handles SSH args and workspace CWD"
+    echo "# Fallback (no mux): wezterm connect \"lace-mux:$port\" --workspace main"
     exit 0
   fi
 
@@ -541,39 +535,27 @@ except: pass
   # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
   export XKB_LOG_LEVEL=10  # critical only
 
-  # Tab mode: spawn a tab with a direct SSH connection.
-  # Uses `wezterm cli spawn` with an SSH command rather than `--domain-name`
-  # because WezTerm's mux server SSH domain implementation does not reliably
-  # pick up SSH key changes after config hot-reload. Direct SSH via the CLI
-  # avoids this issue entirely.
+  # Tab mode: spawn a tab via ExecDomain.
+  # The lace.wezterm plugin registers ExecDomains (lace:<port>) whose fixup
+  # wraps spawned commands with SSH to the container. This gives the pane a
+  # named domain identity, so splits via Alt-HJKL automatically SSH into the
+  # same container (via CurrentPaneDomain inheritance).
   #
-  # The remote command cd's to the workspace folder before starting an
-  # interactive login shell. The workspace_dir is resolved host-side via
-  # docker inspect (see resolve_workspace_folder) rather than relying on
-  # CONTAINER_WORKSPACE_FOLDER being set in the container env, since that
-  # var may be absent if lace up ran with --skip-validation.
+  # Workspace CWD and user are resolved at spawn time by the ExecDomain fixup
+  # from GLOBAL state populated at config load (see resolve_port_workspaces).
   #
   # After spawning, pin the tab title so it shows the project name instead
   # of the SSH hostname. The format-tab-title handler in the wezterm config
   # checks tab_title first, so this survives OSC title changes from TUIs.
   #
-  # Falls back to `wezterm connect` if no mux is running (cold start).
-  local cd_target="${workspace_dir:-\$HOME}"
+  # Falls back to `wezterm connect` with the SSH mux domain if no mux is running.
   local pane_id
-  pane_id=$(wezterm cli spawn -- ssh \
-    -o "IdentityFile=$LACE_SSH_KEY" \
-    -o "IdentitiesOnly=yes" \
-    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS" \
-    -o "StrictHostKeyChecking=no" \
-    -t \
-    -p "$port" \
-    "$user@localhost" \
-    "cd \"$cd_target\" 2>/dev/null || cd; exec \$SHELL -l" 2>/dev/null) && {
+  pane_id=$(wezterm cli spawn --domain-name "lace:$port" 2>/dev/null) && {
     wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
-    info "tab created for $project (pane $pane_id)"
+    info "tab created for $project (pane $pane_id, domain lace:$port)"
   } || {
     info "no running mux, falling back to wezterm connect..."
-    wezterm connect "lace:$port" --workspace main &>/dev/null &
+    wezterm connect "lace-mux:$port" --workspace main &>/dev/null &
     disown
   }
 }
@@ -616,12 +598,15 @@ Projects are discovered via Docker (containers with devcontainer.local_folder
 label and SSH ports in the 22425-22499 range). Discovery is performed by
 lace-discover.
 
-Connection creates a tab in the running WezTerm via direct SSH:
-  wezterm cli spawn -- ssh -p <port> node@localhost
+Connection creates a tab in the running WezTerm via ExecDomain:
+  wezterm cli spawn --domain-name lace:<port>
   wezterm cli set-tab-title --pane-id <id> <project>
 
+The ExecDomain fixup handles SSH connection, user, and workspace CWD.
+Splits in the resulting tab inherit the container context automatically.
+
 If no WezTerm mux is running (cold start), falls back to:
-  wezterm connect lace:<port> --workspace main
+  wezterm connect lace-mux:<port> --workspace main
 
 The --start flag starts a stopped devcontainer before connecting. It uses
 `lace up --workspace-folder <path>` for the full startup pipeline (config

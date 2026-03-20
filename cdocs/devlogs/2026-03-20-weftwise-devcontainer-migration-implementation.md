@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-20T16:30:00-07:00
 task_list: devcontainer/weftwise-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 last_reviewed:
   status: accepted
   by: "@claude-sonnet-4-6"

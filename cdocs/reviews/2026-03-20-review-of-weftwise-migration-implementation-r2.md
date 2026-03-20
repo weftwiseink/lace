@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-20T18:00:00-07:00
 task_list: devcontainer/weftwise-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [rereview_agent, implementation_review, devcontainer, migration, mount_conflict]
 ---

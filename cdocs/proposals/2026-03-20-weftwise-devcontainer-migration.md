@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-20T15:15:00-07:00
 task_list: devcontainer/weftwise-migration
 type: proposal
-state: live
-status: implementation_wip
+state: archived
+status: implementation_accepted
 tags: [devcontainer, workspace_paths, weftwise, migration, clauthier, cdocs]
 ---
 

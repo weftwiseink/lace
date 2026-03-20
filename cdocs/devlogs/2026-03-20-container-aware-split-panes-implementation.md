@@ -6,15 +6,27 @@ task_list: wezterm/split-pane-regression
 type: devlog
 state: live
 status: wip
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6"
+  at: 2026-03-20T16:30:00-07:00
+  round: 1
 tags: [wezterm, lace.wezterm, regression, implementation]
 ---
 
 # Container-Aware Split Panes Implementation
 
+> BLUF: Implemented ExecDomain-based container-aware split panes across 5 phases.
+> Core mechanism verified: splits in container tabs land in the container (not host), confirmed via live testing against 2 running containers.
+> Two runtime bugs found and fixed during testing: `wezterm.GLOBAL` requires string keys, and stale domain registrations persist across config reloads (one-time mux server restart needed after deployment).
+> Bypass bindings and raw SSH fallback require manual verification.
+
 ## Objective
 
 Implement the ExecDomain-based container-aware split panes proposal (`cdocs/proposals/2026-03-20-container-aware-split-panes.md`).
+
 The goal: Alt-H/J/K/L splits in lace container tabs should open container shells instead of host shells.
+
 The mechanism: ExecDomains provide pane-level domain identity that propagates to splits via `CurrentPaneDomain` inheritance.
 
 ## Plan
@@ -38,6 +50,7 @@ Five implementation phases per the proposal:
 ### Phase 1: ExecDomain Registration
 
 Added to `lace.wezterm/plugin/init.lua`:
+
 - Utility helpers: `shell_escape`, `nonempty`, `basename`, `extract_lace_port`
 - ExecDomain infrastructure: `build_ssh_args`, `make_exec_fixup`, `setup_exec_domains`
 - Workspace resolution: `resolve_port_workspaces` (docker inspect for CONTAINER_WORKSPACE_FOLDER)
@@ -50,12 +63,17 @@ Config validation: `ls-fonts` parse check passed.
 ### Phase 2: Picker and wez-into
 
 Plugin picker tab mode: switched from `mux_win:spawn_tab({ args = ssh_args })` to `mux_win:spawn_tab({ domain = { DomainName = "lace:" .. port } })`.
+
 Picker also updates `lace_port_users` in GLOBAL at selection time.
+
 Added `M.get_connection_info(key)` public API.
 
 wez-into `do_connect`: replaced raw SSH spawn with `wezterm cli spawn --domain-name "lace:$port"`.
+
 Removed `workspace_dir` resolution (now handled by ExecDomain fixup).
+
 Updated cold-start fallback to `lace-mux:$port`.
+
 Updated help text and dry-run output.
 
 ### Phase 3: Bypass Bindings
@@ -66,7 +84,9 @@ Updated help text and dry-run output.
 > The `ls-fonts` parse check caught this immediately.
 
 Added Alt+Shift+HJKL bindings with `command = { domain = "DefaultDomain" }`.
+
 Validated via:
+
 - `ls-fonts` parse check: passed
 - `show-keys` diff: exactly 4 new SplitPane entries with DefaultDomain
 - `copy_mode` diff: no changes (no regressions)
@@ -75,6 +95,7 @@ Validated via:
 ### Phase 4: Documentation
 
 Added Connection Domain Architecture block comment to `plugin/init.lua` (lines 50-79).
+
 Documents all three domain types, their purposes, and current status.
 
 ### Phase 5: End-to-End Testing
@@ -95,7 +116,7 @@ Documents all three domain types, their purposes, and current status.
 > This is a one-time deployment requirement: existing WezTerm instances need a mux server restart
 > after deploying the domain rename.
 
-#### Test Results (post-fix)
+#### Test Results (Post-Fix)
 
 **ExecDomain spawn (lace container, port 22427):**
 ```
@@ -130,15 +151,14 @@ CWD=/workspace/lace/main
 
 **Config reload resilience:** All 5 panes survived config file touch + reload.
 
-**Bypass bindings (`show-keys` output):**
+**Bypass bindings (show-keys output):**
 ```
 { key = 'H', mods = 'ALT', action = act.SplitPane{ command = { domain = 'DefaultDomain' }, ... } }
 { key = 'h', mods = 'ALT', action = act.SplitPane{ command = { domain = 'CurrentPaneDomain' }, ... } }
 ```
 Both regular (`CurrentPaneDomain`) and bypass (`DefaultDomain`) bindings coexist correctly.
 
-> NOTE(opus/split-pane-regression): Bypass bindings (Alt+Shift+HJKL opening host shell in container tab)
-> require manual keyboard testing, which cannot be automated via `wezterm cli`.
+> NOTE(opus/split-pane-regression): Bypass bindings (Alt+Shift+HJKL opening host shell in container tab) require manual keyboard testing, which cannot be automated via `wezterm cli`.
 
 **wez-into dry-run output:**
 ```
@@ -151,7 +171,9 @@ wezterm cli spawn --domain-name "lace:$port"
 ### Phase 1: Root Cause Investigation
 
 Initial ExecDomain spawn returned SSH mux socket evidence (`WEZTERM_UNIX_SOCKET` set in pane).
+
 `wezterm cli spawn --domain-name "lace-mux:22427"` returned "invalid domain name" listing only `lace:*` names.
+
 This confirmed stale SSH domain registrations shadowing new ExecDomains.
 
 ### Phase 2: Pattern Analysis
@@ -163,17 +185,23 @@ This confirmed stale SSH domain registrations shadowing new ExecDomains.
 ### Phase 3: Hypothesis Tested
 
 Hypothesis: SIGHUP to mux server clears stale domain state.
+
 Result: mux server terminated; GUI respawned it with fresh config.
+
 Post-restart spawn correctly used ExecDomain (SOCKET=UNSET).
 
 Second issue: ExecDomain fixup Lua error "can only index objects using string values".
+
 Hypothesis: `wezterm.GLOBAL` serializes tables with string-only keys.
+
 Fix: `tostring(port)` for all GLOBAL table indexing.
+
 Result: ExecDomain fixup works correctly.
 
 ### Phase 4: Fix Implemented
 
 Two fixes applied:
+
 1. SIGHUP mux server restart (one-time deployment step)
 2. `tostring(port)` for all `wezterm.GLOBAL` table access (commit `2609c3c`)
 
@@ -203,14 +231,18 @@ Two fixes applied:
 
 **Split inheritance:** Splits from container panes land in the same container (verified hostname match, ExecDomain confirmation).
 
-**Multi-container isolation:** Splits in lace tab stay in lace; splits in clauthier tab stay in clauthier.
+**Multi-container isolation:** Splits in lace tab stay in lace.
+
+Splits in clauthier tab stay in clauthier.
 
 **Config validation:**
+
 - `ls-fonts` parse check: no errors on stderr
 - `show-keys` diff: 8 SplitPane bindings (4 CurrentPaneDomain + 4 DefaultDomain)
 - Config reload: all panes survived
 
 **Remaining manual testing:**
+
 - Bypass bindings (Alt+Shift+HJKL) require keyboard interaction
 - Picker tab creation flow requires GUI interaction
 - `wez-into` from host shell (requires TTY)

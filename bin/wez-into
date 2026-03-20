@@ -451,33 +451,6 @@ resolve_user_for_port() {
   echo "node"
 }
 
-# --- Resolve container workspace folder ---
-# Queries the container for CONTAINER_WORKSPACE_FOLDER, falling back to
-# the Docker WorkingDir. Returns empty string if neither can be determined.
-# This is used as the SSH cd target when connecting.
-resolve_workspace_folder() {
-  local container_name="$1"
-
-  # Try CONTAINER_WORKSPACE_FOLDER from container env
-  local cwf
-  cwf=$(docker inspect "$container_name" \
-    --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-    | grep '^CONTAINER_WORKSPACE_FOLDER=' | head -1 | cut -d= -f2-) || true
-  if [[ -n "$cwf" ]]; then
-    echo "$cwf"
-    return 0
-  fi
-
-  # Fall back to Docker WorkingDir (set by WORKDIR in Dockerfile)
-  local workdir
-  workdir=$(docker inspect "$container_name" \
-    --format '{{.Config.WorkingDir}}' 2>/dev/null) || true
-  if [[ -n "$workdir" ]]; then
-    echo "$workdir"
-    return 0
-  fi
-}
-
 # --- Execute wezterm connect (or dry-run) ---
 do_connect() {
   local project="$1"
@@ -487,7 +460,8 @@ do_connect() {
     echo "wezterm cli spawn --domain-name \"lace:$port\""
     echo "wezterm cli set-tab-title --pane-id <id> $project"
     echo "# ExecDomain fixup handles SSH args and workspace CWD"
-    echo "# Fallback (no mux): wezterm connect \"lace-mux:$port\" --workspace main"
+    echo "# Fallback 1 (no ExecDomain): wezterm connect \"lace-mux:$port\" --workspace main"
+    echo "# Fallback 2 (no plugin): wezterm cli spawn -- ssh -p $port ${user:-node}@localhost"
     exit 0
   fi
 
@@ -554,9 +528,33 @@ except: pass
     wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
     info "tab created for $project (pane $pane_id, domain lace:$port)"
   } || {
-    info "no running mux, falling back to wezterm connect..."
-    wezterm connect "lace-mux:$port" --workspace main &>/dev/null &
-    disown
+    # ExecDomain spawn failed (domain not registered, no mux connection, etc.)
+    # Try wezterm connect with SSH mux domain (requires plugin + in-container mux server)
+    info "ExecDomain spawn failed, trying wezterm connect..."
+    if wezterm connect "lace-mux:$port" --workspace main &>/dev/null & then
+      disown
+      info "connected via lace-mux:$port"
+    else
+      # Final fallback: raw SSH args (works even if plugin is not loaded)
+      info "domain connect failed, falling back to raw SSH..."
+      local ssh_args=(
+        ssh
+        -o "IdentityFile=$LACE_SSH_KEY"
+        -o "IdentitiesOnly=yes"
+        -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
+        -o "StrictHostKeyChecking=no"
+        -t
+        -p "$port"
+        "${user}@localhost"
+      )
+      pane_id=$(wezterm cli spawn -- "${ssh_args[@]}" 2>/dev/null) && {
+        wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
+        info "tab created via raw SSH (pane $pane_id)"
+      } || {
+        err "all connection methods failed for $project on port $port"
+        exit 1
+      }
+    fi
   }
 }
 

@@ -5,7 +5,7 @@ import { runSubprocess as defaultRunSubprocess } from "@/lib/subprocess";
 
 /**
  * Quick check: is a Docker container running for this workspace folder?
- * Used to annotate failure results for callers (e.g., wez-into) that need
+ * Used to annotate failure results for callers (e.g., lace-into) that need
  * to decide whether to retry discovery.
  */
 function isContainerRunning(workspaceFolder: string): boolean {
@@ -105,7 +105,7 @@ export const upCommand = defineCommand({
       console.log(result.message);
     }
 
-    // Emit machine-readable result line for callers (e.g., wez-into).
+    // Emit machine-readable result line for callers (e.g., lace-into).
     // Goes to stderr so it doesn't interfere with stdout-based parsing.
     const failedPhase = result.exitCode !== 0
       ? Object.entries(result.phases).find(([, v]) => v && v.exitCode !== 0)?.[0] ?? "unknown"

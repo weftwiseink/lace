@@ -22,8 +22,7 @@
         "mountTarget": "/workspaces/lace"
       },
       // Mount declarations: lace resolves host source paths from settings or defaults.
-      // These plus wezterm-server/authorized-keys (from feature metadata) are
-      // auto-injected into the mounts array during lace up.
+      // These are auto-injected into the mounts array during lace up.
       // Configure custom source paths in ~/.config/lace/settings.json:
       //   { "mounts": { "project/claude-config": { "source": "~/.claude" } } }
       "mounts": {
@@ -53,9 +52,6 @@
       // ~/.config/lace/settings.json under repoMounts.<repoId>.overrideMount.
       "repoMounts": {
         "github.com/weftwiseink/clauthier": {},
-        "github.com/weftwiseink/lace.wezterm": {
-          "readonly": false
-        },
         "github.com/micimize/dotfiles": {
           "readonly": false
         }
@@ -67,16 +63,13 @@
         "ghcr.io/devcontainers/features/sshd:1": {},
         "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
         "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
-        "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-          "version": "20240203-110809-5046fc22"
-        }
+        "ghcr.io/eitsupi/devcontainer-features/nushell:0": {}
       }
     }
   },
   "mounts": [
-    // wezterm-server/authorized-keys, project/bash-history, and project/claude-config
-    // are auto-injected from feature metadata and customizations.lace.mounts declarations
+    // project/bash-history and project/claude-config
+    // are auto-injected from customizations.lace.mounts declarations
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",

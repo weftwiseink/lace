@@ -1,17 +1,17 @@
 #!/bin/bash
-# wez-into -- Connect to a lace devcontainer via WezTerm.
+# lace-into -- Connect to a lace devcontainer via tmux.
 #
 # Usage:
-#   wez-into                    Interactive picker (fzf or bash select)
-#   wez-into <project>          Connect to named project
-#   wez-into --start <project>  Start a stopped container, then connect
-#   wez-into --start            Pick from stopped containers to start
-#   wez-into --list             List running project names
-#   wez-into --status           Show running projects with ports and paths
-#   wez-into --dry-run <proj>   Print the wezterm connect command without executing
-#   wez-into --help             Show this help
+#   lace-into                    Interactive picker (fzf or bash select)
+#   lace-into <project>          Connect to named project
+#   lace-into --start <project>  Start a stopped container, then connect
+#   lace-into --start            Pick from stopped containers to start
+#   lace-into --list             List running project names
+#   lace-into --status           Show running projects with ports and paths
+#   lace-into --dry-run <proj>   Print the tmux commands without executing
+#   lace-into --help             Show this help
 #
-# Prerequisites: wezterm, docker, lace-discover on PATH or at known location
+# Prerequisites: tmux, docker, lace-discover on PATH or at known location
 
 set -euo pipefail
 
@@ -19,11 +19,9 @@ SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Dedicated known_hosts file for lace devcontainers.
-# Must match M.KNOWN_HOSTS_FILE in the lace.wezterm plugin.
 LACE_KNOWN_HOSTS="$HOME/.ssh/lace_known_hosts"
 
 # SSH private key for lace devcontainers.
-# Must match the key configured in the lace.wezterm plugin's ssh_key option.
 LACE_SSH_KEY="$HOME/.config/lace/ssh/id_ed25519"
 
 err() { echo "${SCRIPT_NAME}: error: $*" >&2; }
@@ -54,7 +52,7 @@ fi
 
 # --- Locate lace CLI ---
 # Used by --start to run `lace up --workspace-folder <path>`.
-# Check co-located path first (bin/wez-into -> packages/lace/bin/lace),
+# Check co-located path first (bin/lace-into -> packages/lace/bin/lace),
 # then known locations, then PATH.
 #
 # Validates that the runtime interpreter (node) is available on PATH.
@@ -162,8 +160,8 @@ start_and_connect() {
       dry_args+=" --rebuild"
     fi
     echo "$dry_args"
-    echo "# then: wezterm cli spawn -- ssh -p <port> ... node@localhost"
-    echo "# then: wezterm cli set-tab-title --pane-id <id> $project"
+    echo "# then: tmux new-session -d -s $project ssh -p <port> ... node@localhost"
+    echo "# then: tmux set-option -t $project @lace_port <port>"
     exit 0
   fi
 
@@ -338,7 +336,7 @@ start_and_connect() {
       err "  docker ps --filter label=devcontainer.local_folder=\"$workspace_path\""
       err ""
       err "to retry connection:"
-      err "  wez-into $project"
+      err "  lace-into $project"
     fi
     exit 1
   fi
@@ -387,7 +385,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       err "unknown option: $1"
-      echo "Usage: wez-into [PROJECT] [--start] [--list] [--status] [--dry-run] [--help]" >&2
+      echo "Usage: lace-into [PROJECT] [--start] [--list] [--status] [--dry-run] [--help]" >&2
       exit 1
       ;;
     *)
@@ -405,12 +403,8 @@ fi
 # --- Host key management ---
 # Refresh the host key for a port in the lace known_hosts file.
 # Removes any stale entry (from container recreation) and pre-populates
-# the current key via ssh-keyscan. This prevents WezTerm's host key trust
-# prompt entirely -- the key is already known when wezterm connect runs.
-#
-# WezTerm does NOT implement StrictHostKeyChecking, so there is no way to
-# skip the prompt via ssh_option. Pre-populating known_hosts is the only
-# mechanism available.
+# the current key via ssh-keyscan. This prevents SSH host key prompts
+# entirely -- the key is already known when the SSH connection runs.
 refresh_host_key() {
   local port="$1"
 
@@ -432,7 +426,7 @@ refresh_host_key() {
   if [[ -n "$keys" ]]; then
     echo "$keys" >> "$LACE_KNOWN_HOSTS"
   else
-    # ssh-keyscan failed (container not ready?). WezTerm will prompt once.
+    # ssh-keyscan failed (container not ready?). SSH will prompt once.
     info "warning: could not scan host key for port $port (container may still be starting)"
   fi
 }
@@ -451,106 +445,81 @@ resolve_user_for_port() {
   echo "node"
 }
 
-# --- Execute wezterm connect (or dry-run) ---
+# --- Connect to a project via tmux ---
 do_connect() {
   local project="$1"
   local port="$2"
-
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "wezterm cli spawn --domain-name \"lace:$port\""
-    echo "wezterm cli set-tab-title --pane-id <id> $project"
-    echo "# ExecDomain fixup handles SSH args and workspace CWD"
-    echo "# Fallback 1 (no ExecDomain): wezterm connect \"lace-mux:$port\" --workspace main"
-    echo "# Fallback 2 (no plugin): wezterm cli spawn -- ssh -p $port ${user:-node}@localhost"
-    exit 0
-  fi
-
-  # Check wezterm prerequisite only when actually connecting
-  if ! command -v wezterm &>/dev/null; then
-    err "wezterm not found on PATH"
-    exit 1
-  fi
-
-  # Pre-populate the host key so WezTerm doesn't prompt for trust
-  refresh_host_key "$port"
-
   local user
   user=$(resolve_user_for_port "$port")
 
-  # Check for existing tab connected to this project (duplicate detection).
-  # If a tab with this project's name already exists, activate it instead
-  # of creating a duplicate. Uses tab_title (set by set-tab-title) to match.
-  # Tries each matching pane in reverse order (newest first) since older
-  # panes from failed domain connections may be ghosts that can't activate.
-  local existing_panes
-  existing_panes=$(wezterm cli list --format json 2>/dev/null \
-    | python3 -c "
-import json, sys
-try:
-    panes = [p['pane_id'] for p in json.load(sys.stdin) if p.get('tab_title') == '$project']
-    for pid in reversed(panes):
-        print(pid)
-except: pass
-" 2>/dev/null) || true
-
-  if [[ -n "$existing_panes" ]]; then
-    while IFS= read -r existing_pane; do
-      if wezterm cli activate-pane --pane-id "$existing_pane" 2>/dev/null; then
-        info "activated existing tab for $project (pane $existing_pane)"
-        return 0
-      fi
-    done <<< "$existing_panes"
-    # All matches were ghosts (e.g. stuck domain panes) — fall through to create new tab
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "# SSH connection args:"
+    echo "ssh -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes \\"
+    echo "    -o UserKnownHostsFile=$LACE_KNOWN_HOSTS -o StrictHostKeyChecking=no \\"
+    echo "    -o ControlMaster=auto -o ControlPath=\$HOME/.ssh/lace-ctrl-%C \\"
+    echo "    -o ControlPersist=600 -t -p $port ${user}@localhost"
+    echo ""
+    echo "# tmux session commands:"
+    echo "tmux new-session -d -s \"$project\" -e LACE_PORT=$port <ssh_command>"
+    echo "tmux set-option -t \"$project\" remain-on-exit on"
+    echo "tmux select-pane -t \"$project\" -T \"shell\""
+    echo "tmux set-option -t \"$project\" @lace_port \"$port\""
+    echo "tmux set-option -t \"$project\" @lace_user \"$user\""
+    echo "tmux attach-session -t \"=$project\"  # or switch-client if inside tmux"
+    exit 0
   fi
 
-  info "connecting to $project as $user on port $port..."
-
-  # Suppress xkbcommon errors from WezTerm's older bundled libxkbcommon
-  # (it doesn't recognize newer keysyms like dead_hamza from Fedora's XKB data).
-  export XKB_LOG_LEVEL=10  # critical only
-
-  # Tab mode: spawn a tab via ExecDomain.
-  # The lace.wezterm plugin registers ExecDomains (lace:<port>) whose fixup
-  # wraps spawned commands with SSH to the container. This gives the pane a
-  # named domain identity, so splits via Alt-HJKL automatically SSH into the
-  # same container (via CurrentPaneDomain inheritance).
-  #
-  # Workspace CWD and user are resolved at spawn time by the ExecDomain fixup
-  # from GLOBAL state populated at config load (see resolve_port_workspaces).
-  #
-  # After spawning, pin the tab title so it shows the project name instead
-  # of the SSH hostname. The format-tab-title handler in the wezterm config
-  # checks tab_title first, so this survives OSC title changes from TUIs.
-  #
-  # Falls back to `wezterm connect` with the SSH mux domain if no mux is running.
-  local pane_id
-  # Three-tier connection fallback:
-  # 1. ExecDomain spawn (mux running + plugin loaded: container-aware splits)
-  # 2. Raw SSH spawn (mux running + plugin not loaded: no split inheritance)
-  # 3. wezterm connect (cold start: opens new window via SSH mux domain)
-  local ssh_args=(
+  # SSH connection args (reused across panes)
+  local ssh_base=(
     ssh
     -o "IdentityFile=$LACE_SSH_KEY"
     -o "IdentitiesOnly=yes"
     -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
     -o "StrictHostKeyChecking=no"
+    -o "ControlMaster=auto"
+    -o "ControlPath=$HOME/.ssh/lace-ctrl-%C"
+    -o "ControlPersist=600"
     -t
     -p "$port"
     "${user}@localhost"
   )
 
-  pane_id=$(wezterm cli spawn --domain-name "lace:$port" 2>/dev/null) && {
-    wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
-    info "tab created for $project (pane $pane_id, domain lace:$port)"
-  } || pane_id=$(wezterm cli spawn -- "${ssh_args[@]}" 2>/dev/null) && {
-    wezterm cli set-tab-title --pane-id "$pane_id" "$project" 2>/dev/null
-    info "tab created via raw SSH (pane $pane_id, no split inheritance)"
-  } || {
-    # No mux connection: cold start with wezterm connect (opens new window)
-    info "no running mux, falling back to wezterm connect..."
-    wezterm connect "lace-mux:$port" --workspace main &>/dev/null &
-    disown
-  }
+  # Check for existing session.
+  # Verify the session's @lace_port matches to avoid name collisions.
+  if tmux has-session -t "=$project" 2>/dev/null; then
+    local existing_port
+    existing_port=$(tmux show-option -t "=$project" -qv @lace_port 2>/dev/null)
+    if [ "$existing_port" = "$port" ] || [ -z "$existing_port" ]; then
+      info "attaching to existing session: $project"
+      if [ -n "$TMUX" ]; then
+        tmux switch-client -t "=$project"
+      else
+        exec tmux attach-session -t "=$project"
+      fi
+      return 0
+    else
+      # Port mismatch: disambiguate session name
+      project="${project}-${port}"
+      info "session name conflict, using: $project"
+    fi
+  fi
+
+  # Create new session with SSH pane
+  refresh_host_key "$port"
+
+  tmux new-session -d -s "$project" -e "LACE_PORT=$port" "${ssh_base[@]}"
+  tmux set-option -t "$project" remain-on-exit on
+  tmux select-pane -t "$project" -T "shell"
+
+  # Store the container port as a session-level user option for split automation.
+  tmux set-option -t "$project" @lace_port "$port"
+  tmux set-option -t "$project" @lace_user "$user"
+
+  if [ -n "$TMUX" ]; then
+    tmux switch-client -t "=$project"
+  else
+    exec tmux attach-session -t "=$project"
+  fi
 }
 
 # --- Execute action ---
@@ -574,32 +543,34 @@ case "$ACTION" in
     ;;
   help)
     cat <<'EOF'
-wez-into -- Connect to a lace devcontainer via WezTerm
+lace-into -- Connect to a lace devcontainer via tmux
 
 Usage:
-  wez-into                    Interactive picker (fzf or bash select)
-  wez-into <project>          Connect to named project
-  wez-into --start <project>  Start a stopped container, then connect
-  wez-into --start            Pick from stopped containers to start
-  wez-into --start --rebuild <project>  Start with full rebuild (recreate container)
-  wez-into --list             List running project names
-  wez-into --status           Show running projects with ports and paths
-  wez-into --dry-run <proj>   Print the connect command without executing
-  wez-into --help             Show this help
+  lace-into                    Interactive picker (fzf or bash select)
+  lace-into <project>          Connect to named project
+  lace-into --start <project>  Start a stopped container, then connect
+  lace-into --start            Pick from stopped containers to start
+  lace-into --start --rebuild <project>  Start with full rebuild (recreate container)
+  lace-into --list             List running project names
+  lace-into --status           Show running projects with ports and paths
+  lace-into --dry-run <proj>   Print the connect command without executing
+  lace-into --help             Show this help
 
 Projects are discovered via Docker (containers with devcontainer.local_folder
 label and SSH ports in the 22425-22499 range). Discovery is performed by
 lace-discover.
 
-Connection creates a tab in the running WezTerm via ExecDomain:
-  wezterm cli spawn --domain-name lace:<port>
-  wezterm cli set-tab-title --pane-id <id> <project>
+Connection creates a tmux session with an SSH pane to the container:
+  tmux new-session -d -s <project> ssh -p <port> ... <user>@localhost
+  tmux set-option -t <project> @lace_port <port>
+  tmux attach-session -t =<project>
 
-The ExecDomain fixup handles SSH connection, user, and workspace CWD.
-Splits in the resulting tab inherit the container context automatically.
+Session-level options @lace_port and @lace_user enable the lace-split
+keybinding (Alt-S in tmux.conf) to auto-SSH new splits into the same
+container.
 
-If no WezTerm mux is running (cold start), falls back to:
-  wezterm connect lace-mux:<port> --workspace main
+If a tmux session for the project already exists, lace-into attaches to
+it (or switches to it, if already inside tmux).
 
 The --start flag starts a stopped devcontainer before connecting. It uses
 `lace up --workspace-folder <path>` for the full startup pipeline (config
@@ -614,19 +585,19 @@ Use this after changing devcontainer.json to pick up runtime config changes
 
 The --dry-run flag prints the command(s) that would be executed without
 actually running them. When combined with --start, it prints both the
-lace up command and the wezterm cli spawn command.
+lace up command and the tmux session creation commands.
 
 Examples:
-  wez-into lace                Connect to the lace devcontainer
-  wez-into dotfiles            Connect to the dotfiles devcontainer
-  wez-into                     Pick from running projects interactively
-  wez-into --start lace        Start lace if stopped, then connect
-  wez-into --start             Pick from stopped containers to start
-  wez-into --start --dry-run lace  Show what --start would do
-  wez-into --start --rebuild lace  Rebuild lace container from current config
-  wez-into --list              Show names of running projects
-  wez-into --status            Show a table of running projects
-  wez-into --dry-run lace      Print the connect command for lace
+  lace-into lace                Connect to the lace devcontainer
+  lace-into dotfiles            Connect to the dotfiles devcontainer
+  lace-into                     Pick from running projects interactively
+  lace-into --start lace        Start lace if stopped, then connect
+  lace-into --start             Pick from stopped containers to start
+  lace-into --start --dry-run lace  Show what --start would do
+  lace-into --start --rebuild lace  Rebuild lace container from current config
+  lace-into --list              Show names of running projects
+  lace-into --status            Show a table of running projects
+  lace-into --dry-run lace      Print the connect command for lace
 EOF
     exit 0
     ;;
@@ -710,7 +681,7 @@ if [[ -n "$PROJECT" ]]; then
     if [[ "$found_in_stopped" == "true" ]]; then
       err ""
       err "hint: '$PROJECT' is stopped. Use --start to start it:"
-      err "  wez-into --start $PROJECT"
+      err "  lace-into --start $PROJECT"
     fi
   fi
   exit 1
@@ -770,12 +741,12 @@ if [[ "$START" == "true" ]]; then
   # Multiple items -- show picker
   if command -v fzf &>/dev/null; then
     SELECTED=$(printf '%s\n' "${PICKER_ITEMS[@]}" | \
-      fzf --prompt="wez-into --start> " --height=10 --reverse)
+      fzf --prompt="lace-into --start> " --height=10 --reverse)
     [[ -z "$SELECTED" ]] && exit 0
     # Extract project name (first field)
     PICK_NAME=$(echo "$SELECTED" | awk '{print $1}')
   else
-    PS3="wez-into --start> "
+    PS3="lace-into --start> "
     mapfile -t DISPLAY_NAMES < <(printf '%s\n' "${PICKER_ITEMS[@]}")
     select PICK in "${DISPLAY_NAMES[@]}"; do
       [[ -n "$PICK" ]] && break
@@ -831,11 +802,11 @@ fi
 if command -v fzf &>/dev/null; then
   SELECTED=$(printf '%s\n' "${PROJECTS[@]}" | \
     awk -F: '{printf "%-20s :%s  %s\n", $1, $2, $4}' | \
-    fzf --prompt="wez-into> " --height=10 --reverse)
+    fzf --prompt="lace-into> " --height=10 --reverse)
   [[ -z "$SELECTED" ]] && exit 0
   PROJECT=$(echo "$SELECTED" | awk '{print $1}')
 else
-  PS3="wez-into> "
+  PS3="lace-into> "
   mapfile -t NAMES < <(printf '%s\n' "${PROJECTS[@]}" | cut -d: -f1)
   select PROJECT in "${NAMES[@]}"; do
     [[ -n "$PROJECT" ]] && break

@@ -5,7 +5,7 @@ first_authored:
 task_list: wezterm/split-pane-regression
 type: proposal
 state: live
-status: implementation_wip
+status: implementation_accepted
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6"

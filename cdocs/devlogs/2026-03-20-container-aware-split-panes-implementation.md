@@ -19,7 +19,8 @@ tags: [wezterm, lace.wezterm, regression, implementation]
 > BLUF: Implemented ExecDomain-based container-aware split panes across 5 phases.
 > Core mechanism verified: splits in container tabs land in the container (not host), confirmed via live testing against 2 running containers.
 > Two runtime bugs found and fixed during testing: `wezterm.GLOBAL` requires string keys, and stale domain registrations persist across config reloads (one-time mux server restart needed after deployment).
-> Bypass bindings and raw SSH fallback require manual verification.
+> Bypass bindings deferred: WezTerm does not respect domain override in ExecDomain splits.
+> See `cdocs/reports/2026-03-20-bypass-binding-investigation.md` and `cdocs/proposals/2026-03-20-exec-domain-bypass-bindings.md`.
 
 ## Objective
 
@@ -211,7 +212,7 @@ Two fixes applied:
 |------|--------|
 | `lace.wezterm/plugin/init.lua` | ExecDomain registration, GLOBAL metadata, SSH domain rename, string key fix |
 | `bin/wez-into` | Switched to ExecDomain spawn, three-tier fallback chain, removed dead code |
-| `dotfiles/dot_config/wezterm/wezterm.lua` | Alt+Shift+HJKL bypass bindings |
+| `dotfiles/dot_config/wezterm/wezterm.lua` | Updated split binding comments for ExecDomain context (bypass bindings deferred) |
 
 ## Commits
 
@@ -224,7 +225,7 @@ Two fixes applied:
 | lace/main | `c157a15` | Devlog/proposal status |
 | lace/main | `529debe` | Phase 2: wez-into ExecDomain spawn |
 | lace/main | `03e7966` | Fix: dead code removal, raw SSH fallback, BLUF |
-| dotfiles | `49222f7` | Phase 3: Bypass bindings |
+| dotfiles | `c282fe5` | Updated split comments, bypass bindings deferred |
 
 ## Verification
 
@@ -247,63 +248,10 @@ Splits in clauthier tab stay in clauthier.
 - Picker tab creation flow requires GUI interaction
 - `wez-into` from host shell (requires TTY)
 
-## Open Issue: Bypass Bindings (Alt+Shift+HJKL)
+## Deferred: Bypass Bindings (Alt+Shift+HJKL)
 
-> WARN(opus/split-pane-regression): The bypass bindings do not work.
-> All tested approaches still produce container splits instead of host shell splits.
-> This is the one unresolved piece of the implementation.
-
-### Problem
-
-Alt+Shift+HJKL should open a host shell split even inside a container tab (ExecDomain pane).
-In practice, the split always inherits the ExecDomain regardless of the domain specified.
-
-### Approaches Tried
-
-**1. `act.SplitPane` with `command = { domain = "DefaultDomain" }`**
-Config validation passed, `show-keys` showed correct binding.
-Live testing: split still opened container shell, not host shell.
-
-**2. `act.SplitPane` with `command = { domain = { DomainName = "local" } }`**
-This setup uses `unix_domains` with `default_gui_startup_args = { "connect", "unix" }`.
-The host domain is `unix`, not `local`.
-Spawning in the `local` domain caused transparent/bugged pane rendering: the pane space was allocated but no content rendered.
-
-**3. `act.SplitPane` with `command = { domain = { DomainName = "unix" } }`**
-Correct domain name for this setup.
-Config validation passed, `show-keys` showed correct binding.
-Live testing: split still opened container shell.
-
-**4. `wezterm.action_callback` with `pane:split({ domain = { DomainName = "unix" } })`**
-Bypassed `act.SplitPane` entirely, used the mux-level `pane:split()` API directly.
-Config validation passed.
-Live testing: split still opened container shell.
-
-### Environment Context
-
-- WezTerm config uses `config.unix_domains = { { name = "unix" } }`
-- All local panes are on the `unix` domain, not `local`
-- `config.default_gui_startup_args = { "connect", "unix" }` starts GUI via unix mux
-- The `local` domain exists as WezTerm's built-in process domain but does not integrate with the unix mux GUI (causes transparent panes)
-
-### Analysis
-
-Both the key assignment layer (`act.SplitPane`) and the mux API (`pane:split()`) ignore the domain parameter when splitting from an ExecDomain pane.
-The split always uses `CurrentPaneDomain` regardless of what domain is specified.
-This appears to be a WezTerm behavior (possibly intentional, possibly a bug) where ExecDomain identity is always propagated to child panes.
-
-WezTerm documentation for both `SplitPane.command.domain` and `pane:split({ domain = ... })` states domain override should work.
-There is no documented limitation or known issue for domain override in ExecDomain splits.
-
-### Possible Next Steps
-
-1. **File a WezTerm issue**: Report that `SplitPane` and `pane:split()` do not respect domain override when the current pane is in an ExecDomain.
-2. **Workaround via spawn+move**: Use `wezterm.action_callback` to spawn a pane in the `unix` domain (via tab spawn), then move it into the current tab as a split using the move-pane mechanism.
-3. **Workaround via ExecDomain fixup**: Modify the ExecDomain fixup function to detect a "bypass" signal (e.g., an environment variable) and skip the SSH args, returning the command unchanged.
-4. **Workaround via separate key table**: Use a different mechanism entirely, like `SpawnCommandInNewTab` with `unix` domain (opens a new tab instead of a split).
-
-### Current Config State
-
-The bypass bindings currently use the `pane:split()` callback approach (attempt 4).
-This does not cause rendering issues but does not achieve the desired behavior.
-The config is clean and deployable (no test handlers).
+> NOTE(opus/split-pane-regression): Bypass bindings deferred to future work.
+> WezTerm does not respect domain override in ExecDomain splits (4 approaches tested, all failed).
+> Full investigation: `cdocs/reports/2026-03-20-bypass-binding-investigation.md`
+> Follow-up RFP: `cdocs/proposals/2026-03-20-exec-domain-bypass-bindings.md`
+> Bypass binding code removed from wezterm.lua (dotfiles commit `c282fe5`).

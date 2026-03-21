@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-20T12:30:00-07:00
 task_list: wezterm/split-pane-regression
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 last_reviewed:
   status: accepted

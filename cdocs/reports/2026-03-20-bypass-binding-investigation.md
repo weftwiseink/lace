@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-20T19:00:00-07:00
 task_list: wezterm/split-pane-regression
 type: report
-state: live
+state: archived
 status: done
 tags: [wezterm, lace.wezterm, regression, investigation]
 ---

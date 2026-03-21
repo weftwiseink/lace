@@ -513,6 +513,7 @@ User-level settings at `~/.config/lace/settings.json` (or `$LACE_SETTINGS`) can 
 The optional `target` field controls where the repo appears inside the container. Two common reasons to set a custom target:
 - **Semantic paths**: place a dotfiles repo at `~/.dotfiles` instead of the default `/mnt/lace/repos/dotfiles`.
 - **Host-path mirroring**: mount at the exact host path (e.g., `/var/home/user/code/tool-registry`) so that tools which store absolute host paths in bind-mounted config files can still resolve them inside the container. See [Tool integration patterns](#tool-integration-patterns) for details.
+- **Cross-repo work**: When working on a cross-cutting concern, directly editing a downstream repo by utilizing `"readonly": false` is sensible.
 
 ```jsonc
 {

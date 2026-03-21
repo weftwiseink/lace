@@ -729,7 +729,7 @@ describe("lace up: runtime fingerprint lifecycle", () => {
     expect(fp).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it("warns on drift when fingerprint changes and rebuild is false", async () => {
+  it("auto-recreates container when drift is detected without --rebuild", async () => {
     setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
 
     // First run: establish fingerprint
@@ -738,23 +738,34 @@ describe("lace up: runtime fingerprint lifecycle", () => {
       subprocess: createMock(),
     });
 
-    // Modify a runtime-affecting property by writing a different config
-    // that will produce a different fingerprint on next run.
-    // We achieve this by writing a stale fingerprint that won't match.
+    // Simulate drift by writing a stale fingerprint that won't match.
     writeFileSync(join(laceDir, "runtime-fingerprint"), "stale_fingerprin\n", "utf-8");
 
-    const warnSpy = vi.spyOn(console, "warn");
+    const logSpy = vi.spyOn(console, "log");
     try {
+      mockCalls = [];
       const result = await runUp({
         workspaceFolder: workspaceRoot,
         subprocess: createMock(),
       });
       expect(result.exitCode).toBe(0);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Runtime config has changed"),
+      expect(logSpy).toHaveBeenCalledWith(
+        "Runtime config changed; container will be recreated.",
       );
+
+      // Verify --remove-existing-container was passed to devcontainer up
+      const upCall = mockCalls.find(
+        (c) => c.command === "devcontainer" && c.args[0] === "up",
+      );
+      expect(upCall).toBeDefined();
+      expect(upCall?.args).toContain("--remove-existing-container");
+
+      // Fingerprint should be updated after successful recreation
+      const fp = readFileSync(join(laceDir, "runtime-fingerprint"), "utf-8").trim();
+      expect(fp).not.toBe("stale_fingerprin");
+      expect(fp).toMatch(/^[0-9a-f]{16}$/);
     } finally {
-      warnSpy.mockRestore();
+      logSpy.mockRestore();
     }
   });
 });

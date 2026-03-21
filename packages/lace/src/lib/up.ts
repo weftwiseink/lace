@@ -671,9 +671,12 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   // Phase: Config drift detection
   // Read the generated extended config and compare its runtime fingerprint
-  // against the previous run. Warn if drift is detected and --rebuild was
-  // not passed, so the user knows the container may be stale.
+  // against the previous run. When drift is detected, auto-recreate the
+  // container so runtime config changes (mounts, env, workspace paths) take
+  // effect without requiring the heavier --rebuild (which also forces a
+  // prebuild image rebuild with --no-cache).
   let currentFingerprint: string | undefined;
+  let recreateContainer = false;
   {
     const extendedConfigPath = join(workspaceFolder, ".lace", "devcontainer.json");
     try {
@@ -688,16 +691,17 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       const drift = checkConfigDrift(extendedConfig, workspaceFolder);
       currentFingerprint = drift.currentFingerprint;
 
-      if (drift.drifted && !rebuild) {
-        console.warn(
-          "Warning: Runtime config has changed since the container was last created.\n" +
-          "Run `lace up --rebuild` to apply the changes, or pass " +
-          "`--remove-existing-container` directly.",
-        );
-      } else if (drift.drifted && rebuild) {
-        console.log(
-          "Runtime config changed; container will be recreated (--rebuild).",
-        );
+      if (drift.drifted) {
+        recreateContainer = true;
+        if (rebuild) {
+          console.log(
+            "Runtime config changed; container will be recreated (--rebuild).",
+          );
+        } else {
+          console.log(
+            "Runtime config changed; container will be recreated.",
+          );
+        }
       }
     } catch {
       // If the config can't be read (shouldn't happen since we just wrote it),
@@ -719,7 +723,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     subprocess,
     devcontainerArgs,
     useExtendedConfig: true, // Always use extended config now
-    removeExistingContainer: rebuild,
+    removeExistingContainer: rebuild || recreateContainer,
   });
 
   result.phases.devcontainerUp = upResult;

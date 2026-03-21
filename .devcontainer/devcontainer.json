@@ -52,7 +52,13 @@
       // bind-mounted into the container. Configure local overrides in
       // ~/.config/lace/settings.json under repoMounts.<repoId>.overrideMount.
       "repoMounts": {
-        "github.com/weftwiseink/clauthier": {}
+        "github.com/weftwiseink/clauthier": {},
+        "github.com/weftwiseink/lace.wezterm": {
+          "readonly": false
+        },
+        "github.com/micimize/dotfiles": {
+          "readonly": false
+        }
       },
       "prebuildFeatures": {
         "ghcr.io/devcontainers/features/git:1": {

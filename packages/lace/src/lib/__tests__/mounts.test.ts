@@ -339,9 +339,9 @@ describe("generateSymlinkCommands", () => {
     ];
 
     const result = generateSymlinkCommands(repoMounts);
-    expect(result).toContain("mkdir -p");
-    expect(result).toContain("rm -f '/mnt/lace/repos/repo'");
-    expect(result).toContain("ln -s '/home/user/code/repo' '/mnt/lace/repos/repo'");
+    expect(result).toContain("sudo mkdir -p");
+    expect(result).toContain("sudo rm -f '/mnt/lace/repos/repo'");
+    expect(result).toContain("sudo ln -s '/home/user/code/repo' '/mnt/lace/repos/repo'");
   });
 
   it("generates multiple symlink commands joined with &&", () => {

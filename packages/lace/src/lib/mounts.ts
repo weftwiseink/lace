@@ -307,11 +307,13 @@ export function generateSymlinkCommands(repoMounts: ResolvedRepoMount[]): string
 
   for (const repoMount of repoMounts) {
     if (repoMount.symlink) {
-      // Create parent directory, remove existing symlink, create new symlink
+      // Create parent directory, remove existing symlink, create new symlink.
+      // Use sudo because the default target prefix (/mnt/lace/repos/) is
+      // typically root-owned and the container user cannot create dirs there.
       commands.push(
-        `mkdir -p "$(dirname '${repoMount.symlink.from}')"`,
-        `rm -f '${repoMount.symlink.from}'`,
-        `ln -s '${repoMount.symlink.to}' '${repoMount.symlink.from}'`,
+        `sudo mkdir -p "$(dirname '${repoMount.symlink.from}')"`,
+        `sudo rm -f '${repoMount.symlink.from}'`,
+        `sudo ln -s '${repoMount.symlink.to}' '${repoMount.symlink.from}'`,
       );
     }
   }

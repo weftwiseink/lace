@@ -1,15 +1,15 @@
 ---
 first_authored:
-  by: "@claude-opus-4-6"
+  by: "@claude-opus-4-6-20250515"
   at: 2026-03-20T12:30:00-07:00
 task_list: wezterm/split-pane-regression
 type: proposal
 state: live
 status: implementation_accepted
 last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6"
-  at: 2026-03-20T14:00:00-07:00
+  status: accepted
+  by: "@claude-opus-4-6-20250515"
+  at: 2026-03-20T19:00:00-07:00
   round: 2
 tags: [wezterm, lace.wezterm, regression, architecture]
 ---

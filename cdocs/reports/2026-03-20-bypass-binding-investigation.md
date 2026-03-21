@@ -1,6 +1,6 @@
 ---
 first_authored:
-  by: "@claude-opus-4-6"
+  by: "@claude-opus-4-6-20250515"
   at: 2026-03-20T19:00:00-07:00
 task_list: wezterm/split-pane-regression
 type: report

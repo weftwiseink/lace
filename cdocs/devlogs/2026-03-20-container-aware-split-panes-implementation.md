@@ -1,11 +1,11 @@
 ---
 first_authored:
-  by: "@claude-opus-4-6"
+  by: "@claude-opus-4-6-20250515"
   at: 2026-03-20T15:00:00-07:00
 task_list: wezterm/split-pane-regression
 type: devlog
 state: live
-status: review_ready
+status: done
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"

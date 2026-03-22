@@ -1,6 +1,11 @@
 #!/bin/bash
-# lace-split: Container-aware tmux split helper.
-# Creates SSH splits in lace sessions, local splits otherwise.
+# lace-split: Context-aware tmux split helper.
+# If the active pane is an SSH connection to a lace container, the new split
+# also SSH's into the same container at the same workspace path.
+# If the active pane is local, creates a local split preserving the current path.
+#
+# Detection: checks pane_current_command == "ssh" (not session-level options),
+# so mixed sessions (some panes local, some container) work correctly.
 #
 # Usage: lace-split [-h|-v] [-U]
 #   -h   Horizontal split (split-window -h, default)
@@ -23,31 +28,53 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-port=$(tmux show-option -qv @lace_port)
-user=$(tmux show-option -qv @lace_user)
-ws=$(tmux show-option -qv @lace_workspace)
+# Check if the current pane is running SSH (container pane).
+# SSH remains the foreground process for the pane's lifetime, regardless of
+# what the user runs on the remote side (bash, vim, etc.).
+current_cmd=$(tmux display-message -p '#{pane_current_command}')
 
-if [ -n "$port" ]; then
-  # Lace session: SSH split into container
-  ssh_base="exec ssh \
-    -o IdentityFile=$HOME/.config/lace/ssh/id_ed25519 \
-    -o IdentitiesOnly=yes \
-    -o UserKnownHostsFile=$HOME/.ssh/lace_known_hosts \
-    -o StrictHostKeyChecking=no \
-    -o ControlMaster=auto \
-    -o ControlPath=$HOME/.ssh/lace-ctrl-%C \
-    -o ControlPersist=600 \
-    -t -p $port ${user:-node}@localhost"
+if [ "$current_cmd" = "ssh" ]; then
+  # Container pane: read lace connection details.
+  # Prefer pane-level options (-p), fall back to session-level.
+  port=$(tmux show-option -pqv @lace_port 2>/dev/null)
+  [ -z "$port" ] && port=$(tmux show-option -qv @lace_port 2>/dev/null)
 
-  if [ -n "$ws" ]; then
-    full_cmd="$ssh_base \"cd $ws && exec \$SHELL -l\""
+  user=$(tmux show-option -pqv @lace_user 2>/dev/null)
+  [ -z "$user" ] && user=$(tmux show-option -qv @lace_user 2>/dev/null)
+
+  ws=$(tmux show-option -pqv @lace_workspace 2>/dev/null)
+  [ -z "$ws" ] && ws=$(tmux show-option -qv @lace_workspace 2>/dev/null)
+
+  if [ -n "$port" ]; then
+    # SSH split into the same container
+    ssh_base="exec ssh \
+      -o IdentityFile=$HOME/.config/lace/ssh/id_ed25519 \
+      -o IdentitiesOnly=yes \
+      -o UserKnownHostsFile=$HOME/.ssh/lace_known_hosts \
+      -o StrictHostKeyChecking=no \
+      -o ControlMaster=auto \
+      -o ControlPath=$HOME/.ssh/lace-ctrl-%C \
+      -o ControlPersist=600 \
+      -t -p $port ${user:-node}@localhost"
+
+    if [ -n "$ws" ]; then
+      full_cmd="$ssh_base \"cd $ws && exec \$SHELL -l\""
+    else
+      full_cmd="$ssh_base"
+    fi
+
+    new_pane=$(tmux split-window "$DIRECTION" -PF '#{pane_id}' "$full_cmd")
+
+    # Propagate lace options to the new pane for future splits
+    tmux set-option -p -t "$new_pane" @lace_port "$port"
+    [ -n "$user" ] && tmux set-option -p -t "$new_pane" @lace_user "$user"
+    [ -n "$ws" ] && tmux set-option -p -t "$new_pane" @lace_workspace "$ws"
   else
-    full_cmd="$ssh_base"
+    # SSH but no lace metadata: local split
+    tmux split-window "$DIRECTION" -c "#{pane_current_path}"
   fi
-
-  tmux split-window "$DIRECTION" "$full_cmd"
 else
-  # Non-lace session: local split
+  # Local pane: local split preserving current directory
   tmux split-window "$DIRECTION" -c "#{pane_current_path}"
 fi
 

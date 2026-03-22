@@ -557,6 +557,12 @@ do_connect() {
                    | awk '$2 == 1 {print $1}')
       for pane_id in $dead_panes; do
           tmux respawn-pane -t "$pane_id" "${ssh_base[@]}"
+          # Set pane-level options for lace-split context detection
+          tmux set-option -p -t "$pane_id" @lace_port "$port"
+          tmux set-option -p -t "$pane_id" @lace_user "$user"
+          if [[ -n "$workspace" ]]; then
+            tmux set-option -p -t "$pane_id" @lace_workspace "$workspace"
+          fi
       done
 
       if [ -n "$TMUX" ]; then
@@ -584,6 +590,15 @@ do_connect() {
   tmux set-option -t "$project" @lace_user "$user"
   if [[ -n "$workspace" ]]; then
     tmux set-option -t "$project" @lace_workspace "$workspace"
+  fi
+
+  # Also set pane-level options on the initial pane for lace-split context detection.
+  local initial_pane
+  initial_pane=$(tmux list-panes -t "=$project" -F '#{pane_id}' | head -1)
+  tmux set-option -p -t "$initial_pane" @lace_port "$port"
+  tmux set-option -p -t "$initial_pane" @lace_user "$user"
+  if [[ -n "$workspace" ]]; then
+    tmux set-option -p -t "$initial_pane" @lace_workspace "$workspace"
   fi
 
   if [ -n "$TMUX" ]; then
@@ -641,7 +656,16 @@ do_connect_pane() {
   # Respawn the current pane with the SSH command
   tmux respawn-pane -k -t "$TMUX_PANE" "${ssh_base[@]}"
 
-  # Set session-level options if not already set, enabling lace-split (Alt+HJKL)
+  # Set pane-level options for lace-split context detection.
+  # lace-split checks pane_current_command == "ssh" AND pane-level @lace_port
+  # to decide whether to SSH-split or local-split.
+  tmux set-option -p -t "$TMUX_PANE" @lace_port "$port"
+  tmux set-option -p -t "$TMUX_PANE" @lace_user "$user"
+  if [[ -n "$workspace" ]]; then
+    tmux set-option -p -t "$TMUX_PANE" @lace_workspace "$workspace"
+  fi
+
+  # Set session-level options if not already set (backward compat / status queries)
   local existing_port
   existing_port=$(tmux show-option -qv @lace_port 2>/dev/null)
   if [[ -z "$existing_port" ]]; then
@@ -650,10 +674,8 @@ do_connect_pane() {
     if [[ -n "$workspace" ]]; then
       tmux set-option @lace_workspace "$workspace"
     fi
-    info "session lace options set (enables Alt+HJKL container splits)"
   elif [[ "$existing_port" != "$port" ]]; then
     info "warning: session @lace_port ($existing_port) differs from pane target ($port)"
-    info "Alt+HJKL splits will target the session-level container, not this pane's"
   fi
 
   # Update pane title

@@ -1,0 +1,30 @@
+#!/bin/bash
+# lace-disconnect-pane: Disconnect a pane from its lace container.
+# Clears pane-level lace options and respawns the pane with the default shell.
+#
+# Usage: lace-disconnect-pane <pane-id>
+#   Called from tmux bindings/command-alias via run-shell.
+#   Not intended for direct user invocation.
+
+set -euo pipefail
+
+pane_id="${1:-}"
+if [ -z "$pane_id" ]; then
+  echo "lace-disconnect-pane: pane_id required" >&2
+  exit 1
+fi
+
+# Clear pane-level lace options so lace-split treats this as a local pane
+tmux set-option -pu -t "$pane_id" @lace_port 2>/dev/null || true
+tmux set-option -pu -t "$pane_id" @lace_user 2>/dev/null || true
+tmux set-option -pu -t "$pane_id" @lace_workspace 2>/dev/null || true
+
+# Get the default shell (respawn-pane without a command re-runs the ORIGINAL
+# command, which would be SSH; we must explicitly pass the shell)
+default_shell=$(tmux show-option -gv default-shell 2>/dev/null)
+if [ -z "$default_shell" ]; then
+  default_shell="/bin/bash"
+fi
+
+# Respawn the pane with a local shell
+tmux respawn-pane -k -t "$pane_id" -- "$default_shell"

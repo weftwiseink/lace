@@ -95,4 +95,24 @@ Three parallel rounds of subagents were dispatched:
 
 ## Verification
 
-TODO(opus/session-management): Pending implementation agent results.
+### SSH Key Injection (Issue 3)
+
+Feature JSON updated in all three copies.
+926/929 tests pass (3 pre-existing failures referencing removed `wezterm-server` feature source directory).
+All mount-related test suites pass cleanly.
+
+### Stale Reattach (Issue 1)
+
+`do_connect()` now performs three-way health check using `tmux list-panes -F '#{pane_dead}'`.
+Code reviewed: `grep -c` guarded with `|| true`, `total_panes -gt 0` guard present, `refresh_host_key` called before respawn.
+
+### Dead Panes Phase 1 (Issue 2)
+
+`remain-on-exit failed` set in both runtime and dry-run paths.
+
+### What Was Not Done
+
+- Dead panes Phases 2-3 (pane-died hook, respawn-all keybinding): deferred pending proposal revision.
+  The review identified blocking issues with the rate limiting explanation and hook lifecycle management.
+- Dotfiles devcontainer migration from wezterm-server to lace-sshd: out of scope for this session.
+- Runtime verification of SSH key injection (requires `lace up --rebuild`): not performed in this session.

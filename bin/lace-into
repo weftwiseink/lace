@@ -500,17 +500,47 @@ do_connect() {
 
   # Check for existing session.
   # Verify the session's @lace_port matches to avoid name collisions.
+  # Then check pane health: reattach if all alive, respawn dead panes if mixed,
+  # kill and recreate if all dead.
   if tmux has-session -t "=$project" 2>/dev/null; then
     local existing_port
     existing_port=$(tmux show-option -t "=$project" -qv @lace_port 2>/dev/null)
     if [ "$existing_port" = "$port" ] || [ -z "$existing_port" ]; then
-      info "attaching to existing session: $project"
-      if [ -n "$TMUX" ]; then
-        tmux switch-client -t "=$project"
+      local total_panes alive_panes
+      total_panes=$(tmux list-panes -t "=$project" -F '#{pane_dead}' | wc -l)
+      alive_panes=$(tmux list-panes -t "=$project" -F '#{pane_dead}' | grep -c '^0$' || true)
+
+      if [ "$total_panes" -gt 0 ] && [ "$alive_panes" -eq "$total_panes" ]; then
+        # All panes alive: reattach
+        info "attaching to existing session: $project"
+        if [ -n "$TMUX" ]; then
+          tmux switch-client -t "=$project"
+        else
+          exec tmux attach-session -t "=$project"
+        fi
+        return 0
+      elif [ "$alive_panes" -gt 0 ]; then
+        # Mixed: respawn dead panes, then reattach
+        info "respawning $((total_panes - alive_panes)) dead pane(s) in session $project"
+        refresh_host_key "$port"
+        local dead_panes
+        dead_panes=$(tmux list-panes -t "=$project" -F '#{pane_id} #{pane_dead}' \
+                     | awk '$2 == 1 {print $1}')
+        for pane_id in $dead_panes; do
+            tmux respawn-pane -t "$pane_id" "${ssh_base[@]}"
+        done
+        if [ -n "$TMUX" ]; then
+          tmux switch-client -t "=$project"
+        else
+          exec tmux attach-session -t "=$project"
+        fi
+        return 0
       else
-        exec tmux attach-session -t "=$project"
+        # All dead (or zero panes): kill and recreate
+        info "session $project has no live panes, recreating"
+        tmux kill-session -t "=$project"
+        # fall through to new-session creation
       fi
-      return 0
     else
       # Port mismatch: disambiguate session name
       project="${project}-${port}"

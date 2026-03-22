@@ -96,6 +96,27 @@ run_lace_into() {
     timeout 5 "$LACE_INTO" "$@" 2>&1 || true
 }
 
+# run_lace_into_pane: like run_lace_into, but simulates being inside the test tmux.
+# Uses the test socket's path for TMUX and a real pane ID from the given session.
+run_lace_into_pane() {
+  local session="$1"
+  shift
+  # Get the socket path and server pid for the TMUX env var
+  local socket_path
+  socket_path=$(tmx display-message -p '#{socket_path}' 2>/dev/null)
+  local server_pid
+  server_pid=$(tmx display-message -p '#{pid}' 2>/dev/null)
+  # Get the first pane ID in the target session
+  local pane_id
+  pane_id=$(tmx list-panes -t "=$session" -F '#{pane_id}' | head -1)
+  # TMUX format: socket_path,pid,session_index
+  TMUX="${socket_path},${server_pid},0" \
+  TMUX_PANE="$pane_id" \
+  PATH="$BINDIR:/usr/bin:/bin" \
+  HOME="${HOME}" \
+    timeout 5 "$LACE_INTO" "$@" 2>&1 || true
+}
+
 kill_session() {
   tmx kill-session -t "=$1" 2>/dev/null || true
 }
@@ -215,6 +236,111 @@ sleep 0.3
 tmx send-keys -t roe-test2 'exit 255' Enter
 sleep 0.5
 assert_eq "exit-255 pane persists" "1" "$(pane_dead_count roe-test2)"
+
+# =============================================================================
+# --pane mode tests
+# =============================================================================
+
+echo ""
+echo "=== Test 6: --pane outside tmux ==="
+# With TMUX unset, --pane should error
+OUTPUT=$(run_lace_into --pane test-proj)
+assert_contains "error message" "pane requires running inside tmux" "$OUTPUT"
+
+echo ""
+echo "=== Test 7: --pane inside tmux (respawn pane with SSH) ==="
+# Create a fresh session to serve as the "current session" for --pane
+setup_mocks "pane-proj" "22427"
+kill_session "pane-test-session"
+tmx new-session -d -s pane-test-session 'bash --norc --noprofile'
+sleep 0.3
+
+# Get the pane's initial process (bash)
+INITIAL_PID=$(tmx list-panes -t "=pane-test-session" -F '#{pane_pid}' | head -1)
+
+# Run lace-into --pane targeting the pane in pane-test-session
+OUTPUT=$(run_lace_into_pane "pane-test-session" --pane pane-proj)
+sleep 0.3
+
+# The pane should still be alive (respawned with mock ssh -> bash)
+assert_eq "pane alive after --pane" "1" "$(pane_alive_count pane-test-session)"
+
+# The pane PID should have changed (respawn-pane -k kills and restarts)
+NEW_PID=$(tmx list-panes -t "=pane-test-session" -F '#{pane_pid}' | head -1)
+TESTS_RUN=$((TESTS_RUN + 1))
+if [ "$INITIAL_PID" != "$NEW_PID" ]; then
+  echo "  PASS: pane process was respawned (pid changed: $INITIAL_PID -> $NEW_PID)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: pane process was NOT respawned (pid unchanged: $INITIAL_PID)"
+  FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "=== Test 8: --pane sets session options (set-if-absent) ==="
+# Session options should be set by --pane since this is a fresh session
+assert_eq "session @lace_port set" "22427" "$(get_option pane-test-session @lace_port)"
+assert_eq "session @lace_user set" "node" "$(get_option pane-test-session @lace_user)"
+assert_eq "session @lace_workspace set" "/workspaces/test" "$(get_option pane-test-session @lace_workspace)"
+
+# Pane title should be set to the project name
+PANE_TITLE=$(tmx list-panes -t "=pane-test-session" -F '#{pane_title}' | head -1)
+assert_eq "pane title set" "pane-proj" "$PANE_TITLE"
+
+echo ""
+echo "=== Test 9: --pane set-if-absent does not overwrite ==="
+# Connect a second project to a new pane in the same session.
+# Session options should NOT change (set-if-absent logic).
+setup_mocks "other-proj" "22428"
+tmx split-window -t pane-test-session bash --norc --noprofile
+sleep 0.3
+
+# Run --pane targeting pane-test-session (the new split pane).
+# We need to get the new pane ID.
+NEW_PANE_ID=$(tmx list-panes -t "=pane-test-session" -F '#{pane_id}' | tail -1)
+
+# Override TMUX_PANE to target the new pane
+socket_path=$(tmx display-message -p '#{socket_path}' 2>/dev/null)
+server_pid=$(tmx display-message -p '#{pid}' 2>/dev/null)
+OUTPUT=$(TMUX="${socket_path},${server_pid},0" \
+  TMUX_PANE="$NEW_PANE_ID" \
+  PATH="$BINDIR:/usr/bin:/bin" \
+  HOME="${HOME}" \
+  timeout 5 "$LACE_INTO" --pane other-proj 2>&1 || true)
+sleep 0.3
+
+# Session-level @lace_port should still be the FIRST project's port
+assert_eq "session @lace_port unchanged" "22427" "$(get_option pane-test-session @lace_port)"
+# Warning should be emitted about port mismatch
+assert_contains "port mismatch warning" "differs from pane target" "$OUTPUT"
+
+echo ""
+echo "=== Test 10: disconnect-pane (respawn-pane -k drops to shell) ==="
+# Create a clean session for disconnect testing (avoids pane state issues
+# from prior tests). The pane starts running bash (simulates an SSH pane).
+kill_session "disconnect-test"
+tmx new-session -d -s disconnect-test 'bash --norc --noprofile'
+sleep 0.3
+
+BEFORE_PID=$(tmx list-panes -t "=disconnect-test" -F '#{pane_pid}' | head -1)
+
+# Run disconnect-pane: respawn-pane -k without a command starts default shell.
+# Use session:pane_index syntax for targeting.
+tmx respawn-pane -k -t "disconnect-test:0.0"
+sleep 0.3
+
+AFTER_PID=$(tmx list-panes -t "=disconnect-test" -F '#{pane_pid}' | head -1)
+PANE_DEAD=$(tmx list-panes -t "=disconnect-test" -F '#{pane_dead}' | head -1)
+assert_eq "pane alive after disconnect" "0" "$PANE_DEAD"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [ "$BEFORE_PID" != "$AFTER_PID" ]; then
+  echo "  PASS: pane process was respawned by disconnect (pid changed: $BEFORE_PID -> $AFTER_PID)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL: pane process was NOT respawned by disconnect (pid unchanged: $BEFORE_PID)"
+  FAIL=$((FAIL + 1))
+fi
 
 # =============================================================================
 echo ""

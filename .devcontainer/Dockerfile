@@ -73,6 +73,13 @@ RUN mkdir -p /home/${USERNAME}/.ssh && \
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
     chmod 0440 /etc/sudoers.d/${USERNAME}
 
+# Add container user to rustlang group for cargo registry write access.
+# The Rust devcontainer feature creates this group and sets /usr/local/cargo to
+# root:rustlang with setgid. The prebuild runs features as root (the base image's
+# USER), so the Rust feature adds root to the group. The actual container user
+# (node) must be added separately here since the USER switch happens after prebuild.
+RUN usermod -aG rustlang ${USERNAME}
+
 # Switch to node user for all user-level installations and builds
 USER ${USERNAME}
 

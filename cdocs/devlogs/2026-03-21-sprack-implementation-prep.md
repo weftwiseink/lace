@@ -62,8 +62,13 @@ Two rebuilds were necessary: first to discover the rustlang group issue, second 
 It adds `_CONTAINER_USER` to the `rustlang` group, but `_CONTAINER_USER` is resolved from the prebuild image's USER, which is `root` (the base `node:24-bookworm` image has no USER set).
 The actual container user (`node`) is only set via `USER node` in the main Dockerfile, which runs after prebuild features.
 
-**Fix:** Added `RUN usermod -aG rustlang ${USERNAME}` in the Dockerfile before the `USER ${USERNAME}` switch.
+**Fix (applied):** Added `RUN usermod -aG rustlang ${USERNAME}` in the Dockerfile before the `USER ${USERNAME}` switch.
 This ensures the container user has write access to the cargo registry.
+
+**Proper fix (deferred):** The lace prebuild generator (`generateTempDevcontainerJson()` in `packages/lace/src/lib/devcontainer.ts`) should propagate `remoteUser` into the temp devcontainer.json.
+The `extractRemoteUser()` function already exists and resolves the correct user.
+This would cause the devcontainer CLI to set `_REMOTE_USER=node` during prebuild, and the Rust feature would add `node` to the `rustlang` group automatically.
+The Dockerfile workaround can then be removed.
 
 ### Issue 2: SSH port not allocated on --rebuild (NOT FIXED, pre-existing)
 

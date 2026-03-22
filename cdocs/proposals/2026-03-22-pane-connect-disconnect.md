@@ -5,7 +5,7 @@ first_authored:
 task_list: session-management/pane-connect-disconnect
 type: proposal
 state: live
-status: wip
+status: review_ready
 tags: [lace-into, tmux, session-management, pane-management]
 ---
 
@@ -393,6 +393,27 @@ This is inherent to `respawn-pane` and cannot be avoided without a wrapper that 
 
 1. Run `lace-into --pane --dry-run lace`
 2. **Verify**: prints the `respawn-pane` and `set-option` commands without executing
+
+## Learnings Applied from Session Debugging
+
+These hard-won findings from debugging stale-reattach and Alt+S must inform the implementation:
+
+1. **Nushell default-shell**: `respawn-pane` and `split-window` pass commands through the default shell (nushell), which cannot parse `&&` or `$SHELL`.
+The `ssh_base` array pattern used in `do_connect()` works because tmux preserves quoting on individual array elements.
+The remote command `"cd $ws && exec $SHELL -l"` must remain a single quoted string argument to SSH.
+
+2. **`show-option` without `=` prefix**: `tmux show-option -t "=session" -qv @option` silently returns empty.
+Always use `show-option -t "session"` (no `=`) for reading user options.
+The `=` prefix works for `has-session` but not `show-option`.
+
+3. **Never kill lace sessions**: Use `respawn-pane` in place, never `kill-session`.
+tmux-continuum auto-restores killed sessions with default shells.
+
+4. **Test harness required**: The test harness at `bin/test/test-lace-into.sh` must be extended with `--pane` tests before the feature ships.
+Use `tmux -f /dev/null -L <socket>` for isolation from tmux.conf/continuum.
+
+5. **`disconnect-pane` via `respawn-pane -k`**: Without a command, starts the default shell (nushell).
+This is correct behavior for disconnecting.
 
 ## Implementation Phases
 

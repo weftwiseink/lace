@@ -163,19 +163,13 @@ kill_pane_process "test-proj"
 assert_eq "pane is dead" "1" "$(pane_dead_count test-proj)"
 assert_eq "session still exists" "0" "$(tmx has-session -t '=test-proj' 2>/dev/null; echo $?)"
 
-# Run lace-into again - current behavior: kills session and recreates
-# Desired behavior: respawn in place
+# Run lace-into again - should respawn in place (never kill lace sessions)
 OUTPUT=$(run_lace_into test-proj)
 sleep 0.3
 assert_eq "session exists after reconnect" "0" "$(tmx has-session -t '=test-proj' 2>/dev/null; echo $?)"
 assert_eq "pane alive after reconnect" "1" "$(pane_alive_count test-proj)"
 assert_eq "port preserved" "22426" "$(get_option test-proj @lace_port)"
-# Check which message was output (documents current behavior)
-if echo "$OUTPUT" | grep -q "no live panes"; then
-  echo "  INFO: used kill-and-recreate path"
-elif echo "$OUTPUT" | grep -q "respawning"; then
-  echo "  INFO: used respawn-in-place path"
-fi
+assert_contains "used respawn path" "respawning" "$OUTPUT"
 
 echo ""
 echo "=== Test 4: Mixed health (alive + dead) ==="

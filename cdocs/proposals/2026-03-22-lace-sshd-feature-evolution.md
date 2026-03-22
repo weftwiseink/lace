@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-22T00:00:00-07:00
 task_list: session-management/lace-sshd-evolution
 type: proposal
-state: live
+state: deferred
 status: wip
 tags: [lace-sshd, devcontainer-features, ghcr, architecture]
 ---

@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-21T22:50:00-07:00
 task_list: session-management/stale-reattach
 type: proposal
-state: live
-status: wip
+state: archived
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6-20250725"

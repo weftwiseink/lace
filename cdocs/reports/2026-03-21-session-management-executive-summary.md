@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-21T23:15:00-07:00
 task_list: session-management/executive-summary
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [lace-into, tmux, ssh, session-management]
 ---
 

@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-22T00:15:00-07:00
 task_list: session-management/in-container-splits
 type: proposal
-state: live
-status: wip
+state: archived
+status: implementation_accepted
 tags: [tmux, lace-into, keybindings, session-management]
 ---
 

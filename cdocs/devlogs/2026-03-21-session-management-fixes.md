@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-21T22:30:00-07:00
 task_list: session-management/investigation-and-fixes
 type: devlog
-state: live
-status: wip
+state: archived
+status: done
 tags: [lace-into, tmux, ssh, session-management]
 ---
 

@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-21T15:45:00-07:00
 task_list: terminal-management/tmux-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, implementation_plan, test_plan, edge_cases, terminal_management]
 ---

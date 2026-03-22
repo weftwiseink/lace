@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-21T13:02:05-07:00
 task_list: terminal-management/tmux-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6-20250605"

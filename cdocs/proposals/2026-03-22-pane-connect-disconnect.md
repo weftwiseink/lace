@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-22T09:30:00-07:00
 task_list: session-management/pane-connect-disconnect
 type: proposal
-state: live
-status: review_ready
+state: archived
+status: implementation_accepted
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6-20250725"

@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-22T11:00:00-07:00
 task_list: session-management/pane-connect-disconnect
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, tmux, nushell, test_plan, session-management, pane-management]
 ---

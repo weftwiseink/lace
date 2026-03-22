@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-21T23:15:00-07:00
 task_list: session-management/ssh-key-injection
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, ssh, lace-sshd, mount-resolver, test_coverage]
 ---

@@ -280,13 +280,15 @@ start_and_connect() {
 
   # Re-discover to get the current port (may have shifted after restart)
   local port=""
+  local container_workspace=""
   local attempts=0
   local max_attempts=5
 
   while [[ $attempts -lt $max_attempts ]]; do
-    while IFS=: read -r name p user path; do
+    while IFS=: read -r name p user path ws; do
       if [[ "$name" == "$project" ]]; then
         port="$p"
+        container_workspace="$ws"
         break
       fi
     done < <(discover)
@@ -347,7 +349,7 @@ start_and_connect() {
     info "container is running despite lace up exit $up_exit (likely a lifecycle hook failure)"
   fi
 
-  do_connect "$project" "$port"
+  do_connect "$project" "$port" "$container_workspace"
 }
 
 # --- Argument parsing ---
@@ -436,7 +438,7 @@ refresh_host_key() {
 # Falls back to "node" if not found.
 resolve_user_for_port() {
   local port="$1"
-  while IFS=: read -r _name p user _path; do
+  while IFS=: read -r _name p user _path _ws; do
     if [[ "$p" == "$port" ]]; then
       echo "$user"
       return 0
@@ -449,6 +451,7 @@ resolve_user_for_port() {
 do_connect() {
   local project="$1"
   local port="$2"
+  local workspace="${3:-}"
   local user
   user=$(resolve_user_for_port "$port")
 
@@ -458,6 +461,9 @@ do_connect() {
     echo "    -o UserKnownHostsFile=$LACE_KNOWN_HOSTS -o StrictHostKeyChecking=no \\"
     echo "    -o ControlMaster=auto -o ControlPath=\$HOME/.ssh/lace-ctrl-%C \\"
     echo "    -o ControlPersist=600 -t -p $port ${user}@localhost"
+    if [[ -n "$workspace" ]]; then
+      echo "    \"cd $workspace && exec \\\$SHELL -l\"  # land in workspace"
+    fi
     echo ""
     echo "# tmux session commands:"
     echo "tmux new-session -d -s \"$project\" -e LACE_PORT=$port <ssh_command>"
@@ -465,6 +471,7 @@ do_connect() {
     echo "tmux select-pane -t \"$project\" -T \"shell\""
     echo "tmux set-option -t \"$project\" @lace_port \"$port\""
     echo "tmux set-option -t \"$project\" @lace_user \"$user\""
+    echo "tmux set-option -t \"$project\" @lace_workspace \"$workspace\""
     echo "tmux attach-session -t \"=$project\"  # or switch-client if inside tmux"
     exit 0
   fi
@@ -483,6 +490,13 @@ do_connect() {
     -p "$port"
     "${user}@localhost"
   )
+
+  # If workspace path is known, append a remote command to land there.
+  # The cd + exec $SHELL pattern starts a fresh login shell in the workspace
+  # directory. This works with any remote shell (bash, nushell, zsh).
+  if [[ -n "$workspace" ]]; then
+    ssh_base+=("cd $workspace && exec \$SHELL -l")
+  fi
 
   # Check for existing session.
   # Verify the session's @lace_port matches to avoid name collisions.
@@ -511,9 +525,12 @@ do_connect() {
   tmux set-option -t "$project" remain-on-exit on
   tmux select-pane -t "$project" -T "shell"
 
-  # Store the container port as a session-level user option for split automation.
+  # Store container connection details as session-level user options for split automation.
   tmux set-option -t "$project" @lace_port "$port"
   tmux set-option -t "$project" @lace_user "$user"
+  if [[ -n "$workspace" ]]; then
+    tmux set-option -t "$project" @lace_workspace "$workspace"
+  fi
 
   if [ -n "$TMUX" ]; then
     tmux switch-client -t "=$project"
@@ -534,10 +551,10 @@ case "$ACTION" in
       info "no running devcontainers found"
       exit 0
     fi
-    printf "%-20s %-8s %-10s %s\n" "PROJECT" "PORT" "USER" "PATH"
-    printf "%-20s %-8s %-10s %s\n" "-------" "----" "----" "----"
-    echo "$projects_output" | while IFS=: read -r name port user path; do
-      printf "%-20s %-8s %-10s %s\n" "$name" "$port" "$user" "$path"
+    printf "%-20s %-8s %-10s %-30s %s\n" "PROJECT" "PORT" "USER" "PATH" "WORKSPACE"
+    printf "%-20s %-8s %-10s %-30s %s\n" "-------" "----" "----" "----" "---------"
+    echo "$projects_output" | while IFS=: read -r name port user path ws; do
+      printf "%-20s %-8s %-10s %-30s %s\n" "$name" "$port" "$user" "$path" "$ws"
     done
     exit 0
     ;;
@@ -565,9 +582,9 @@ Connection creates a tmux session with an SSH pane to the container:
   tmux set-option -t <project> @lace_port <port>
   tmux attach-session -t =<project>
 
-Session-level options @lace_port and @lace_user enable the lace-split
-keybinding (Alt-S in tmux.conf) to auto-SSH new splits into the same
-container.
+Session-level options @lace_port, @lace_user, and @lace_workspace enable
+the lace-split keybinding (Alt-S in tmux.conf) to auto-SSH new splits
+into the same container, landing in the workspace directory.
 
 If a tmux session for the project already exists, lace-into attaches to
 it (or switches to it, if already inside tmux).
@@ -607,10 +624,12 @@ esac
 if [[ -n "$PROJECT" ]]; then
   # Step 1: Check if already running
   port=""
+  workspace=""
 
-  while IFS=: read -r name p user path; do
+  while IFS=: read -r name p user path ws; do
     if [[ "$name" == "$PROJECT" ]]; then
       port="$p"
+      workspace="$ws"
       break
     fi
   done < <(discover)
@@ -620,7 +639,7 @@ if [[ -n "$PROJECT" ]]; then
     if [[ "$START" == "true" ]]; then
       info "$PROJECT is already running"
     fi
-    do_connect "$PROJECT" "$port"
+    do_connect "$PROJECT" "$port" "$workspace"
     exit 0  # reached only if exec in do_connect fails (e.g. dry-run already exits)
   fi
 
@@ -697,12 +716,12 @@ if [[ "$START" == "true" ]]; then
 
   # Build combined list: running projects marked as [running], stopped as [stopped]
   PICKER_ITEMS=()
-  PICKER_DATA=()  # parallel array: "running:name:port" or "stopped:name:path"
+  PICKER_DATA=()  # parallel array: "running\tname\tport\tworkspace" or "stopped\tname\tpath"
 
   for proj in "${RUNNING[@]}"; do
-    IFS=: read -r name port user path <<< "$proj"
+    IFS=: read -r name port user path ws <<< "$proj"
     PICKER_ITEMS+=("$name  [running]  :$port  $path")
-    PICKER_DATA+=("running:$name:$port")
+    PICKER_DATA+=("running"$'\t'"$name"$'\t'"$port"$'\t'"$ws")
   done
 
   for line in "${STOPPED[@]}"; do
@@ -718,7 +737,7 @@ if [[ "$START" == "true" ]]; then
     done
     if [[ "$already_running" == "false" ]]; then
       PICKER_ITEMS+=("$name  [stopped]  $path")
-      PICKER_DATA+=("stopped:$name:$path")
+      PICKER_DATA+=("stopped"$'\t'"$name"$'\t'"$path"$'\t'"")
     fi
   done
 
@@ -729,9 +748,9 @@ if [[ "$START" == "true" ]]; then
   fi
 
   if [[ ${#PICKER_ITEMS[@]} -eq 1 ]]; then
-    IFS=: read -r kind name extra <<< "${PICKER_DATA[0]}"
+    IFS=$'\t' read -r kind name extra ws <<< "${PICKER_DATA[0]}"
     if [[ "$kind" == "running" ]]; then
-      do_connect "$name" "$extra"
+      do_connect "$name" "$extra" "$ws"
     else
       start_and_connect "$name" "$extra"
     fi
@@ -758,9 +777,9 @@ if [[ "$START" == "true" ]]; then
   for i in "${!PICKER_ITEMS[@]}"; do
     item_name=$(echo "${PICKER_ITEMS[$i]}" | awk '{print $1}')
     if [[ "$item_name" == "$PICK_NAME" ]]; then
-      IFS=: read -r kind name extra <<< "${PICKER_DATA[$i]}"
+      IFS=$'\t' read -r kind name extra ws <<< "${PICKER_DATA[$i]}"
       if [[ "$kind" == "running" ]]; then
-        do_connect "$name" "$extra"
+        do_connect "$name" "$extra" "$ws"
       else
         start_and_connect "$name" "$extra"
       fi
@@ -792,9 +811,9 @@ if [[ ${#PROJECTS[@]} -eq 0 ]]; then
 fi
 
 if [[ ${#PROJECTS[@]} -eq 1 ]]; then
-  IFS=: read -r name port user path <<< "${PROJECTS[0]}"
+  IFS=: read -r name port user path ws <<< "${PROJECTS[0]}"
   info "one project found: $name"
-  do_connect "$name" "$port"
+  do_connect "$name" "$port" "$ws"
   exit 0
 fi
 
@@ -813,11 +832,11 @@ else
   done
 fi
 
-# Find port for selected project
+# Find port and workspace for selected project
 for proj in "${PROJECTS[@]}"; do
   if [[ "${proj%%:*}" == "$PROJECT" ]]; then
-    IFS=: read -r _ port _ _ <<< "$proj"
-    do_connect "$PROJECT" "$port"
+    IFS=: read -r _ port _ _ ws <<< "$proj"
+    do_connect "$PROJECT" "$port" "$ws"
     exit 0
   fi
 done

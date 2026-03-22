@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-sidecar
 type: proposal
 state: live
-status: review_ready  # revised to address R1 blocking findings
+status: evolved
 tags: [wezterm, plugin, workspace, pane-management, tree-view, monitoring]
 last_reviewed:
   status: revision_requested
@@ -15,6 +15,9 @@ last_reviewed:
 ---
 
 # WezTerm Sidecar: Tree-Style Workspace and Activity Manager
+
+> NOTE(opus/sprack-tmux-sidecar): This proposal has been superseded by the sprack proposal, which targets tmux instead of wezterm.
+> See `cdocs/proposals/2026-03-21-sprack-tmux-sidecar-tui.md`.
 
 > BLUF: Build a WezTerm Lua plugin (`sidecar.wezterm`) that provides a persistent, tree-structured workspace and process manager inspired by Firefox's Sideberry/TreeStyle Tab. The plugin renders a dedicated "sidecar" pane running a custom TUI application, communicating with WezTerm's Lua layer via user variables (OSC 1337) and `wezterm cli`. The sidecar displays the full workspace/tab/pane hierarchy with collapsible nodes, live process status, and configurable summary widgets. Navigation is keyboard-first with fuzzy search. WezTerm's native plugin API handles event wiring, key tables, and status bar integration, while a standalone TUI process (Rust with `ratatui`) handles the rich interactive rendering that WezTerm's Lua API cannot provide natively. This hybrid architecture (Lua plugin + TUI sidecar process) is the critical design decision: it works within WezTerm's real constraints while delivering a UI far beyond what status bars and InputSelector overlays can achieve.
 

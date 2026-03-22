@@ -10,10 +10,10 @@
 # - A port mapping in the 22425-22499 range (lace wezterm SSH ports)
 #
 # Output format (default):
-#   project-name:22425:node:/path/to/project
+#   project-name:22425:node:/path/to/project:/container/workspace
 #
 # JSON format:
-#   [{"name":"project-name","port":22425,"user":"node","path":"/path/to/project","container_id":"abc123"}]
+#   [{"name":"project-name","port":22425,"user":"node","path":"/path/to/project","workspace":"/container/workspace","container_id":"abc123"}]
 
 set -euo pipefail
 
@@ -113,13 +113,21 @@ discover_projects() {
       [[ -z "$user" || "$user" == "root" ]] && user="node"
     fi
 
+    # Get container workspace folder from CONTAINER_WORKSPACE_FOLDER env var.
+    # This is set by lace up from the resolved workspaceFolder in devcontainer config.
+    # Falls back to empty string if not set (pre-lace containers).
+    workspace=""
+    workspace=$(docker inspect "$container_id" \
+      --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+      | grep '^CONTAINER_WORKSPACE_FOLDER=' | head -1 | cut -d= -f2- || true)
+
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
       # Output JSON object (without trailing comma - handled by caller)
-      printf '{"name":"%s","port":%d,"user":"%s","path":"%s","container_id":"%s"}\n' \
-        "$name" "$ssh_port" "$user" "$local_folder" "$container_id"
+      printf '{"name":"%s","port":%d,"user":"%s","path":"%s","workspace":"%s","container_id":"%s"}\n' \
+        "$name" "$ssh_port" "$user" "$local_folder" "$workspace" "$container_id"
     else
       # Output text format
-      echo "$name:$ssh_port:$user:$local_folder"
+      echo "$name:$ssh_port:$user:$local_folder:$workspace"
     fi
   done < <(discover_raw)
 }

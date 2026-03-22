@@ -7,6 +7,11 @@ type: devlog
 state: live
 status: wip
 tags: [sprack, devcontainer, rust, tooling]
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6-20250605"
+  at: 2026-03-22T03:00:00-07:00
+  round: 1
 ---
 
 # Devlog: sprack Implementation Prep
@@ -14,7 +19,7 @@ tags: [sprack, devcontainer, rust, tooling]
 > BLUF: Implementation complete and verified.
 > Rust toolchain, tmux, sqlite3, and Cargo workspace scaffold are working in the lace devcontainer.
 > One issue found and fixed: the Rust devcontainer feature's `rustlang` group membership was not applied to the `node` user due to prebuild user resolution.
-> One known issue: `lace up --rebuild` does not allocate SSH ports (pre-existing lace bug).
+> One known issue: `lace up --rebuild` does not allocate SSH ports (regression from `7f6ca1d` wezterm-server deletion).
 
 ## Objective
 
@@ -31,6 +36,9 @@ The proposal adds Rust toolchain, tmux, sqlite3, and a Cargo workspace scaffold 
 
 **devcontainer.json additions:**
 - `ghcr.io/devcontainers/features/rust:1` with `version: "latest"` and `profile: "default"` added to `prebuildFeatures`.
+
+> NOTE(opus/sprack-impl-prep): The proposal's Step 3 called for explicit `rustup component add rust-analyzer`, but `profile: "default"` already includes it.
+> No separate component installation was needed.
 
 ### Phase 2: Cargo Workspace Scaffold
 
@@ -70,18 +78,19 @@ The `extractRemoteUser()` function already exists and resolves the correct user.
 This would cause the devcontainer CLI to set `_REMOTE_USER=node` during prebuild, and the Rust feature would add `node` to the `rustlang` group automatically.
 The Dockerfile workaround can then be removed.
 
-### Issue 2: SSH port not allocated on --rebuild (NOT FIXED, pre-existing)
+### Issue 2: SSH port not allocated on --rebuild (regression from `7f6ca1d`)
 
 **Symptom:** After `lace up --rebuild`, the container has no SSH port mapping.
 `lace-discover` cannot find the container. sshd is running inside the container on port 2222, but no host port is bound.
 
-**Root cause:** `lace up` reports "No port templates found, skipping port allocation."
-The sshd feature's port templates are not being detected during the --rebuild flow.
-This appears to be a pre-existing lace issue unrelated to the Rust feature addition.
+**Root cause:** This is a regression from commit `7f6ca1d` (wezterm-server deletion), not a pre-existing bug.
+The wezterm-server feature was the only one declaring `customizations.lace.ports` in its metadata, which drove the `appPort` auto-injection pipeline.
+When it was deleted, nothing in the config declared lace ports anymore.
+The port 22427 continued to work only because the existing Docker container retained its port binding from a previous `lace up` run.
+The `--rebuild` recreated the container from current config, exposing the missing port declaration.
 
-> WARN(opus/sprack-impl-prep): This means `lace-into` cannot connect to the container after a `--rebuild`.
-> The container is accessible via `docker exec` but not via SSH.
-> This should be investigated separately.
+> WARN(opus/sprack-impl-prep): This means `lace-into` cannot connect to the container after any container recreation.
+> Fix: a lace-sshd wrapper feature that declares `customizations.lace.ports.sshPort` is being implemented.
 
 ## Verification Record
 

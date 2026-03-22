@@ -126,6 +126,89 @@ describe("prebuild: happy path", () => {
   });
 });
 
+describe("prebuild: remoteUser propagation", () => {
+  it("propagates remoteUser from main config to temp devcontainer.json", () => {
+    const jsonWithRemoteUser = JSON.stringify({
+      build: { dockerfile: "Dockerfile" },
+      remoteUser: "node",
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+      },
+      features: {
+        "ghcr.io/devcontainers/features/git:1": {},
+      },
+    }, null, 2);
+    setupWorkspace(jsonWithRemoteUser, STANDARD_DOCKERFILE);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+
+    // Verify temp devcontainer.json includes remoteUser
+    const tempConfig = JSON.parse(
+      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(tempConfig.remoteUser).toBe("node");
+  });
+
+  it("propagates remoteUser from Dockerfile USER directive", () => {
+    const dockerfileWithUser = "FROM node:24-bookworm\nRUN apt-get update\nUSER vscode\n";
+    setupWorkspace(STANDARD_JSON, dockerfileWithUser);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+
+    // Verify temp devcontainer.json includes remoteUser from Dockerfile
+    const tempConfig = JSON.parse(
+      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(tempConfig.remoteUser).toBe("vscode");
+  });
+
+  it("defaults remoteUser to root when no remoteUser or Dockerfile USER", () => {
+    setupWorkspace(STANDARD_JSON, STANDARD_DOCKERFILE);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+
+    // extractRemoteUser falls through to "root" default
+    const tempConfig = JSON.parse(
+      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(tempConfig.remoteUser).toBe("root");
+  });
+
+  it("propagates remoteUser for image-based configs", () => {
+    const imageJsonWithUser = JSON.stringify({
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      remoteUser: "vscode",
+      customizations: {
+        lace: {
+          prebuildFeatures: {
+            "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+          },
+        },
+      },
+    }, null, 2);
+    setupImageWorkspace(imageJsonWithUser);
+    const mock = createMock();
+
+    const result = runPrebuild({ workspaceRoot, subprocess: mock });
+    expect(result.exitCode).toBe(0);
+
+    const tempConfig = JSON.parse(
+      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+    );
+    expect(tempConfig.remoteUser).toBe("vscode");
+  });
+});
+
 describe("prebuild: idempotency", () => {
   it("skips rebuild when context is unchanged", () => {
     setupWorkspace(STANDARD_JSON, STANDARD_DOCKERFILE);

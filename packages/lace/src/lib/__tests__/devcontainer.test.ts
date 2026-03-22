@@ -280,6 +280,36 @@ describe("generateTempDevcontainerJson", () => {
     );
     expect(result).not.toHaveProperty("customizations");
     expect(result).not.toHaveProperty("forwardPorts");
+  });
+
+  it("includes remoteUser when provided", () => {
+    const features = {
+      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+    };
+    const result = JSON.parse(
+      generateTempDevcontainerJson(features, "Dockerfile", "node"),
+    );
+    expect(result.remoteUser).toBe("node");
+    expect(Object.keys(result)).toEqual(["build", "features", "remoteUser"]);
+  });
+
+  it("omits remoteUser when not provided", () => {
+    const features = {
+      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+    };
+    const result = JSON.parse(
+      generateTempDevcontainerJson(features, "Dockerfile"),
+    );
+    expect(result).not.toHaveProperty("remoteUser");
+  });
+
+  it("omits remoteUser when empty string", () => {
+    const features = {
+      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+    };
+    const result = JSON.parse(
+      generateTempDevcontainerJson(features, "Dockerfile", ""),
+    );
     expect(result).not.toHaveProperty("remoteUser");
   });
 

@@ -222,15 +222,21 @@ export function resolveDockerfilePath(
 /**
  * Generate a minimal devcontainer.json for the prebuild temp context.
  * Promotes prebuildFeatures to the `features` key. Excludes original features.
+ * When remoteUser is provided, it is included so that the devcontainer CLI
+ * passes the correct _REMOTE_USER to features at install time.
  */
 export function generateTempDevcontainerJson(
   prebuildFeatures: Record<string, Record<string, unknown>>,
   dockerfileName: string,
+  remoteUser?: string,
 ): string {
-  const config = {
+  const config: Record<string, unknown> = {
     build: { dockerfile: dockerfileName },
     features: prebuildFeatures,
   };
+  if (remoteUser) {
+    config.remoteUser = remoteUser;
+  }
   return JSON.stringify(config, null, 2) + "\n";
 }
 

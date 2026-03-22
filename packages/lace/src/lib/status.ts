@@ -2,14 +2,18 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readMetadata, contextsChanged } from "@/lib/metadata";
-import { readDevcontainerConfig, extractPrebuildFeatures } from "@/lib/devcontainer";
+import {
+  readDevcontainerConfig,
+  extractPrebuildFeatures,
+  generateTempDevcontainerJson,
+  extractRemoteUser,
+} from "@/lib/devcontainer";
 import {
   parseDockerfile,
   parseTag,
   generatePrebuildDockerfile,
   restoreFrom,
 } from "@/lib/dockerfile";
-import { generateTempDevcontainerJson } from "@/lib/devcontainer";
 
 export interface StatusOptions {
   workspaceRoot?: string;
@@ -90,9 +94,11 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
       }
       const parsed = parseDockerfile(dockerfileContent);
       const tempDockerfile = generatePrebuildDockerfile(parsed);
+      const remoteUser = extractRemoteUser(config.raw, config.configDir);
       const tempDevcontainerJson = generateTempDevcontainerJson(
         prebuildResult.features,
         "Dockerfile",
+        remoteUser,
       );
 
       if (contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)) {

@@ -1,5 +1,6 @@
 {
   "name": "Lace Development (Worktrees)",
+  "remoteUser": "node",
   // NOTE: docs/worktree_development.md for details.
   "build": {
     "dockerfile": "Dockerfile",

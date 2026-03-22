@@ -6,6 +6,7 @@ import {
   extractPrebuildFeatures,
   generateTempDevcontainerJson,
   rewriteImageField,
+  extractRemoteUser,
 } from "@/lib/devcontainer";
 import {
   parseDockerfile,
@@ -185,9 +186,11 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   }
 
   // Step 4: Generate temp context
+  const remoteUser = extractRemoteUser(config.raw, config.configDir);
   const tempDevcontainerJson = generateTempDevcontainerJson(
     prebuildFeatures,
     "Dockerfile",
+    remoteUser,
   );
   const prebuildTag = generateTag(parsed.imageName, parsed.tag, parsed.digest);
 

@@ -4,6 +4,8 @@
 # Usage:
 #   lace-into                    Interactive picker (fzf or bash select)
 #   lace-into <project>          Connect to named project
+#   lace-into --pane <project>   Connect current tmux pane to named project
+#   lace-into --pane             Interactive picker, connect current pane
 #   lace-into --start <project>  Start a stopped container, then connect
 #   lace-into --start            Pick from stopped containers to start
 #   lace-into --list             List running project names
@@ -349,7 +351,11 @@ start_and_connect() {
     info "container is running despite lace up exit $up_exit (likely a lifecycle hook failure)"
   fi
 
-  do_connect "$project" "$port" "$container_workspace"
+  if [[ "$PANE_MODE" == "true" ]]; then
+    do_connect_pane "$project" "$port" "$container_workspace"
+  else
+    do_connect "$project" "$port" "$container_workspace"
+  fi
 }
 
 # --- Argument parsing ---
@@ -358,9 +364,14 @@ ACTION=""
 DRY_RUN=false
 START=false
 REBUILD=false
+PANE_MODE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --pane)
+      PANE_MODE=true
+      shift
+      ;;
     --start)
       START=true
       shift
@@ -387,7 +398,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       err "unknown option: $1"
-      echo "Usage: lace-into [PROJECT] [--start] [--list] [--status] [--dry-run] [--help]" >&2
+      echo "Usage: lace-into [PROJECT] [--pane] [--start] [--list] [--status] [--dry-run] [--help]" >&2
       exit 1
       ;;
     *)
@@ -400,6 +411,12 @@ done
 # Validate flag combinations
 if [[ "$REBUILD" == "true" && "$START" != "true" ]]; then
   info "warning: --rebuild has no effect without --start (ignored)"
+fi
+
+# --pane requires running inside tmux
+if [[ "$PANE_MODE" == "true" && -z "${TMUX:-}" ]]; then
+  err "--pane requires running inside tmux"
+  exit 1
 fi
 
 # --- Host key management ---
@@ -576,6 +593,73 @@ do_connect() {
   fi
 }
 
+# --- Connect current pane to a project (--pane mode) ---
+do_connect_pane() {
+  local project="$1"
+  local port="$2"
+  local workspace="${3:-}"
+  local user
+  user=$(resolve_user_for_port "$port")
+
+  # SSH connection args (same construction as do_connect)
+  local ssh_base=(
+    ssh
+    -o "IdentityFile=$LACE_SSH_KEY"
+    -o "IdentitiesOnly=yes"
+    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
+    -o "StrictHostKeyChecking=no"
+    -o "ControlMaster=auto"
+    -o "ControlPath=$HOME/.ssh/lace-ctrl-%C"
+    -o "ControlPersist=600"
+    -t
+    -p "$port"
+    "${user}@localhost"
+  )
+
+  if [[ -n "$workspace" ]]; then
+    ssh_base+=("cd $workspace && exec \$SHELL -l")
+  fi
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "# --pane mode: respawn current pane with SSH"
+    echo "tmux respawn-pane -k -t \"$TMUX_PANE\" ${ssh_base[*]}"
+    echo ""
+    echo "# Session-level options (set-if-absent):"
+    echo "tmux set-option @lace_port \"$port\""
+    echo "tmux set-option @lace_user \"$user\""
+    if [[ -n "$workspace" ]]; then
+      echo "tmux set-option @lace_workspace \"$workspace\""
+    fi
+    echo ""
+    echo "# Pane title:"
+    echo "tmux select-pane -t \"$TMUX_PANE\" -T \"$project\""
+    exit 0
+  fi
+
+  refresh_host_key "$port"
+
+  # Respawn the current pane with the SSH command
+  tmux respawn-pane -k -t "$TMUX_PANE" "${ssh_base[@]}"
+
+  # Set session-level options if not already set, enabling lace-split (Alt+HJKL)
+  local existing_port
+  existing_port=$(tmux show-option -qv @lace_port 2>/dev/null)
+  if [[ -z "$existing_port" ]]; then
+    tmux set-option @lace_port "$port"
+    tmux set-option @lace_user "$user"
+    if [[ -n "$workspace" ]]; then
+      tmux set-option @lace_workspace "$workspace"
+    fi
+    info "session lace options set (enables Alt+HJKL container splits)"
+  elif [[ "$existing_port" != "$port" ]]; then
+    info "warning: session @lace_port ($existing_port) differs from pane target ($port)"
+    info "Alt+HJKL splits will target the session-level container, not this pane's"
+  fi
+
+  # Update pane title
+  tmux select-pane -t "$TMUX_PANE" -T "$project"
+}
+
 # --- Execute action ---
 case "$ACTION" in
   list)
@@ -602,6 +686,8 @@ lace-into -- Connect to a lace devcontainer via tmux
 Usage:
   lace-into                    Interactive picker (fzf or bash select)
   lace-into <project>          Connect to named project
+  lace-into --pane <project>   Connect current tmux pane to named project
+  lace-into --pane             Interactive picker, connect current pane
   lace-into --start <project>  Start a stopped container, then connect
   lace-into --start            Pick from stopped containers to start
   lace-into --start --rebuild <project>  Start with full rebuild (recreate container)
@@ -618,6 +704,12 @@ Connection creates a tmux session with an SSH pane to the container:
   tmux new-session -d -s <project> ssh -p <port> ... <user>@localhost
   tmux set-option -t <project> @lace_port <port>
   tmux attach-session -t =<project>
+
+The --pane flag connects the current tmux pane to a container instead of
+creating a dedicated session. Uses `tmux respawn-pane -k` to replace the
+current pane's process with an SSH connection. Must be run from inside tmux.
+Session-level @lace_port options are set if not already present, enabling
+Alt+HJKL container-aware splits in the current session.
 
 Session-level options @lace_port, @lace_user, and @lace_workspace enable
 the lace-split keybinding (Alt-S in tmux.conf) to auto-SSH new splits
@@ -645,6 +737,9 @@ Examples:
   lace-into lace                Connect to the lace devcontainer
   lace-into dotfiles            Connect to the dotfiles devcontainer
   lace-into                     Pick from running projects interactively
+  lace-into --pane lace         Connect current pane to lace container
+  lace-into --pane              Pick from running, connect current pane
+  lace-into --pane --start lace Start lace if stopped, connect current pane
   lace-into --start lace        Start lace if stopped, then connect
   lace-into --start             Pick from stopped containers to start
   lace-into --start --dry-run lace  Show what --start would do
@@ -676,7 +771,11 @@ if [[ -n "$PROJECT" ]]; then
     if [[ "$START" == "true" ]]; then
       info "$PROJECT is already running"
     fi
-    do_connect "$PROJECT" "$port" "$workspace"
+    if [[ "$PANE_MODE" == "true" ]]; then
+      do_connect_pane "$PROJECT" "$port" "$workspace"
+    else
+      do_connect "$PROJECT" "$port" "$workspace"
+    fi
     exit 0  # reached only if exec in do_connect fails (e.g. dry-run already exits)
   fi
 
@@ -787,7 +886,11 @@ if [[ "$START" == "true" ]]; then
   if [[ ${#PICKER_ITEMS[@]} -eq 1 ]]; then
     IFS=$'\t' read -r kind name extra ws <<< "${PICKER_DATA[0]}"
     if [[ "$kind" == "running" ]]; then
-      do_connect "$name" "$extra" "$ws"
+      if [[ "$PANE_MODE" == "true" ]]; then
+        do_connect_pane "$name" "$extra" "$ws"
+      else
+        do_connect "$name" "$extra" "$ws"
+      fi
     else
       start_and_connect "$name" "$extra"
     fi
@@ -816,7 +919,11 @@ if [[ "$START" == "true" ]]; then
     if [[ "$item_name" == "$PICK_NAME" ]]; then
       IFS=$'\t' read -r kind name extra ws <<< "${PICKER_DATA[$i]}"
       if [[ "$kind" == "running" ]]; then
-        do_connect "$name" "$extra" "$ws"
+        if [[ "$PANE_MODE" == "true" ]]; then
+          do_connect_pane "$name" "$extra" "$ws"
+        else
+          do_connect "$name" "$extra" "$ws"
+        fi
       else
         start_and_connect "$name" "$extra"
       fi
@@ -850,7 +957,11 @@ fi
 if [[ ${#PROJECTS[@]} -eq 1 ]]; then
   IFS=: read -r name port user path ws <<< "${PROJECTS[0]}"
   info "one project found: $name"
-  do_connect "$name" "$port" "$ws"
+  if [[ "$PANE_MODE" == "true" ]]; then
+    do_connect_pane "$name" "$port" "$ws"
+  else
+    do_connect "$name" "$port" "$ws"
+  fi
   exit 0
 fi
 
@@ -873,7 +984,11 @@ fi
 for proj in "${PROJECTS[@]}"; do
   if [[ "${proj%%:*}" == "$PROJECT" ]]; then
     IFS=: read -r _ port _ _ ws <<< "$proj"
-    do_connect "$PROJECT" "$port" "$ws"
+    if [[ "$PANE_MODE" == "true" ]]; then
+      do_connect_pane "$PROJECT" "$port" "$ws"
+    else
+      do_connect "$PROJECT" "$port" "$ws"
+    fi
     exit 0
   fi
 done

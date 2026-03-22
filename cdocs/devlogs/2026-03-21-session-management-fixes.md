@@ -91,7 +91,10 @@ Three parallel rounds of subagents were dispatched:
 | `cdocs/reports/2026-03-21-session-management-executive-summary.md` | Executive summary |
 | `.devcontainer/features/lace-sshd/devcontainer-feature.json` | Added authorized-keys mount |
 | `.lace/prebuild/features/lace-sshd/devcontainer-feature.json` | Added authorized-keys mount |
-| `bin/lace-into` | Health check + remain-on-exit failed |
+| `bin/lace-into` | Health check + remain-on-exit failed + respawn-in-place |
+| `bin/test/test-lace-into.sh` | Tmux session management test harness (22 tests) |
+| `cdocs/reports/2026-03-22-tmux-troubleshooting-approach.md` | Troubleshooting techniques |
+| `cdocs/proposals/2026-03-22-lace-sshd-feature-evolution.md` | Published feature proposal |
 
 ## Verification
 
@@ -101,18 +104,31 @@ Feature JSON updated in all three copies.
 926/929 tests pass (3 pre-existing failures referencing removed `wezterm-server` feature source directory).
 All mount-related test suites pass cleanly.
 
-### Stale Reattach (Issue 1)
+### Stale Reattach (Issue 1): Round 2
 
-`do_connect()` now performs three-way health check using `tmux list-panes -F '#{pane_dead}'`.
-Code reviewed: `grep -c` guarded with `|| true`, `total_panes -gt 0` guard present, `refresh_host_key` called before respawn.
+Initial implementation (kill-and-recreate) had a critical flaw: `remain-on-exit failed` was set AFTER `tmux new-session`, creating a race condition where fast SSH failures would destroy the session before `remain-on-exit` took effect.
+tmux-continuum then auto-restored the killed session with a default shell (nushell), producing the "local terminal" the user reported.
+
+**Fix:** Rewrote to **respawn-in-place**: never kill lace sessions, always respawn dead panes with the current SSH command.
+This avoids the continuum interaction entirely and preserves session options.
+
+Also discovered: `tmux show-option -t "=session"` (with `=` prefix) silently returns empty for user options, even though `has-session -t "=session"` works.
+Fixed all `show-option` calls to use `-t "session"` without `=`.
+
+### Test Harness
+
+Built `bin/test/test-lace-into.sh`: 22 tests using tmux `-L <socket>` for isolation, PATH-shimmed mocks, and state assertions.
+Key techniques from `cdocs/reports/2026-03-22-tmux-troubleshooting-approach.md`.
 
 ### Dead Panes Phase 1 (Issue 2)
 
 `remain-on-exit failed` set in both runtime and dry-run paths.
+This only helps for clean exits (exit 0 closes pane); rebuild-induced deaths (exit 255) still persist.
+The respawn-in-place fix addresses the practical impact: `lace-into` now reconnects dead panes instead of leaving them.
 
 ### What Was Not Done
 
 - Dead panes Phases 2-3 (pane-died hook, respawn-all keybinding): deferred pending proposal revision.
-  The review identified blocking issues with the rate limiting explanation and hook lifecycle management.
-- Dotfiles devcontainer migration from wezterm-server to lace-sshd: out of scope for this session.
-- Runtime verification of SSH key injection (requires `lace up --rebuild`): not performed in this session.
+- Dotfiles devcontainer migration from wezterm-server to lace-sshd: out of scope.
+- In-container splits (Alt+HJKL): proposal in progress.
+- lace-sshd feature evolution to published GHCR feature: proposal written.

@@ -1,0 +1,9 @@
+[package]
+name = "sprack-poll"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sprack-db = { path = "../sprack-db" }
+anyhow = { workspace = true }
+signal-hook = { workspace = true }

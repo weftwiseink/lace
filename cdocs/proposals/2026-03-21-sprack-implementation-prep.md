@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-tui
 type: proposal
 state: live
-status: wip
+status: implementation_wip
 tags: [sprack, devcontainer, rust, tooling, implementation_prep]
 ---
 

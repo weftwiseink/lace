@@ -1,0 +1,10 @@
+[package]
+name = "sprack-claude"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sprack-db = { path = "../sprack-db" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

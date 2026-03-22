@@ -1,0 +1,56 @@
+#!/bin/bash
+# lace-split: Container-aware tmux split helper.
+# Creates SSH splits in lace sessions, local splits otherwise.
+#
+# Usage: lace-split [-h|-v] [-U]
+#   -h   Horizontal split (split-window -h, default)
+#   -v   Vertical split (split-window -v)
+#   -U   Swap pane up after split (for left/up splits)
+#
+# Called from tmux keybindings. Not intended for direct user invocation.
+
+set -euo pipefail
+
+DIRECTION="-h"
+SWAP=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h) DIRECTION="-h"; shift ;;
+    -v) DIRECTION="-v"; shift ;;
+    -U) SWAP="yes"; shift ;;
+    *) shift ;;
+  esac
+done
+
+port=$(tmux show-option -qv @lace_port)
+user=$(tmux show-option -qv @lace_user)
+ws=$(tmux show-option -qv @lace_workspace)
+
+if [ -n "$port" ]; then
+  # Lace session: SSH split into container
+  ssh_base="exec ssh \
+    -o IdentityFile=$HOME/.config/lace/ssh/id_ed25519 \
+    -o IdentitiesOnly=yes \
+    -o UserKnownHostsFile=$HOME/.ssh/lace_known_hosts \
+    -o StrictHostKeyChecking=no \
+    -o ControlMaster=auto \
+    -o ControlPath=$HOME/.ssh/lace-ctrl-%C \
+    -o ControlPersist=600 \
+    -t -p $port ${user:-node}@localhost"
+
+  if [ -n "$ws" ]; then
+    full_cmd="$ssh_base \"cd $ws && exec \$SHELL -l\""
+  else
+    full_cmd="$ssh_base"
+  fi
+
+  tmux split-window "$DIRECTION" "$full_cmd"
+else
+  # Non-lace session: local split
+  tmux split-window "$DIRECTION" -c "#{pane_current_path}"
+fi
+
+if [ -n "$SWAP" ]; then
+  tmux swap-pane -U
+fi

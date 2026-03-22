@@ -6,6 +6,11 @@ task_list: session-management/ssh-key-injection
 type: proposal
 state: live
 status: wip
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-6-20250725"
+  at: 2026-03-21T23:15:00-07:00
+  round: 1
 tags: [lace-into, ssh, lace-sshd, authorized-keys]
 ---
 

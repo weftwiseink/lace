@@ -6,6 +6,11 @@ task_list: session-management/dead-panes
 type: proposal
 state: live
 status: wip
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6-20250725"
+  at: 2026-03-21T23:15:00-07:00
+  round: 1
 tags: [lace-into, tmux, session-management]
 ---
 

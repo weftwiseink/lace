@@ -6,6 +6,11 @@ task_list: session-management/pane-connect-disconnect
 type: proposal
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6-20250725"
+  at: 2026-03-22T11:00:00-07:00
+  round: 1
 tags: [lace-into, tmux, session-management, pane-management]
 ---
 
@@ -135,11 +140,6 @@ do_connect_pane() {
   # Respawn the current pane with the SSH command
   tmux respawn-pane -k -t "$TMUX_PANE" "${ssh_base[@]}"
 
-  # Set pane-level options for tracking
-  tmux set-option -p -t "$TMUX_PANE" @lace_connected true
-  tmux set-option -p -t "$TMUX_PANE" @lace_target_port "$port"
-  tmux set-option -p -t "$TMUX_PANE" @lace_target_project "$project"
-
   # Set session-level options if not already set, enabling lace-split
   local existing_port
   existing_port=$(tmux show-option -qv @lace_port 2>/dev/null)
@@ -190,11 +190,12 @@ In `dot_config/tmux/tmux.conf`:
 ```tmux
 # disconnect-pane: Drop the current pane from SSH back to a local shell.
 # Usage: prefix + : then type "disconnect-pane"
-set -s command-alias[100] disconnect-pane='run-shell "tmux respawn-pane -k -t #{pane_id}"'
+set -s command-alias[100] disconnect-pane='respawn-pane -k'
 ```
 
-`respawn-pane -k` without a command argument starts the default shell (`$SHELL`, which is nushell per `default-shell` config).
+`respawn-pane -k` without a command argument starts the default shell (nushell per `default-shell` config).
 This kills the SSH process and drops to a fresh local shell in the same pane.
+Uses bare `respawn-pane -k` directly as a tmux command (not wrapped in `run-shell`), so it targets the current pane without shell indirection.
 
 #### Keybinding (Optional)
 
@@ -202,7 +203,7 @@ For quick access without the command prompt:
 
 ```tmux
 # Disconnect current pane from SSH (prefix + D)
-bind D run-shell 'tmux respawn-pane -k -t "#{pane_id}"'
+bind D respawn-pane -k
 ```
 
 `prefix + D` is `Alt-z D` with the current prefix configuration.

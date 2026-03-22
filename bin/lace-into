@@ -467,7 +467,7 @@ do_connect() {
     echo ""
     echo "# tmux session commands:"
     echo "tmux new-session -d -s \"$project\" -e LACE_PORT=$port <ssh_command>"
-    echo "tmux set-option -t \"$project\" remain-on-exit on"
+    echo "tmux set-option -t \"$project\" remain-on-exit failed"
     echo "tmux select-pane -t \"$project\" -T \"shell\""
     echo "tmux set-option -t \"$project\" @lace_port \"$port\""
     echo "tmux set-option -t \"$project\" @lace_user \"$user\""
@@ -552,7 +552,7 @@ do_connect() {
   refresh_host_key "$port"
 
   tmux new-session -d -s "$project" -e "LACE_PORT=$port" "${ssh_base[@]}"
-  tmux set-option -t "$project" remain-on-exit on
+  tmux set-option -t "$project" remain-on-exit failed
   tmux select-pane -t "$project" -T "shell"
 
   # Store container connection details as session-level user options for split automation.

@@ -199,7 +199,7 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   if (
     !options.force &&
     !options.dryRun &&
-    !contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)
+    !contextsChanged(join(prebuildDir, ".devcontainer"), tempDockerfile, tempDevcontainerJson)
   ) {
     // Cache is fresh — but verify the Docker image actually exists before skipping.
     const imageCheck = run("docker", ["image", "inspect", "--format", "{{.Id}}", prebuildTag]);
@@ -265,21 +265,25 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   }
 
   // Step 6: Write temp context and run devcontainer build
-  mkdirSync(prebuildDir, { recursive: true });
-  writeFileSync(join(prebuildDir, "Dockerfile"), tempDockerfile, "utf-8");
+  // The devcontainer CLI requires local features to be children of a
+  // .devcontainer/ directory within the workspace folder. Place all
+  // prebuild files inside prebuildDir/.devcontainer/ to satisfy this.
+  const prebuildConfigDir = join(prebuildDir, ".devcontainer");
+  mkdirSync(prebuildConfigDir, { recursive: true });
+  writeFileSync(join(prebuildConfigDir, "Dockerfile"), tempDockerfile, "utf-8");
   writeFileSync(
-    join(prebuildDir, "devcontainer.json"),
+    join(prebuildConfigDir, "devcontainer.json"),
     tempDevcontainerJson,
     "utf-8",
   );
 
-  // Copy local features into the prebuild temp context so the devcontainer
+  // Copy local features into the prebuild .devcontainer/ so the devcontainer
   // CLI can find them. Local feature paths (e.g., "./features/lace-sshd")
-  // are resolved relative to the config directory (.devcontainer/).
+  // are resolved relative to the .devcontainer/ directory.
   for (const featureRef of Object.keys(prebuildFeatures)) {
     if (!isLocalPath(featureRef)) continue;
     const sourcePath = resolve(config.configDir, featureRef);
-    const targetPath = join(prebuildDir, featureRef);
+    const targetPath = join(prebuildConfigDir, featureRef);
     mkdirSync(join(targetPath, ".."), { recursive: true });
     cpSync(sourcePath, targetPath, { recursive: true });
   }
@@ -289,7 +293,7 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   // Seed temp context with prior lock entries for version pinning
   const priorEntries = extractPrebuiltEntries(lockFilePath);
   if (Object.keys(priorEntries).length > 0) {
-    writeLockFile(join(prebuildDir, "devcontainer-lock.json"), {
+    writeLockFile(join(prebuildConfigDir, "devcontainer-lock.json"), {
       features: priorEntries,
     });
   }
@@ -304,7 +308,7 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     "--workspace-folder",
     prebuildDir,
     "--config",
-    join(prebuildDir, "devcontainer.json"),
+    join(prebuildConfigDir, "devcontainer.json"),
     "--image-name",
     prebuildTag,
   ];

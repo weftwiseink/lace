@@ -15,6 +15,7 @@ import type { RunSubprocess } from "@/lib/subprocess";
 let workspaceRoot: string;
 let devcontainerDir: string;
 let prebuildDir: string;
+let prebuildConfigDir: string;
 let mockCalls: Array<{ command: string; args: string[] }>;
 
 /** Mock subprocess that always succeeds and writes a lock file. */
@@ -69,6 +70,7 @@ beforeEach(() => {
   workspaceRoot = join(tmpdir(), `lace-test-prebuild-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   devcontainerDir = join(workspaceRoot, ".devcontainer");
   prebuildDir = join(workspaceRoot, ".lace", "prebuild");
+  prebuildConfigDir = join(prebuildDir, ".devcontainer");
   mockCalls = [];
   mkdirSync(workspaceRoot, { recursive: true });
 });
@@ -111,8 +113,8 @@ describe("prebuild: happy path", () => {
     expect(dockerfile).toContain("FROM lace.local/node:24-bookworm");
 
     // Verify temp context exists
-    expect(existsSync(join(prebuildDir, "Dockerfile"))).toBe(true);
-    expect(existsSync(join(prebuildDir, "devcontainer.json"))).toBe(true);
+    expect(existsSync(join(prebuildConfigDir, "Dockerfile"))).toBe(true);
+    expect(existsSync(join(prebuildConfigDir, "devcontainer.json"))).toBe(true);
     expect(existsSync(join(prebuildDir, "metadata.json"))).toBe(true);
 
     // Verify devcontainer build was called correctly
@@ -150,7 +152,7 @@ describe("prebuild: remoteUser propagation", () => {
 
     // Verify temp devcontainer.json includes remoteUser
     const tempConfig = JSON.parse(
-      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+      readFileSync(join(prebuildConfigDir, "devcontainer.json"), "utf-8"),
     );
     expect(tempConfig.remoteUser).toBe("node");
   });
@@ -165,7 +167,7 @@ describe("prebuild: remoteUser propagation", () => {
 
     // Verify temp devcontainer.json includes remoteUser from Dockerfile
     const tempConfig = JSON.parse(
-      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+      readFileSync(join(prebuildConfigDir, "devcontainer.json"), "utf-8"),
     );
     expect(tempConfig.remoteUser).toBe("vscode");
   });
@@ -179,7 +181,7 @@ describe("prebuild: remoteUser propagation", () => {
 
     // extractRemoteUser falls through to "root" default
     const tempConfig = JSON.parse(
-      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+      readFileSync(join(prebuildConfigDir, "devcontainer.json"), "utf-8"),
     );
     expect(tempConfig.remoteUser).toBe("root");
   });
@@ -203,7 +205,7 @@ describe("prebuild: remoteUser propagation", () => {
     expect(result.exitCode).toBe(0);
 
     const tempConfig = JSON.parse(
-      readFileSync(join(prebuildDir, "devcontainer.json"), "utf-8"),
+      readFileSync(join(prebuildConfigDir, "devcontainer.json"), "utf-8"),
     );
     expect(tempConfig.remoteUser).toBe("vscode");
   });
@@ -465,8 +467,8 @@ describe("prebuild: image-based config happy path", () => {
     expect(config).toContain("lace.local/mcr.microsoft.com/devcontainers/base:ubuntu");
 
     // Verify temp context
-    expect(existsSync(join(prebuildDir, "Dockerfile"))).toBe(true);
-    const tempDockerfile = readFileSync(join(prebuildDir, "Dockerfile"), "utf-8");
+    expect(existsSync(join(prebuildConfigDir, "Dockerfile"))).toBe(true);
+    const tempDockerfile = readFileSync(join(prebuildConfigDir, "Dockerfile"), "utf-8");
     expect(tempDockerfile).toBe("FROM mcr.microsoft.com/devcontainers/base:ubuntu\n");
 
     // Verify metadata includes configType

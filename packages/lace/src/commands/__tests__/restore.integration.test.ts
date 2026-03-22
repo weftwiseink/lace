@@ -99,7 +99,7 @@ describe("restore: after prebuild", () => {
     runRestore({ workspaceRoot });
     expect(existsSync(prebuildDir)).toBe(true);
     expect(existsSync(join(prebuildDir, "metadata.json"))).toBe(true);
-    expect(existsSync(join(prebuildDir, "Dockerfile"))).toBe(true);
+    expect(existsSync(join(prebuildDir, ".devcontainer", "Dockerfile"))).toBe(true);
   });
 });
 

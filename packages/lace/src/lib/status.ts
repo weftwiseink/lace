@@ -101,7 +101,7 @@ export function runStatus(options: StatusOptions = {}): StatusResult {
         remoteUser,
       );
 
-      if (contextsChanged(prebuildDir, tempDockerfile, tempDevcontainerJson)) {
+      if (contextsChanged(join(prebuildDir, ".devcontainer"), tempDockerfile, tempDevcontainerJson)) {
         lines.push(`  Status:        config changed since last prebuild`);
       } else {
         lines.push(`  Status:        up to date`);

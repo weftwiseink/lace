@@ -18,6 +18,16 @@
                     "onAutoForward": "silent",
                     "requireLocalPort": true
                 }
+            },
+            "mounts": {
+                "authorized-keys": {
+                    "target": "/home/${_REMOTE_USER}/.ssh/authorized_keys",
+                    "recommendedSource": "~/.config/lace/ssh/id_ed25519.pub",
+                    "description": "SSH public key for lace SSH access",
+                    "readonly": true,
+                    "sourceMustBe": "file",
+                    "hint": "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N ''"
+                }
             }
         }
     },

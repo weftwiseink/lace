@@ -62,6 +62,7 @@
           "version": "latest"
         },
         "ghcr.io/devcontainers/features/sshd:1": {},
+        "./features/lace-sshd": {},
         "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
         "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
         "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},

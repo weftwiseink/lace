@@ -1,6 +1,7 @@
 // IMPLEMENTATION_VALIDATION
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { isLocalPath } from "@/lib/feature-metadata";
 import {
   readDevcontainerConfig,
   extractPrebuildFeatures,
@@ -271,6 +272,17 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     tempDevcontainerJson,
     "utf-8",
   );
+
+  // Copy local features into the prebuild temp context so the devcontainer
+  // CLI can find them. Local feature paths (e.g., "./features/lace-sshd")
+  // are resolved relative to the config directory (.devcontainer/).
+  for (const featureRef of Object.keys(prebuildFeatures)) {
+    if (!isLocalPath(featureRef)) continue;
+    const sourcePath = resolve(config.configDir, featureRef);
+    const targetPath = join(prebuildDir, featureRef);
+    mkdirSync(join(targetPath, ".."), { recursive: true });
+    cpSync(sourcePath, targetPath, { recursive: true });
+  }
 
   const lockFilePath = join(config.configDir, "devcontainer-lock.json");
 

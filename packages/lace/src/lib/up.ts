@@ -275,6 +275,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         skipValidation: skipMetadataValidation,
         subprocess,
         cacheDir,
+        configDir: configMinimal.configDir,
       });
 
       // Validate each feature's options and port declarations

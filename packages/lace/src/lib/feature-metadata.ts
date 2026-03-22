@@ -98,6 +98,13 @@ export interface FetchOptions {
   subprocess?: RunSubprocess;
   /** Override cache directory (for testing). Default: ~/.config/lace/cache/features */
   cacheDir?: string;
+  /**
+   * Directory containing the devcontainer.json config file.
+   * Used to resolve relative local feature paths (e.g., "./features/foo").
+   * When set, local paths are resolved relative to this directory.
+   * When unset, local paths are resolved from cwd (backward compatible).
+   */
+  configDir?: string;
 }
 
 export type MetadataFetchKind =
@@ -362,8 +369,14 @@ function fetchFromRegistry(
 
 // ── Internal: Local-path fetch ──
 
-function fetchFromLocalPath(featureId: string): FeatureMetadata {
-  const metadataPath = join(featureId, "devcontainer-feature.json");
+function fetchFromLocalPath(featureId: string, configDir?: string): FeatureMetadata {
+  // Resolve relative local paths against the config directory when provided.
+  // This matches the devcontainer CLI convention: "./features/foo" in
+  // devcontainer.json resolves relative to the directory containing that file.
+  const resolvedPath = configDir && !featureId.startsWith("/")
+    ? join(configDir, featureId)
+    : featureId;
+  const metadataPath = join(resolvedPath, "devcontainer-feature.json");
 
   if (!existsSync(metadataPath)) {
     throw new MetadataFetchError(
@@ -413,6 +426,7 @@ export async function fetchFeatureMetadata(
     skipValidation = false,
     subprocess,
     cacheDir = DEFAULT_CACHE_DIR,
+    configDir,
   } = options;
 
   // 1. Check in-memory cache
@@ -435,7 +449,7 @@ export async function fetchFeatureMetadata(
   // 3. Fetch from source
   try {
     const metadata = isLocalPath(featureId)
-      ? fetchFromLocalPath(featureId)
+      ? fetchFromLocalPath(featureId, configDir)
       : fetchFromRegistry(featureId, subprocess);
 
     // 4. Populate caches

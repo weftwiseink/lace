@@ -5,5 +5,6 @@ edition = "2021"
 
 [dependencies]
 sprack-db = { path = "../sprack-db" }
+rusqlite = { workspace = true }
 anyhow = { workspace = true }
 signal-hook = { workspace = true }

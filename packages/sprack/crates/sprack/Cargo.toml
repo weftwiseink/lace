@@ -8,3 +8,7 @@ sprack-db = { path = "../sprack-db" }
 anyhow = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+tui-tree-widget = { workspace = true }
+catppuccin = { workspace = true }
+rusqlite = { workspace = true }
+libc = "0.2"

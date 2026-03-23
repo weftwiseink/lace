@@ -11,11 +11,11 @@ members = [
 rusqlite = { version = "0.32", features = ["bundled"] }
 thiserror = "2"
 anyhow = "1"
-ratatui = "0.29"
+ratatui = "0.28"
 crossterm = "0.28"
 tui-tree-widget = "0.22"
 signal-hook = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-catppuccin = { version = "3", features = ["ratatui"] }
+catppuccin = { version = "2", features = ["ratatui"] }
 insta = "1"

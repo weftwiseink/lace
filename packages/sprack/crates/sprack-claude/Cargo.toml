@@ -8,3 +8,5 @@ sprack-db = { path = "../sprack-db" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+signal-hook = { workspace = true }
+rusqlite = { workspace = true }

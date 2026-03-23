@@ -1,0 +1,126 @@
+//! Session file discovery for Claude Code projects.
+//!
+//! Resolves a Claude Code project directory to its active JSONL session file
+//! using a two-tier strategy: parse sessions-index.json (primary), or list
+//! root-level .jsonl files by mtime (fallback).
+
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+
+/// An entry from Claude Code's sessions-index.json file.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct SessionIndexEntry {
+    /// Full absolute path to the session file.
+    #[serde(rename = "fullPath", default)]
+    pub full_path: Option<String>,
+
+    /// File modification time as a string (ISO 8601 or numeric).
+    #[serde(rename = "fileMtime", default)]
+    pub file_mtime: Option<serde_json::Value>,
+
+    /// Whether this session is a sidechain (subagent session).
+    #[serde(rename = "isSidechain", default)]
+    pub is_sidechain: Option<bool>,
+
+    /// Session identifier.
+    #[serde(rename = "sessionId", default)]
+    pub session_id: Option<String>,
+}
+
+/// Cached state for a resolved session file.
+pub struct SessionFileState {
+    /// PID of the Claude Code process.
+    pub claude_pid: u32,
+    /// Path to the active session file.
+    pub session_file: PathBuf,
+    /// Last read position for incremental reads.
+    pub file_position: u64,
+    /// The most recent entries from the last read.
+    pub last_entries: Vec<crate::jsonl::JsonlEntry>,
+}
+
+/// Finds the active session file for a Claude Code project directory.
+///
+/// Primary strategy: parse sessions-index.json, filter out sidechains,
+/// and select the entry with the most recent file modification time.
+/// Fallback: list root-level .jsonl files sorted by mtime descending.
+pub fn find_session_file(project_dir: &Path) -> Option<PathBuf> {
+    // Primary: parse sessions-index.json.
+    if let Some(path) = find_via_sessions_index(project_dir) {
+        return Some(path);
+    }
+
+    // Fallback: list root-level .jsonl files by mtime.
+    find_via_jsonl_listing(project_dir)
+}
+
+/// Parses sessions-index.json and returns the most recent non-sidechain session file.
+fn find_via_sessions_index(project_dir: &Path) -> Option<PathBuf> {
+    let index_path = project_dir.join("sessions-index.json");
+    let index_content = std::fs::read_to_string(&index_path).ok()?;
+    let entries: Vec<SessionIndexEntry> = serde_json::from_str(&index_content).ok()?;
+
+    // Filter out sidechains.
+    let non_sidechain_entries: Vec<&SessionIndexEntry> = entries
+        .iter()
+        .filter(|entry| !entry.is_sidechain.unwrap_or(false))
+        .collect();
+
+    if non_sidechain_entries.is_empty() {
+        return None;
+    }
+
+    // Pick the entry with the most recent fileMtime.
+    // fileMtime can be a number (epoch ms) or a string; compare as f64.
+    let best_entry = non_sidechain_entries.into_iter().max_by(|a, b| {
+        let mtime_a = extract_mtime_value(&a.file_mtime);
+        let mtime_b = extract_mtime_value(&b.file_mtime);
+        mtime_a
+            .partial_cmp(&mtime_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+
+    let full_path = best_entry.full_path.as_ref()?;
+    let path = PathBuf::from(full_path);
+
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Extracts a numeric mtime value from a serde_json::Value.
+fn extract_mtime_value(value: &Option<serde_json::Value>) -> f64 {
+    match value {
+        Some(serde_json::Value::Number(number)) => number.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(string)) => string.parse::<f64>().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+/// Lists root-level .jsonl files in the project directory, sorted by mtime descending.
+///
+/// Ignores files in subdirectories (which are subagent session files).
+fn find_via_jsonl_listing(project_dir: &Path) -> Option<PathBuf> {
+    let read_dir = std::fs::read_dir(project_dir).ok()?;
+
+    let mut jsonl_files: Vec<(PathBuf, std::time::SystemTime)> = read_dir
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            let path = entry.path();
+            path.is_file() && path.extension().is_some_and(|ext| ext == "jsonl")
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((entry.path(), modified))
+        })
+        .collect();
+
+    // Sort by mtime descending: most recent first.
+    jsonl_files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    jsonl_files.into_iter().next().map(|(path, _)| path)
+}

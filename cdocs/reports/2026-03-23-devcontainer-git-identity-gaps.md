@@ -6,7 +6,7 @@ task_list: lace/devcontainer-git-identity
 type: report
 state: live
 status: review_ready
-tags: [devcontainer, git, architecture]
+tags: [devcontainer, git, architecture, lace]
 ---
 
 # Devcontainer Git Identity Gaps

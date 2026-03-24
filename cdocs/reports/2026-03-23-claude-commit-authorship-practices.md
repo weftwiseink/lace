@@ -6,7 +6,7 @@ task_list: lace/claude-commit-authorship
 type: report
 state: live
 status: review_ready
-tags: [git, attribution, architecture]
+tags: [git, attribution, architecture, claude_code]
 ---
 
 # Claude Commit Authorship Practices

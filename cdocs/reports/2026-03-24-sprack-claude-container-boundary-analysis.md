@@ -6,7 +6,7 @@ task_list: terminal-management/sprack-tui
 type: report
 state: live
 status: review_ready
-tags: [sprack, container, architecture, process_isolation]
+tags: [sprack, container, architecture, process_isolation, lace]
 ---
 
 # sprack-claude Container Boundary Analysis

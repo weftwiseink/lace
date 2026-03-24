@@ -23,6 +23,20 @@ lace up --workspace-folder .
 
 See [`packages/lace/README.md`](packages/lace/README.md) for full documentation.
 
+### [`packages/sprack`](packages/sprack/)
+
+Tree-style tmux session browser built as cooperating Rust binaries sharing a SQLite database (WAL mode).
+Renders a responsive, collapsible view of every tmux session, window, and pane, grouped by lace devcontainer.
+Includes deep Claude Code integration: thinking/idle/error status, subagent counts, context usage.
+
+Three binaries: `sprack` (TUI), `sprack-poll` (tmux state poller), `sprack-claude` (Claude Code summarizer).
+
+```sh
+cd packages/sprack && cargo build --release
+```
+
+See [`packages/sprack/README.md`](packages/sprack/README.md) for full documentation.
+
 ### [`devcontainers/features`](devcontainers/features/)
 
 Devcontainer features published to `ghcr.io/weftwiseink/devcontainer-features`:
@@ -68,7 +82,8 @@ pnpm --filter lace test
 ```
 lace/
 ├── packages/
-│   └── lace/              # Devcontainer orchestration CLI
+│   ├── lace/              # Devcontainer orchestration CLI
+│   └── sprack/            # tmux session browser (Rust workspace)
 ├── devcontainers/
 │   └── features/          # Devcontainer features (OCI-published)
 │       └── src/

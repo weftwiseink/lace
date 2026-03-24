@@ -52,6 +52,10 @@ fn is_process_running(pid_file: &Path) -> bool {
 ///
 /// The daemon is spawned with `setsid()` to prevent signal propagation
 /// from the TUI's process group. stdin/stdout/stderr are redirected to /dev/null.
+///
+/// Resolves the sprack-poll binary as a sibling of the current executable first,
+/// falling back to PATH lookup. This ensures `./target/debug/sprack` finds
+/// `./target/debug/sprack-poll` without requiring PATH configuration.
 pub fn start_sprack_poll() -> Result<()> {
     let data_dir = sprack_data_dir()?;
     fs::create_dir_all(&data_dir)?;
@@ -63,9 +67,14 @@ pub fn start_sprack_poll() -> Result<()> {
         let _ = fs::remove_file(&pid_path);
     }
 
+    let poll_binary = resolve_sibling_binary("sprack-poll");
+
     // Spawn sprack-poll as a detached daemon.
-    let child = unsafe {
-        Command::new("sprack-poll")
+    // NOTE(opus/sprack): Do not write the PID file here. sprack-poll manages
+    // its own PID file on startup. Writing it from the parent causes a race:
+    // sprack-poll's check_already_running() would see its own PID and exit.
+    let _child = unsafe {
+        Command::new(&poll_binary)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -77,8 +86,24 @@ pub fn start_sprack_poll() -> Result<()> {
     }
     .context("failed to spawn sprack-poll daemon")?;
 
-    fs::write(&pid_path, child.id().to_string())?;
     Ok(())
+}
+
+/// Resolves a binary name by looking for it as a sibling of the current executable.
+///
+/// If the current executable is `/path/to/target/debug/sprack`, looks for
+/// `/path/to/target/debug/<name>`. Falls back to the bare name (PATH lookup)
+/// if the sibling path doesn't exist or the current exe can't be determined.
+fn resolve_sibling_binary(name: &str) -> PathBuf {
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            let sibling = exe_dir.join(name);
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from(name)
 }
 
 /// Returns the default DB path for existence checks.

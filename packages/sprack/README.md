@@ -83,6 +83,8 @@ Override with `--db-path`.
 
 ### tmux hooks for instant updates
 
+> TODO(mjr): Consider if a tmux plugin would be helpful here or overkill, or totally unnecessary when migrating to IPC
+
 sprack-poll uses a 1-second fallback poll interval.
 For near-instant structural updates (<50ms), configure tmux hooks to send SIGUSR1:
 

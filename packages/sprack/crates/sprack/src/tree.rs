@@ -7,13 +7,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tui_tree_widget::TreeItem;
 
-use sprack_db::types::{DbSnapshot, Integration, Pane, ProcessStatus, Session, Window};
+use sprack_db::types::{DbSnapshot, Integration, Pane, Session, Window};
 
-use crate::colors::cat_color;
+use crate::colors::Theme;
 use crate::layout::LayoutTier;
 
 /// Identifier for tree nodes, distinguishing node types for tmux navigation.
@@ -63,41 +62,65 @@ pub fn build_tree(
     tier: LayoutTier,
 ) -> Vec<TreeItem<'static, NodeId>> {
     let groups = group_sessions_by_host(&snapshot.sessions);
-    let mocha = &catppuccin::PALETTE.mocha.colors;
+    let theme = Theme::mocha();
 
     groups
         .into_iter()
         .filter_map(|group| {
-            let session_items: Vec<TreeItem<'static, NodeId>> = group
-                .sessions
-                .iter()
-                .filter_map(|session| {
-                    let window_items: Vec<TreeItem<'static, NodeId>> =
-                        windows_for_session(&session.name, &snapshot.windows)
-                            .iter()
-                            .filter_map(|window| {
-                                let pane_items: Vec<TreeItem<'static, NodeId>> = panes_for_window(
-                                    &window.session_name,
-                                    window.window_index,
-                                    &snapshot.panes,
-                                )
-                                .iter()
-                                .filter(|pane| own_pane_id.is_none_or(|own| pane.pane_id != own))
-                                .filter_map(|pane| {
-                                    build_pane_item(pane, &snapshot.integrations, tier, mocha)
-                                })
-                                .collect();
-
-                                build_window_item(window, pane_items, tier, mocha)
-                            })
-                            .collect();
-
-                    build_session_item(session, window_items, tier, mocha)
-                })
-                .collect();
-
-            build_host_group_item(&group, session_items, tier, mocha)
+            let session_items = build_session_items(&group, snapshot, own_pane_id, tier, &theme);
+            build_host_group_item(&group, session_items, tier, &theme)
         })
+        .collect()
+}
+
+/// Builds TreeItems for all sessions within a host group.
+fn build_session_items(
+    group: &HostGroup,
+    snapshot: &DbSnapshot,
+    own_pane_id: Option<&str>,
+    tier: LayoutTier,
+    theme: &Theme,
+) -> Vec<TreeItem<'static, NodeId>> {
+    group
+        .sessions
+        .iter()
+        .filter_map(|session| {
+            let window_items =
+                build_window_items(&session.name, snapshot, own_pane_id, tier, theme);
+            build_session_item(session, window_items, tier, theme)
+        })
+        .collect()
+}
+
+/// Builds TreeItems for all windows within a session.
+fn build_window_items(
+    session_name: &str,
+    snapshot: &DbSnapshot,
+    own_pane_id: Option<&str>,
+    tier: LayoutTier,
+    theme: &Theme,
+) -> Vec<TreeItem<'static, NodeId>> {
+    windows_for_session(session_name, &snapshot.windows)
+        .iter()
+        .filter_map(|window| {
+            let pane_items = build_pane_items(window, snapshot, own_pane_id, tier, theme);
+            build_window_item(window, pane_items, tier, theme)
+        })
+        .collect()
+}
+
+/// Builds TreeItems for all panes within a window, filtering out the TUI's own pane.
+fn build_pane_items(
+    window: &Window,
+    snapshot: &DbSnapshot,
+    own_pane_id: Option<&str>,
+    tier: LayoutTier,
+    theme: &Theme,
+) -> Vec<TreeItem<'static, NodeId>> {
+    panes_for_window(&window.session_name, window.window_index, &snapshot.panes)
+        .iter()
+        .filter(|pane| own_pane_id.is_none_or(|own| pane.pane_id != own))
+        .filter_map(|pane| build_pane_item(pane, &snapshot.integrations, tier, theme))
         .collect()
 }
 
@@ -207,10 +230,10 @@ fn build_pane_item(
     pane: &Pane,
     integrations: &[Integration],
     tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
+    theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
     let pane_integrations = integrations_for_pane(&pane.pane_id, integrations);
-    let line = format_pane_label(pane, &pane_integrations, tier, mocha);
+    let line = format_pane_label(pane, &pane_integrations, tier, theme);
     let node_id = NodeId::Pane(pane.pane_id.clone());
     Some(TreeItem::new_leaf(node_id, line))
 }
@@ -219,9 +242,9 @@ fn build_window_item(
     window: &Window,
     pane_items: Vec<TreeItem<'static, NodeId>>,
     tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
+    theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let line = format_window_label(window, tier, mocha);
+    let line = format_window_label(window, tier, theme);
     let node_id = NodeId::Window(window.session_name.clone(), window.window_index);
     TreeItem::new(node_id, line, pane_items).ok()
 }
@@ -230,9 +253,9 @@ fn build_session_item(
     session: &Session,
     window_items: Vec<TreeItem<'static, NodeId>>,
     tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
+    theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let line = format_session_label(session, tier, mocha);
+    let line = format_session_label(session, tier, theme);
     let node_id = NodeId::Session(session.name.clone());
     TreeItem::new(node_id, line, window_items).ok()
 }
@@ -241,9 +264,9 @@ fn build_host_group_item(
     group: &HostGroup,
     session_items: Vec<TreeItem<'static, NodeId>>,
     tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
+    theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let line = format_host_group_label(group, tier, mocha);
+    let line = format_host_group_label(group, tier, theme);
     let node_id = NodeId::HostGroup(group.name.clone());
     TreeItem::new(node_id, line, session_items).ok()
 }
@@ -254,7 +277,7 @@ fn format_pane_label(
     pane: &Pane,
     integrations: &[&Integration],
     tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
+    theme: &Theme,
 ) -> Line<'static> {
     let process_name = pane
         .current_command
@@ -268,10 +291,10 @@ fn format_pane_label(
     match tier {
         LayoutTier::Compact => {
             let icon = primary_integration
-                .map(|i| status_compact_icon(&i.status))
+                .map(|i| theme.status_compact_icon(&i.status))
                 .unwrap_or(" ");
             let icon_style = primary_integration
-                .map(|i| status_style(&i.status, mocha))
+                .map(|i| theme.status_style(&i.status))
                 .unwrap_or_default();
             Line::from(vec![
                 Span::styled(icon.to_string(), icon_style),
@@ -282,9 +305,9 @@ fn format_pane_label(
         LayoutTier::Standard => {
             let mut spans = vec![Span::raw(truncate_label(&process_name, 20))];
             if let Some(integration) = primary_integration {
-                let (badge, style) = status_badge(&integration.status, mocha);
+                let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(badge, style));
+                spans.push(Span::styled(badge.to_string(), style));
             }
             Line::from(spans)
         }
@@ -296,30 +319,23 @@ fn format_pane_label(
             };
             let mut spans = vec![
                 Span::raw(title),
-                Span::styled(
-                    format!(" ({process_name})"),
-                    Style::default().fg(cat_color(mocha.subtext0)),
-                ),
+                Span::styled(format!(" ({process_name})"), theme.subtext0),
             ];
             if let Some(integration) = primary_integration {
-                let (badge, style) = status_badge(&integration.status, mocha);
+                let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(badge, style));
+                spans.push(Span::styled(badge.to_string(), style));
             }
             Line::from(spans)
         }
     }
 }
 
-fn format_window_label(
-    window: &Window,
-    tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
-) -> Line<'static> {
+fn format_window_label(window: &Window, tier: LayoutTier, theme: &Theme) -> Line<'static> {
     let style = if window.active {
-        Style::default().fg(cat_color(mocha.text))
+        theme.window_active
     } else {
-        Style::default().fg(cat_color(mocha.subtext0))
+        theme.window_inactive
     };
 
     match tier {
@@ -328,17 +344,11 @@ fn format_window_label(
     }
 }
 
-fn format_session_label(
-    session: &Session,
-    tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
-) -> Line<'static> {
+fn format_session_label(session: &Session, tier: LayoutTier, theme: &Theme) -> Line<'static> {
     let style = if session.attached {
-        Style::default().fg(cat_color(mocha.text))
+        theme.session_attached
     } else {
-        Style::default()
-            .fg(cat_color(mocha.overlay1))
-            .add_modifier(Modifier::DIM)
+        theme.session_detached
     };
 
     match tier {
@@ -346,98 +356,23 @@ fn format_session_label(
         _ => {
             let mut spans = vec![Span::styled(truncate_label(&session.name, 25), style)];
             if let Some(port) = session.lace_port {
-                spans.push(Span::styled(
-                    format!(" ({port})"),
-                    Style::default().fg(cat_color(mocha.surface2)),
-                ));
+                spans.push(Span::styled(format!(" ({port})"), theme.surface2_fg));
             }
             Line::from(spans)
         }
     }
 }
 
-fn format_host_group_label(
-    group: &HostGroup,
-    tier: LayoutTier,
-    mocha: &catppuccin::FlavorColors,
-) -> Line<'static> {
-    let header_style = Style::default()
-        .fg(cat_color(mocha.blue))
-        .add_modifier(Modifier::BOLD);
-
+fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -> Line<'static> {
     match tier {
         LayoutTier::Compact => Line::from(Span::styled(
             truncate_label(&group.name.to_uppercase(), 15),
-            header_style,
+            theme.host_group_header,
         )),
-        _ => Line::from(Span::styled(group.name.to_uppercase(), header_style)),
-    }
-}
-
-// === Status display helpers ===
-
-/// Returns the single-char icon for compact tier.
-fn status_compact_icon(status: &ProcessStatus) -> &'static str {
-    match status {
-        ProcessStatus::Thinking => "*",
-        ProcessStatus::ToolUse => "T",
-        ProcessStatus::Idle => ".",
-        ProcessStatus::Error => "!",
-        ProcessStatus::Waiting => "?",
-        ProcessStatus::Complete => "-",
-    }
-}
-
-/// Returns the bracketed badge and its style for standard+ tiers.
-fn status_badge(status: &ProcessStatus, mocha: &catppuccin::FlavorColors) -> (String, Style) {
-    let (label, style) = match status {
-        ProcessStatus::Thinking => (
-            "[thinking]",
-            Style::default()
-                .fg(cat_color(mocha.yellow))
-                .add_modifier(Modifier::BOLD),
-        ),
-        ProcessStatus::ToolUse => (
-            "[tool]",
-            Style::default()
-                .fg(cat_color(mocha.teal))
-                .add_modifier(Modifier::BOLD),
-        ),
-        ProcessStatus::Idle => ("[idle]", Style::default().fg(cat_color(mocha.green))),
-        ProcessStatus::Error => (
-            "[error]",
-            Style::default()
-                .fg(cat_color(mocha.red))
-                .add_modifier(Modifier::BOLD),
-        ),
-        ProcessStatus::Waiting => ("[waiting]", Style::default().fg(cat_color(mocha.text))),
-        ProcessStatus::Complete => (
-            "[done]",
-            Style::default()
-                .fg(cat_color(mocha.overlay0))
-                .add_modifier(Modifier::DIM),
-        ),
-    };
-    (label.to_string(), style)
-}
-
-/// Returns a style for the compact status icon.
-fn status_style(status: &ProcessStatus, mocha: &catppuccin::FlavorColors) -> Style {
-    match status {
-        ProcessStatus::Thinking => Style::default()
-            .fg(cat_color(mocha.yellow))
-            .add_modifier(Modifier::BOLD),
-        ProcessStatus::ToolUse => Style::default()
-            .fg(cat_color(mocha.teal))
-            .add_modifier(Modifier::BOLD),
-        ProcessStatus::Idle => Style::default().fg(cat_color(mocha.green)),
-        ProcessStatus::Error => Style::default()
-            .fg(cat_color(mocha.red))
-            .add_modifier(Modifier::BOLD),
-        ProcessStatus::Waiting => Style::default().fg(cat_color(mocha.text)),
-        ProcessStatus::Complete => Style::default()
-            .fg(cat_color(mocha.overlay0))
-            .add_modifier(Modifier::DIM),
+        _ => Line::from(Span::styled(
+            group.name.to_uppercase(),
+            theme.host_group_header,
+        )),
     }
 }
 

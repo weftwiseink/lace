@@ -118,10 +118,13 @@ fn insert_panes(conn: &Connection, panes: &[Pane]) -> Result<(), SprackDbError> 
 }
 
 /// Returns the current time as an ISO 8601 string with UTC timezone.
-fn now_iso8601() -> String {
-    // NOTE(opus/sprack-db): Using a simple seconds-since-epoch format for now.
-    // A proper ISO 8601 library (chrono or time) would be cleaner, but avoiding
-    // extra dependencies for this ephemeral timestamp.
+///
+/// Used by write operations in this module and exported for other crates
+/// (e.g., sprack-poll) that need timestamps in the same format.
+// NOTE(opus/sprack-db): Using a simple seconds-since-epoch format for now.
+// A proper ISO 8601 library (chrono or time) would be cleaner, but avoiding
+// extra dependencies for this ephemeral timestamp.
+pub fn now_iso8601() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

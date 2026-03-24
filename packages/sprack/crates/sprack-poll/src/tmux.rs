@@ -215,7 +215,7 @@ pub fn to_db_types(
     let mut windows = Vec::new();
     let mut panes = Vec::new();
 
-    let timestamp = now_iso8601();
+    let timestamp = sprack_db::write::now_iso8601();
 
     for tmux_session in &snapshot.sessions {
         let meta = lace_meta.get(&tmux_session.name);
@@ -353,17 +353,6 @@ fn build_snapshot(lines: Vec<ParsedLine>) -> TmuxSnapshot {
     }
 
     TmuxSnapshot { sessions }
-}
-
-/// Returns the current time as an ISO 8601 string.
-///
-/// Uses the same format as sprack-db's internal `now_iso8601()` since that function
-/// is private.
-fn now_iso8601() -> String {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("1970-01-01T00:00:00Z+{}s", duration.as_secs())
 }
 
 #[cfg(test)]

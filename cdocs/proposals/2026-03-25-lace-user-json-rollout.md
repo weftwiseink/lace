@@ -134,10 +134,29 @@ The correct order:
 > Moving it to `user.json` means any lace project gets Claude Code without declaring it in `prebuildFeatures`.
 > Projects that need to pin a specific claude-code version can still declare it in their `devcontainer.json` (project options override user options).
 
-> NOTE(opus/user-json-rollout): Nushell history persistence is deferred to a dedicated RFP at `cdocs/proposals/2026-03-25-lace-nushell-history-persistence.md`.
-> The core challenge: config.nu is chezmoi-managed and shared with the host, so container-specific paths can't be hardcoded.
-> Additionally, nushell uses sqlite with WAL/SHM files, complicating bind mount approaches.
-> A report at `cdocs/reports/2026-03-25-nushell-history-container-persistence.md` investigates pragmatic solutions.
+### Nushell history persistence
+
+Nushell history cannot be a `user.json` mount (readonly) and cannot be configured via `config.nu` (shared with host via chezmoi).
+Nushell 0.110 has no `config.history.path` setting ([PR #14434](https://github.com/nushell/nushell/pull/14434) closed without merge).
+
+The pragmatic solution (from `cdocs/reports/2026-03-25-nushell-history-container-persistence.md`): symlink the history file in `lace-fundamentals-init`, after chezmoi apply:
+
+```sh
+if [ "$DEVCONTAINER" = "true" ]; then
+    NUSHELL_HISTORY_DIR="/commandhistory/nushell"
+    mkdir -p "$NUSHELL_HISTORY_DIR"
+    rm -f "$HOME/.config/nushell/history.sqlite3"
+    rm -f "$HOME/.config/nushell/history.sqlite3-wal"
+    rm -f "$HOME/.config/nushell/history.sqlite3-shm"
+    ln -sf "$NUSHELL_HISTORY_DIR/history.sqlite3" "$HOME/.config/nushell/history.sqlite3"
+fi
+```
+
+This reuses the existing writable `/commandhistory` mount (project-level `bash-history`), needs zero changes to shared dotfiles, and SQLite WAL/SHM files follow the symlink to the persistent target.
+
+> NOTE(opus/user-json-rollout): Requires adding `history.sqlite3*` to `.chezmoiignore` in the dotfiles repo so chezmoi never clobbers the symlink on re-apply.
+> The full analysis of approaches (XDG_CONFIG_HOME, env vars, autoload, chezmoi templating) is in the report.
+> A dedicated RFP at `cdocs/proposals/2026-03-25-lace-nushell-history-persistence.md` covers the longer-term architecture (shared history across containers, config directory mounting considerations).
 
 > NOTE(opus/user-json-rollout): The git identity uses `micimize` / `rosenthalm93@gmail.com` rather than the current `mjr` / `mjr@weftwiseink.com`.
 > The host `~/.gitconfig` uses `micimize`, so this aligns container identity with host identity.
@@ -252,7 +271,8 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] `/mnt/lace/screenshots` contains host screenshots (readonly)
 - [ ] `/mnt/lace/repos/dotfiles` contains dotfiles repo
 - [ ] `/home/node/.ssh/authorized_keys` exists
-- [ ] Nushell history persistence: deferred to nushell-history-persistence RFP (sqlite WAL complications)
+- [ ] Nushell history symlink exists: `ls -la ~/.config/nushell/history.sqlite3` shows symlink to `/commandhistory/nushell/`
+- [ ] Nushell history persists: run a command, restart container, `history | length` > 0
 
 ### Tools
 - [ ] `git-delta`: `delta --version` works
@@ -283,9 +303,12 @@ Every item must be verified inside a freshly rebuilt container after applying th
    - Add `"claude-code/config": { "source": "~/.claude" }` (replaces `"project/claude-config"`)
    - Add `"claude-code/config-json": { "source": "~/.claude.json" }` (replaces `"project/claude-config-json"`)
    - Remove the old `"project/claude-config"` override
-5. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
+5. Update `lace-fundamentals-init` (in `devcontainers/features/src/lace-fundamentals/steps/git-identity.sh`):
+   - After chezmoi apply, add nushell history symlink step (symlinks `~/.config/nushell/history.sqlite3` to `/commandhistory/nushell/history.sqlite3`)
+6. Add `history.sqlite3*` to `.chezmoiignore` in the dotfiles repo to prevent chezmoi from clobbering the symlink.
+7. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
    `lace-fundamentals-init && nvim --headless "+Lazy! sync" +qa`
-6. Commit and push the code changes (triggers GHCR re-publish for `installsAfter`).
+8. Commit and push the code changes (triggers GHCR re-publish for `installsAfter` and init script update).
 
 **Success criteria:**
 - `cat ~/.config/lace/user.json` matches the target config.
@@ -311,7 +334,7 @@ Known likely issues to check for:
 2. **Neovim plugin pre-install**: If `nvim --headless "+Lazy! sync" +qa` fails or hangs, investigate: network access, treesitter compilation (may need `gcc`/`make`), plugin-specific build steps. Consider whether the nvim plugin mount from the neovim feature (`~/.local/share/nvim`) should be configured in settings.json to persist plugins across rebuilds.
 3. **Nushell config host-specific paths**: If nushell config references host-specific paths (e.g., `~/.cargo/bin`), add chezmoi templating with `.chezmoi.hostname` or `env "DEVCONTAINER"` conditionals.
 4. **Claude config mount migration**: Verify that the `.claude.json` file overlay (previously `project/claude-config-json`) is handled correctly by the feature's directory mount. If not, the implementor may need to add a secondary file mount declaration to the claude-code feature metadata.
-5. **Nushell history persistence**: Deferred to dedicated RFP. For this rollout, nushell history is ephemeral (lost on container rebuild). Not a blocker for verification.
+5. **Nushell history symlink**: Verify the symlink survives chezmoi re-apply. If chezmoi clobbers it, confirm `.chezmoiignore` has `history.sqlite3*`. Test: run `chezmoi apply --source /mnt/lace/repos/dotfiles` inside container, then check symlink still exists.
 
 The implementor should iterate on these until the full verification checklist passes, documenting each fix in the devlog.
 

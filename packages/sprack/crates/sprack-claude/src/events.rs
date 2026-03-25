@@ -198,7 +198,6 @@ fn parse_event(raw: &RawEvent) -> Option<HookEvent> {
 ///
 /// Returns the path if the corresponding event file exists.
 /// Used when a SessionStart event has been seen and the session_id is known.
-#[allow(dead_code)]
 pub fn find_event_file_by_session_id(event_dir: &Path, session_id: &str) -> Option<PathBuf> {
     let path = event_dir.join(format!("{session_id}.jsonl"));
     if path.is_file() {
@@ -491,6 +490,60 @@ mod tests {
 
         let result = find_event_file(event_dir, "/workspaces/lace");
         assert_eq!(result, Some(file_a));
+    }
+
+    #[test]
+    fn find_event_file_by_session_id_returns_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_dir = dir.path();
+
+        let file = event_dir.join("abc-123.jsonl");
+        write_event_line(&file, "SessionStart", "abc-123", "/workspaces/lace", r#"{}"#);
+
+        let result = find_event_file_by_session_id(event_dir, "abc-123");
+        assert_eq!(result, Some(file));
+    }
+
+    #[test]
+    fn find_event_file_by_session_id_returns_none_for_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_dir = dir.path();
+
+        let result = find_event_file_by_session_id(event_dir, "nonexistent");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn session_start_provides_transcript_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let event_file = dir.path().join("sess-1.jsonl");
+        write_event_line(
+            &event_file,
+            "SessionStart",
+            "sess-1",
+            "/workspaces/lace",
+            r#"{"model":"opus","transcript_path":"/home/user/.claude/projects/-workspaces-lace/session-abc.jsonl"}"#,
+        );
+
+        let mut pos = 0;
+        let events = read_events(&event_file, &mut pos);
+        assert_eq!(events.len(), 1);
+
+        // Extract session_id and transcript_path from the event.
+        if let HookEvent::SessionStart {
+            session_id,
+            transcript_path,
+            ..
+        } = &events[0]
+        {
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(
+                transcript_path.as_deref(),
+                Some("/home/user/.claude/projects/-workspaces-lace/session-abc.jsonl")
+            );
+        } else {
+            panic!("Expected SessionStart");
+        }
     }
 
     #[test]

@@ -196,12 +196,69 @@ fn process_claude_pane(
     // Read hook events and merge into summary (graceful: no-op if no event files exist).
     if let Some(event_dir) = events::default_event_dir() {
         if event_dir.is_dir() {
-            if let Some(event_file) =
-                events::find_event_file(&event_dir, &pane.current_path)
-            {
+            // Prefer session_id-based lookup when a previous SessionStart provided one.
+            // Falls back to cwd-based scan for the initial discovery.
+            let event_file = session_state
+                .hook_session_id
+                .as_deref()
+                .and_then(|sid| events::find_event_file_by_session_id(&event_dir, sid))
+                .or_else(|| events::find_event_file(&event_dir, &pane.current_path));
+
+            if let Some(event_file) = event_file {
                 let hook_events =
                     events::read_events(&event_file, &mut session_state.event_file_position);
                 if !hook_events.is_empty() {
+                    // Extract session_id and transcript_path from SessionStart events.
+                    for event in &hook_events {
+                        if let events::HookEvent::SessionStart {
+                            session_id,
+                            transcript_path,
+                            ..
+                        } = event
+                        {
+                            session_state.hook_session_id = Some(session_id.clone());
+
+                            if let Some(tp) = transcript_path {
+                                let tp_path = PathBuf::from(tp);
+                                // Only use transcript_path if the file exists on the host.
+                                // Container-internal paths (e.g., /home/node/.claude/...)
+                                // won't resolve and should be ignored.
+                                if tp_path.is_file() {
+                                    session_state.hook_transcript_path = Some(tp_path);
+                                }
+                            }
+                        }
+                    }
+
+                    // If hook provided a transcript_path that differs from the current
+                    // session_file, switch to it and reset file_position to re-read.
+                    if let Some(ref hook_path) = session_state.hook_transcript_path {
+                        if *hook_path != session_state.session_file {
+                            session_state.session_file = hook_path.clone();
+                            session_state.file_position = 0;
+                            session_state.last_entries.clear();
+
+                            // Re-read from the correct file.
+                            let entries = jsonl::tail_read(
+                                &session_state.session_file,
+                                jsonl::default_tail_bytes(),
+                            );
+                            session_state.file_position =
+                                std::fs::metadata(&session_state.session_file)
+                                    .map(|m| m.len())
+                                    .unwrap_or(0);
+                            if !entries.is_empty() {
+                                session_state.last_entries = entries;
+                            }
+
+                            // Rebuild summary from the correct file's entries.
+                            summary = status::build_summary(&session_state.last_entries);
+                            if let Some(ref custom_title) = session_state.session_name {
+                                summary.session_name = Some(custom_title.clone());
+                            }
+                        }
+                    }
+
                     session_state.cached_hook_events.extend(hook_events);
                 }
                 events::merge_hook_events(&mut summary, &session_state.cached_hook_events);
@@ -292,6 +349,8 @@ fn resolve_session_for_pane(
         event_file_position: 0,
         cached_hook_events: Vec::new(),
         session_name: resolved.custom_title,
+        hook_transcript_path: None,
+        hook_session_id: None,
     })
 }
 

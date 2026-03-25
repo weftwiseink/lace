@@ -75,6 +75,15 @@ pub struct SessionFileState {
     /// Claude Code session name: `customTitle` from sessions-index.json (user-set via
     /// `/rename`), falling back to `slug` from JSONL entries (auto-generated).
     pub session_name: Option<String>,
+    /// Transcript path from a SessionStart hook event.
+    /// When set, this is the exact JSONL session file for this specific Claude instance,
+    /// bypassing the mtime-based heuristic that can conflate multiple instances in the
+    /// same project directory.
+    pub hook_transcript_path: Option<PathBuf>,
+    /// Session ID from a SessionStart hook event.
+    /// Used to locate the correct event file via `find_event_file_by_session_id`
+    /// instead of the cwd-based `find_event_file` scan.
+    pub hook_session_id: Option<String>,
 }
 
 /// Result of resolving a session file: the path and optional user-set session name.
@@ -326,5 +335,68 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = find_session_file(dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn session_file_state_hook_fields_default_to_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_file = dir.path().join("session.jsonl");
+        std::fs::write(&session_file, r#"{"type":"user"}"#).unwrap();
+
+        let state = SessionFileState {
+            cache_key: CacheKey::Pid(1234),
+            session_file: session_file.clone(),
+            file_position: 0,
+            last_entries: Vec::new(),
+            event_file_position: 0,
+            cached_hook_events: Vec::new(),
+            session_name: None,
+            hook_transcript_path: None,
+            hook_session_id: None,
+        };
+
+        assert!(state.hook_transcript_path.is_none());
+        assert!(state.hook_session_id.is_none());
+    }
+
+    #[test]
+    fn session_file_state_hook_transcript_path_overrides_session_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_file = dir.path().join("session-wrong.jsonl");
+        let correct_file = dir.path().join("session-correct.jsonl");
+        std::fs::write(&original_file, r#"{"type":"user"}"#).unwrap();
+        std::fs::write(&correct_file, r#"{"type":"user"}"#).unwrap();
+
+        let mut state = SessionFileState {
+            cache_key: CacheKey::Pid(1234),
+            session_file: original_file.clone(),
+            file_position: 100,
+            last_entries: Vec::new(),
+            event_file_position: 0,
+            cached_hook_events: Vec::new(),
+            session_name: None,
+            hook_transcript_path: None,
+            hook_session_id: None,
+        };
+
+        // Simulate receiving a SessionStart hook event with a different transcript_path.
+        state.hook_transcript_path = Some(correct_file.clone());
+        state.hook_session_id = Some("session-abc".to_string());
+
+        // Verify the hook fields are stored.
+        assert_eq!(state.hook_transcript_path.as_ref(), Some(&correct_file));
+        assert_eq!(state.hook_session_id.as_deref(), Some("session-abc"));
+
+        // Simulate the session_file override logic from process_claude_pane.
+        if let Some(ref hook_path) = state.hook_transcript_path {
+            if *hook_path != state.session_file {
+                state.session_file = hook_path.clone();
+                state.file_position = 0;
+                state.last_entries.clear();
+            }
+        }
+
+        assert_eq!(state.session_file, correct_file);
+        assert_eq!(state.file_position, 0);
     }
 }

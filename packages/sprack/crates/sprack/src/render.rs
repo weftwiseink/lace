@@ -35,6 +35,16 @@ pub fn render_frame(frame: &mut Frame, app: &mut App) {
     render_status_bar(frame, app, status_area, &theme);
 }
 
+/// Renders a dump frame: tree only, no detail panel, no status bar.
+///
+/// Used by `--dump-rendered-tree` to produce a clean full-hierarchy output.
+pub fn render_dump_frame(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let theme = Theme::mocha();
+
+    render_tree(frame, app, area, &theme);
+}
+
 /// Renders the tree widget.
 fn render_tree(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let tree_widget = Tree::new(&app.tree_items)
@@ -155,9 +165,16 @@ fn build_claude_detail_lines<'a>(
     ]));
 
     // Context + subagents.
+    let context_display = match (summary.tokens_used, summary.tokens_max) {
+        (Some(used), Some(max)) => {
+            use crate::tree::format_token_count;
+            format!("{}/{} ({}%)", format_token_count(used), format_token_count(max), summary.context_percent)
+        }
+        _ => format!("{}%", summary.context_percent),
+    };
     let mut info_spans = vec![
         Span::styled("  ctx: ", theme.detail_metadata),
-        Span::styled(format!("{}%", summary.context_percent), theme.detail_summary),
+        Span::styled(context_display, theme.detail_summary),
     ];
     if summary.subagent_count > 0 {
         info_spans.push(Span::styled(

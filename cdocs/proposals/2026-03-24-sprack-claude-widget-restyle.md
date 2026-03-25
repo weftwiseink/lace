@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-widget-restyle
 type: proposal
 state: live
-status: wip
+status: implementation_wip
 tags: [sprack, tui, ux_design, widget]
 ---
 
@@ -258,6 +258,11 @@ This proposal changes only the _content_ of each widget line:
 
 Tool stats (`R:n E:n B:n`) are moved to the detail pane at full tier.
 They are useful for debugging but not for the at-a-glance dashboard.
+
+> NOTE(mjr/sprack-trouble): Three architectural decisions from user feedback:
+> 1. **Detail panel removal**: The detail panel is removed entirely. Widget content renders as nested child TreeItems within the pane node (making it a non-leaf node with expandable children), not as a separate split panel. This is a single unified tree view.
+> 2. **Default expanded tree**: The sprack TUI starts with all tree nodes expanded by default, not collapsed. This applies to both the live TUI and the `--dump-rendered-tree` output.
+> 3. **Widget as tree items**: Multi-line widget content (model, tokens, git context, purpose, tasks) are each child nodes of the pane TreeItem rather than multi-line Text in a single leaf node. This integrates naturally with the tree's expand/collapse mechanics.
 
 ## Implementation Notes
 

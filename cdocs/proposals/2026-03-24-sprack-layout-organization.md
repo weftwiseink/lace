@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-layout-organization
 type: proposal
 state: live
-status: wip
+status: implementation_accepted
 tags: [sprack, tui, tmux, layout, metadata]
 last_reviewed:
   status: revision_requested

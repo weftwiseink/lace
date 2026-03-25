@@ -21,37 +21,43 @@ use crate::layout::LayoutTier;
 /// Mirrors sprack-claude's ClaudeSummary but owned by the TUI crate.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
-pub struct ClaudeSummary {
+pub(crate) struct ClaudeSummary {
     #[serde(default)]
-    pub state: String,
+    pub(crate) state: String,
     #[serde(default)]
-    pub model: Option<String>,
+    pub(crate) model: Option<String>,
     #[serde(default)]
-    pub subagent_count: u32,
+    pub(crate) subagent_count: u32,
     #[serde(default)]
-    pub context_percent: u8,
+    pub(crate) context_percent: u8,
     #[serde(default)]
-    pub last_tool: Option<String>,
+    pub(crate) last_tool: Option<String>,
     #[serde(default)]
-    pub error_message: Option<String>,
+    pub(crate) error_message: Option<String>,
     #[serde(default)]
-    pub tasks: Option<Vec<TaskEntry>>,
+    pub(crate) tasks: Option<Vec<TaskEntry>>,
     #[serde(default)]
-    pub session_summary: Option<String>,
+    pub(crate) session_summary: Option<String>,
     #[serde(default)]
-    pub session_purpose: Option<String>,
+    pub(crate) session_purpose: Option<String>,
+    #[serde(default)]
+    pub(crate) tokens_used: Option<u64>,
+    #[serde(default)]
+    pub(crate) tokens_max: Option<u64>,
+    #[serde(default)]
+    pub(crate) session_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TaskEntry {
+pub(crate) struct TaskEntry {
     #[serde(default)]
-    pub subject: String,
+    pub(crate) subject: String,
     #[serde(default)]
-    pub status: String,
+    pub(crate) status: String,
 }
 
 /// Parses a ClaudeSummary from an integration's JSON summary field.
-pub fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSummary> {
+pub(crate) fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSummary> {
     serde_json::from_str(&integration.summary).ok()
 }
 
@@ -344,6 +350,38 @@ fn build_host_group_item(
 
 // === Label formatting by tier ===
 
+/// Formats a token count as a compact human-readable string.
+///
+/// - < 1,000: bare number (e.g., "500")
+/// - 1,000..1,000,000: K-suffixed rounded to nearest K (e.g., "840K")
+/// - >= 1,000,000: M-suffixed with one decimal if not whole (e.g., "1M", "1.2M")
+pub(crate) fn format_token_count(tokens: u64) -> String {
+    if tokens < 1_000 {
+        format!("{tokens}")
+    } else if tokens < 1_000_000 {
+        let k = (tokens as f64 / 1_000.0).round() as u64;
+        format!("{k}K")
+    } else {
+        let m = tokens as f64 / 1_000_000.0;
+        let rounded = (m * 10.0).round() / 10.0;
+        if (rounded - rounded.floor()).abs() < f64::EPSILON {
+            format!("{}M", rounded as u64)
+        } else {
+            format!("{rounded:.1}M")
+        }
+    }
+}
+
+/// Formats the context display string: absolute tokens when available, percentage fallback.
+fn format_context_display(summary: &ClaudeSummary) -> String {
+    match (summary.tokens_used, summary.tokens_max) {
+        (Some(used), Some(max)) => {
+            format!("{}/{}", format_token_count(used), format_token_count(max))
+        }
+        _ => format!("{}%", summary.context_percent),
+    }
+}
+
 fn format_pane_label(
     pane: &Pane,
     integrations: &[&Integration],
@@ -359,6 +397,19 @@ fn format_pane_label(
 
     let primary_integration = integrations.first();
     let summary = primary_integration.and_then(|i| parse_claude_summary(i));
+    let is_claude = primary_integration.is_some_and(|i| i.kind == "claude_code");
+
+    // Scoped display name: "claude/{claude_session_name}" for claude panes (except compact).
+    // Prefers the Claude Code session name (customTitle or slug) over the tmux session name.
+    let scoped_name = if is_claude && !matches!(tier, LayoutTier::Compact) {
+        let claude_session = summary
+            .as_ref()
+            .and_then(|s| s.session_name.as_deref())
+            .unwrap_or(&pane.session_name);
+        format!("{}/{}", process_name, claude_session)
+    } else {
+        process_name.clone()
+    };
 
     // Active pane prefix.
     let active_prefix = if pane.active { "* " } else { "  " };
@@ -378,7 +429,7 @@ fn format_pane_label(
         if s.subagent_count > 0 {
             parts.push(format!("{}ag", s.subagent_count));
         }
-        parts.push(format!("{}%", s.context_percent));
+        parts.push(format_context_display(s));
         if let Some(ref status) = primary_integration {
             if status.status == ProcessStatus::ToolUse {
                 if let Some(ref tool) = s.last_tool {
@@ -407,7 +458,7 @@ fn format_pane_label(
         LayoutTier::Standard => {
             let mut spans = vec![
                 Span::raw(active_prefix.to_string()),
-                Span::raw(truncate_label(&process_name, 12)),
+                Span::raw(truncate_label(&scoped_name, 20)),
             ];
             if let Some(integration) = primary_integration {
                 let (badge, style) = theme.status_badge(&integration.status);
@@ -425,7 +476,7 @@ fn format_pane_label(
         LayoutTier::Wide => {
             let mut spans = vec![
                 Span::raw(active_prefix.to_string()),
-                Span::raw(truncate_label(&process_name, 20)),
+                Span::raw(truncate_label(&scoped_name, 30)),
             ];
             if !dims.is_empty() {
                 spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
@@ -445,7 +496,7 @@ fn format_pane_label(
         }
         LayoutTier::Full => {
             let title = if pane.title.is_empty() || pane.title == pane.current_command {
-                process_name.clone()
+                scoped_name.clone()
             } else {
                 truncate_label(&pane.title, 25)
             };
@@ -597,15 +648,15 @@ fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -
 
 /// Builds a multi-line rich widget for a Claude pane when hook data is available.
 ///
-/// Line 1: process_name status_badge context% subagent_count
-/// Line 2: Tasks: done/total done task_markers (if tasks present)
-/// Line 3: model shortname (if available)
-/// Line 4: session_purpose (if available)
+/// Line 1: process/session [status]
+/// Line 2: model | tokens | subagents
+/// Line 3: session_purpose (git context comes in Phase 2)
+/// Line 4: Tasks: done/total done task_markers
 fn format_rich_widget(
     pane: &Pane,
     integrations: &[&Integration],
     summary: &ClaudeSummary,
-    _tier: LayoutTier,
+    tier: LayoutTier,
     theme: &Theme,
 ) -> Text<'static> {
     let process_name = pane
@@ -615,29 +666,53 @@ fn format_rich_widget(
         .unwrap_or("?")
         .to_string();
 
+    let claude_session = summary
+        .session_name
+        .as_deref()
+        .unwrap_or(&pane.session_name);
+    let scoped_name = format!("{}/{}", process_name, claude_session);
     let primary_integration = integrations.first();
 
-    // Line 1: status + context + subagents.
-    let mut line1_spans = vec![Span::raw(truncate_label(&process_name, 15))];
+    // Line 1: process/session [status].
+    let mut line1_spans = vec![Span::raw(truncate_label(&scoped_name, 30))];
     if let Some(integration) = primary_integration {
         let (badge, style) = theme.status_badge(&integration.status);
         line1_spans.push(Span::raw(" "));
         line1_spans.push(Span::styled(badge.to_string(), style));
     }
-    line1_spans.push(Span::styled(
-        format!(" {}% ctx", summary.context_percent),
-        theme.subtext0,
-    ));
-    if summary.subagent_count > 0 {
-        line1_spans.push(Span::styled(
-            format!(" {}ag", summary.subagent_count),
-            theme.subtext0,
-        ));
-    }
 
     let mut lines = vec![Line::from(line1_spans)];
 
-    // Line 2: task progress.
+    // Line 2: model | tokens | subagents.
+    let model_short = summary
+        .model
+        .as_deref()
+        .map(|m| m.strip_prefix("claude-").unwrap_or(m))
+        .unwrap_or("unknown");
+    let context_display = format_context_display(summary);
+    let subagent_label = if matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
+        format!("{} subagents", summary.subagent_count)
+    } else {
+        format!("{}ag", summary.subagent_count)
+    };
+    let mut line2_parts = vec![model_short.to_string()];
+    line2_parts.push(context_display);
+    line2_parts.push(subagent_label);
+    lines.push(Line::from(Span::styled(
+        format!("  {}", line2_parts.join(" | ")),
+        theme.subtext0,
+    )));
+
+    // Line 3: session purpose (git context line will be added in Phase 2).
+    if let Some(purpose) = &summary.session_purpose {
+        let purpose_display = truncate_label(purpose, 50);
+        lines.push(Line::from(Span::styled(
+            format!("  {purpose_display}"),
+            theme.subtext0,
+        )));
+    }
+
+    // Line 4: task progress.
     if let Some(tasks) = &summary.tasks {
         if !tasks.is_empty() {
             let done = tasks.iter().filter(|t| t.status == "Completed").count();
@@ -666,26 +741,6 @@ fn format_rich_widget(
 
             lines.push(Line::from(task_spans));
         }
-    }
-
-    // Line 3: model shortname.
-    if let Some(model) = &summary.model {
-        let model_short = model
-            .strip_prefix("claude-")
-            .unwrap_or(model);
-        lines.push(Line::from(Span::styled(
-            format!("  {model_short}"),
-            theme.subtext0,
-        )));
-    }
-
-    // Line 4: session purpose.
-    if let Some(purpose) = &summary.session_purpose {
-        let purpose_display = truncate_label(purpose, 50);
-        lines.push(Line::from(Span::styled(
-            format!("  {purpose_display}"),
-            theme.subtext0,
-        )));
     }
 
     Text::from(lines)
@@ -757,6 +812,29 @@ mod tests {
     #[test]
     fn test_truncate_label_empty_string_unchanged() {
         assert_eq!(truncate_label("", 5), "");
+    }
+
+    #[test]
+    fn test_format_token_count_bare_number() {
+        assert_eq!(format_token_count(0), "0");
+        assert_eq!(format_token_count(500), "500");
+        assert_eq!(format_token_count(999), "999");
+    }
+
+    #[test]
+    fn test_format_token_count_k_suffix() {
+        assert_eq!(format_token_count(1_000), "1K");
+        assert_eq!(format_token_count(1_500), "2K");
+        assert_eq!(format_token_count(840_000), "840K");
+        assert_eq!(format_token_count(999_999), "1000K");
+    }
+
+    #[test]
+    fn test_format_token_count_m_suffix() {
+        assert_eq!(format_token_count(1_000_000), "1M");
+        assert_eq!(format_token_count(1_200_000), "1.2M");
+        assert_eq!(format_token_count(2_000_000), "2M");
+        assert_eq!(format_token_count(2_500_000), "2.5M");
     }
 
     #[test]

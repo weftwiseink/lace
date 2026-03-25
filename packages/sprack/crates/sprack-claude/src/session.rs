@@ -8,6 +8,19 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+/// Top-level structure of Claude Code's sessions-index.json file.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct SessionsIndex {
+    /// Schema version.
+    #[serde(default)]
+    pub version: Option<u32>,
+
+    /// Session entries.
+    #[serde(default)]
+    pub entries: Vec<SessionIndexEntry>,
+}
+
 /// An entry from Claude Code's sessions-index.json file.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
@@ -27,6 +40,10 @@ pub struct SessionIndexEntry {
     /// Session identifier.
     #[serde(rename = "sessionId", default)]
     pub session_id: Option<String>,
+
+    /// User-set session name via `/rename` command.
+    #[serde(rename = "customTitle", default)]
+    pub custom_title: Option<String>,
 }
 
 /// Cache key for session invalidation.
@@ -55,6 +72,17 @@ pub struct SessionFileState {
     pub event_file_position: u64,
     /// Accumulated hook events for this session.
     pub cached_hook_events: Vec<crate::events::HookEvent>,
+    /// Claude Code session name: `customTitle` from sessions-index.json (user-set via
+    /// `/rename`), falling back to `slug` from JSONL entries (auto-generated).
+    pub session_name: Option<String>,
+}
+
+/// Result of resolving a session file: the path and optional user-set session name.
+pub struct ResolvedSession {
+    /// Path to the active session file.
+    pub path: PathBuf,
+    /// User-set session name from sessions-index.json `customTitle` field.
+    pub custom_title: Option<String>,
 }
 
 /// Finds the active session file for a Claude Code project directory.
@@ -62,21 +90,33 @@ pub struct SessionFileState {
 /// Primary strategy: parse sessions-index.json, filter out sidechains,
 /// and select the entry with the most recent file modification time.
 /// Fallback: list root-level .jsonl files sorted by mtime descending.
-pub fn find_session_file(project_dir: &Path) -> Option<PathBuf> {
+pub fn find_session_file(project_dir: &Path) -> Option<ResolvedSession> {
     // Primary: parse sessions-index.json.
-    if let Some(path) = find_via_sessions_index(project_dir) {
-        return Some(path);
+    if let Some(resolved) = find_via_sessions_index(project_dir) {
+        return Some(resolved);
     }
 
-    // Fallback: list root-level .jsonl files by mtime.
-    find_via_jsonl_listing(project_dir)
+    // Fallback: list root-level .jsonl files by mtime (no customTitle available).
+    find_via_jsonl_listing(project_dir).map(|path| ResolvedSession {
+        path,
+        custom_title: None,
+    })
 }
 
 /// Parses sessions-index.json and returns the most recent non-sidechain session file.
-fn find_via_sessions_index(project_dir: &Path) -> Option<PathBuf> {
+///
+/// Handles both the versioned format `{version, entries}` and a flat array of entries.
+fn find_via_sessions_index(project_dir: &Path) -> Option<ResolvedSession> {
     let index_path = project_dir.join("sessions-index.json");
     let index_content = std::fs::read_to_string(&index_path).ok()?;
-    let entries: Vec<SessionIndexEntry> = serde_json::from_str(&index_content).ok()?;
+
+    // Try versioned format first (`{version, entries}`), then flat array.
+    let entries: Vec<SessionIndexEntry> =
+        if let Ok(index) = serde_json::from_str::<SessionsIndex>(&index_content) {
+            index.entries
+        } else {
+            serde_json::from_str(&index_content).ok()?
+        };
 
     // Filter out sidechains.
     let non_sidechain_entries: Vec<&SessionIndexEntry> = entries
@@ -102,7 +142,10 @@ fn find_via_sessions_index(project_dir: &Path) -> Option<PathBuf> {
     let path = PathBuf::from(full_path);
 
     if path.exists() {
-        Some(path)
+        Some(ResolvedSession {
+            path,
+            custom_title: best_entry.custom_title.clone(),
+        })
     } else {
         None
     }
@@ -164,7 +207,8 @@ mod tests {
         std::fs::write(&newer, r#"{"type":"user"}"#).unwrap();
 
         let result = find_session_file(project_dir);
-        assert_eq!(result, Some(newer));
+        assert_eq!(result.as_ref().map(|r| &r.path), Some(&newer));
+        assert_eq!(result.as_ref().and_then(|r| r.custom_title.as_deref()), None);
     }
 
     #[test]
@@ -183,7 +227,7 @@ mod tests {
 
         // find_session_file should return the root file only.
         let result = find_session_file(project_dir);
-        assert_eq!(result, Some(root_file));
+        assert_eq!(result.as_ref().map(|r| &r.path), Some(&root_file));
     }
 
     #[test]
@@ -195,7 +239,7 @@ mod tests {
         let session_file = project_dir.join("session-abc.jsonl");
         std::fs::write(&session_file, r#"{"type":"user"}"#).unwrap();
 
-        // Create sessions-index.json pointing to it.
+        // Create sessions-index.json pointing to it (flat array format).
         let index = serde_json::json!([
             {
                 "fullPath": session_file.to_str().unwrap(),
@@ -208,7 +252,40 @@ mod tests {
         std::fs::write(&index_path, serde_json::to_string(&index).unwrap()).unwrap();
 
         let result = find_session_file(project_dir);
-        assert_eq!(result, Some(session_file));
+        assert_eq!(result.as_ref().map(|r| &r.path), Some(&session_file));
+    }
+
+    #[test]
+    fn find_session_file_via_versioned_sessions_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path();
+
+        // Create a session file.
+        let session_file = project_dir.join("session-abc.jsonl");
+        std::fs::write(&session_file, r#"{"type":"user"}"#).unwrap();
+
+        // Create sessions-index.json in versioned format with customTitle.
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [
+                {
+                    "fullPath": session_file.to_str().unwrap(),
+                    "fileMtime": 1700000000000u64,
+                    "isSidechain": false,
+                    "sessionId": "abc",
+                    "customTitle": "my-session"
+                }
+            ]
+        });
+        let index_path = project_dir.join("sessions-index.json");
+        std::fs::write(&index_path, serde_json::to_string(&index).unwrap()).unwrap();
+
+        let result = find_session_file(project_dir);
+        assert_eq!(result.as_ref().map(|r| &r.path), Some(&session_file));
+        assert_eq!(
+            result.as_ref().and_then(|r| r.custom_title.as_deref()),
+            Some("my-session")
+        );
     }
 
     #[test]
@@ -241,13 +318,13 @@ mod tests {
 
         // Should pick main (non-sidechain) even though sidechain has higher mtime.
         let result = find_session_file(project_dir);
-        assert_eq!(result, Some(main_file));
+        assert_eq!(result.as_ref().map(|r| &r.path), Some(&main_file));
     }
 
     #[test]
     fn find_session_file_returns_none_for_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
         let result = find_session_file(dir.path());
-        assert_eq!(result, None);
+        assert!(result.is_none());
     }
 }

@@ -187,6 +187,12 @@ fn process_claude_pane(
 
     let mut summary = status::build_summary(&session_state.last_entries);
 
+    // Override session_name with customTitle from sessions-index.json if available.
+    // customTitle is the user-set name via `/rename`, preferred over the auto-generated slug.
+    if let Some(ref custom_title) = session_state.session_name {
+        summary.session_name = Some(custom_title.clone());
+    }
+
     // Read hook events and merge into summary (graceful: no-op if no event files exist).
     if let Some(event_dir) = events::default_event_dir() {
         if event_dir.is_dir() {
@@ -276,15 +282,16 @@ fn resolve_session_for_pane(
 
     let project_dir = claude_home.join("projects").join(&encoded_path);
 
-    let session_file = session::find_session_file(&project_dir)?;
+    let resolved = session::find_session_file(&project_dir)?;
 
     Some(SessionFileState {
         cache_key: session::CacheKey::Pid(claude_pid),
-        session_file,
+        session_file: resolved.path,
         file_position: 0,
         last_entries: Vec::new(),
         event_file_position: 0,
         cached_hook_events: Vec::new(),
+        session_name: resolved.custom_title,
     })
 }
 
@@ -334,6 +341,9 @@ fn write_error_integration(
         tasks: None,
         session_summary: None,
         session_purpose: None,
+        tokens_used: None,
+        tokens_max: None,
+        session_name: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

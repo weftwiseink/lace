@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-hook-bridge
 type: proposal
 state: live
-status: wip
+status: implementation_wip
 tags: [sprack, claude_code, hooks, architecture, data_bridge]
 last_reviewed:
   status: revision_requested

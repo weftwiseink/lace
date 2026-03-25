@@ -46,6 +46,10 @@ pub struct JsonlEntry {
     #[serde(rename = "isCompactSummary", default)]
     pub is_compact_summary: Option<bool>,
 
+    /// Auto-generated session slug (e.g., "swirling-swimming-hopper").
+    #[serde(default)]
+    pub slug: Option<String>,
+
     /// Progress data (present on progress entries).
     #[serde(default)]
     pub data: Option<ProgressData>,

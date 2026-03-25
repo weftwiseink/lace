@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-verifiability
 type: proposal
 state: live
-status: wip
+status: implementation_accepted
 tags: [sprack, testing, container, verification, architecture]
 last_reviewed:
   status: revision_requested

@@ -440,6 +440,7 @@ mod tests {
             is_sidechain: None,
             parent_tool_use_id: None,
             is_compact_summary: None,
+            slug: None,
             message: None,
             data: None,
         }
@@ -453,6 +454,7 @@ mod tests {
             is_sidechain: None,
             parent_tool_use_id: None,
             is_compact_summary: None,
+            slug: None,
             message: Some(AssistantMessage {
                 model: Some("claude-opus-4-6".to_string()),
                 usage: Some(TokenUsage {

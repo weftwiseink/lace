@@ -79,15 +79,16 @@ impl PaneResolver for LocalResolver {
         let encoded_path = proc_walk::encode_project_path(&process_cwd);
 
         let project_dir = claude_home.join("projects").join(&encoded_path);
-        let session_file = session::find_session_file(&project_dir)?;
+        let resolved = session::find_session_file(&project_dir)?;
 
         Some(SessionFileState {
             cache_key: CacheKey::Pid(claude_pid),
-            session_file,
+            session_file: resolved.path,
             file_position: 0,
             last_entries: Vec::new(),
             event_file_position: 0,
             cached_hook_events: Vec::new(),
+            session_name: resolved.custom_title,
         })
     }
 }
@@ -121,6 +122,7 @@ impl<'a> PaneResolver for LaceContainerResolver<'a> {
             last_entries: Vec::new(),
             event_file_position: 0,
             cached_hook_events: Vec::new(),
+            session_name: None,
         })
     }
 }
@@ -147,6 +149,7 @@ pub fn resolve_container_pane(
         last_entries: Vec::new(),
         event_file_position: 0,
         cached_hook_events: Vec::new(),
+        session_name: None,
     })
 }
 

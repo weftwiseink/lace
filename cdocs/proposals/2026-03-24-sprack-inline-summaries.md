@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-inline-summaries
 type: proposal
 state: live
-status: wip
+status: implementation_wip
 tags: [sprack, tui, ratatui, layout, ux_design]
 last_reviewed:
   status: revision_requested

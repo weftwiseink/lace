@@ -58,8 +58,9 @@ fn save_integrations(
     Ok(result)
 }
 
-/// Restores saved integrations. INSERT OR IGNORE skips rows whose pane_id
-/// no longer exists in the panes table (FK enforced).
+/// Restores saved integrations for panes that survived the state replacement.
+/// FK violations (pane_id not in panes) produce errors that are silently
+/// discarded via `let _ =`, effectively skipping removed panes.
 fn restore_integrations(
     conn: &Connection,
     integrations: &[(String, String, String, String, String)],

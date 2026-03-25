@@ -808,6 +808,8 @@ dependencies = [
  "libc",
  "ratatui",
  "rusqlite",
+ "serde",
+ "serde_json",
  "sprack-db",
  "tui-tree-widget",
 ]

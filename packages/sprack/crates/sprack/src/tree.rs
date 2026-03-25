@@ -7,13 +7,53 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use tui_tree_widget::TreeItem;
 
-use sprack_db::types::{DbSnapshot, Integration, Pane, Session, Window};
+use serde::Deserialize;
+
+use sprack_db::types::{DbSnapshot, Integration, Pane, ProcessStatus, Session, Window};
 
 use crate::colors::Theme;
 use crate::layout::LayoutTier;
+
+/// Parsed Claude Code summary from integration JSON.
+/// Mirrors sprack-claude's ClaudeSummary but owned by the TUI crate.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct ClaudeSummary {
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    subagent_count: u32,
+    #[serde(default)]
+    context_percent: u8,
+    #[serde(default)]
+    last_tool: Option<String>,
+    #[serde(default)]
+    error_message: Option<String>,
+    #[serde(default)]
+    tasks: Option<Vec<TaskEntry>>,
+    #[serde(default)]
+    session_summary: Option<String>,
+    #[serde(default)]
+    session_purpose: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TaskEntry {
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    status: String,
+}
+
+/// Parses a ClaudeSummary from an integration's JSON summary field.
+fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSummary> {
+    serde_json::from_str(&integration.summary).ok()
+}
 
 /// Identifier for tree nodes, distinguishing node types for tmux navigation.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -248,9 +288,23 @@ fn build_pane_item(
     theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
     let pane_integrations = integrations_for_pane(&pane.pane_id, integrations);
-    let line = format_pane_label(pane, &pane_integrations, tier, theme);
+    let primary_integration = pane_integrations.first();
+    let claude_summary = primary_integration.and_then(|i| parse_claude_summary(i));
+
+    // At Wide/Full tiers, if hook data is available, render multi-line widget.
+    let has_hook_data = claude_summary
+        .as_ref()
+        .is_some_and(|s| s.tasks.is_some() || s.session_summary.is_some());
+
+    let text = if has_hook_data && matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
+        format_rich_widget(pane, &pane_integrations, claude_summary.as_ref().unwrap(), tier, theme)
+    } else {
+        let line = format_pane_label(pane, &pane_integrations, tier, theme);
+        Text::from(line)
+    };
+
     let node_id = NodeId::Pane(pane.pane_id.clone());
-    Some(TreeItem::new_leaf(node_id, line))
+    Some(TreeItem::new_leaf(node_id, text))
 }
 
 fn build_window_item(
@@ -304,6 +358,7 @@ fn format_pane_label(
         .to_string();
 
     let primary_integration = integrations.first();
+    let summary = primary_integration.and_then(|i| parse_claude_summary(i));
 
     // Active pane prefix.
     let active_prefix = if pane.active { "* " } else { "  " };
@@ -316,6 +371,24 @@ fn format_pane_label(
 
     // Copy mode suffix.
     let mode_suffix = if pane.in_mode { " [copy]" } else { "" };
+
+    // Build inline summary suffix from ClaudeSummary.
+    let inline_suffix = summary.as_ref().map(|s| {
+        let mut parts = Vec::new();
+        if s.subagent_count > 0 {
+            parts.push(format!("{}ag", s.subagent_count));
+        }
+        parts.push(format!("{}%", s.context_percent));
+        if let Some(ref status) = primary_integration {
+            if status.status == ProcessStatus::ToolUse {
+                if let Some(ref tool) = s.last_tool {
+                    parts.clear();
+                    parts.push(truncate_label(tool, 8));
+                }
+            }
+        }
+        parts.join(" ")
+    });
 
     match tier {
         LayoutTier::Compact => {
@@ -334,15 +407,15 @@ fn format_pane_label(
         LayoutTier::Standard => {
             let mut spans = vec![
                 Span::raw(active_prefix.to_string()),
-                Span::raw(truncate_label(&process_name, 20)),
+                Span::raw(truncate_label(&process_name, 12)),
             ];
-            if !dims.is_empty() {
-                spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
-            }
             if let Some(integration) = primary_integration {
                 let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(badge.to_string(), style));
+            }
+            if let Some(ref suffix) = inline_suffix {
+                spans.push(Span::styled(format!(" {suffix}"), theme.subtext0));
             }
             if !mode_suffix.is_empty() {
                 spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
@@ -350,7 +423,6 @@ fn format_pane_label(
             Line::from(spans)
         }
         LayoutTier::Wide => {
-            let path = truncate_path(&pane.current_path, 25);
             let mut spans = vec![
                 Span::raw(active_prefix.to_string()),
                 Span::raw(truncate_label(&process_name, 20)),
@@ -358,11 +430,13 @@ fn format_pane_label(
             if !dims.is_empty() {
                 spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
             }
-            spans.push(Span::styled(format!(" {path}"), theme.subtext0));
             if let Some(integration) = primary_integration {
                 let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(badge.to_string(), style));
+            }
+            if let Some(ref suffix) = inline_suffix {
+                spans.push(Span::styled(format!(" {suffix}"), theme.subtext0));
             }
             if !mode_suffix.is_empty() {
                 spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
@@ -394,6 +468,9 @@ fn format_pane_label(
                 let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(badge.to_string(), style));
+            }
+            if let Some(ref suffix) = inline_suffix {
+                spans.push(Span::styled(format!(" {suffix}"), theme.subtext0));
             }
             if !mode_suffix.is_empty() {
                 spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
@@ -516,6 +593,102 @@ fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -
             theme.host_group_header,
         )),
     }
+}
+
+/// Builds a multi-line rich widget for a Claude pane when hook data is available.
+///
+/// Line 1: process_name status_badge context% subagent_count
+/// Line 2: Tasks: done/total done task_markers (if tasks present)
+/// Line 3: model shortname (if available)
+/// Line 4: session_purpose (if available)
+fn format_rich_widget(
+    pane: &Pane,
+    integrations: &[&Integration],
+    summary: &ClaudeSummary,
+    _tier: LayoutTier,
+    theme: &Theme,
+) -> Text<'static> {
+    let process_name = pane
+        .current_command
+        .rsplit('/')
+        .next()
+        .unwrap_or("?")
+        .to_string();
+
+    let primary_integration = integrations.first();
+
+    // Line 1: status + context + subagents.
+    let mut line1_spans = vec![Span::raw(truncate_label(&process_name, 15))];
+    if let Some(integration) = primary_integration {
+        let (badge, style) = theme.status_badge(&integration.status);
+        line1_spans.push(Span::raw(" "));
+        line1_spans.push(Span::styled(badge.to_string(), style));
+    }
+    line1_spans.push(Span::styled(
+        format!(" {}% ctx", summary.context_percent),
+        theme.subtext0,
+    ));
+    if summary.subagent_count > 0 {
+        line1_spans.push(Span::styled(
+            format!(" {}ag", summary.subagent_count),
+            theme.subtext0,
+        ));
+    }
+
+    let mut lines = vec![Line::from(line1_spans)];
+
+    // Line 2: task progress.
+    if let Some(tasks) = &summary.tasks {
+        if !tasks.is_empty() {
+            let done = tasks.iter().filter(|t| t.status == "Completed").count();
+            let total = tasks.len();
+            let mut task_spans = vec![Span::styled(
+                format!("  Tasks: {done}/{total} done "),
+                theme.subtext0,
+            )];
+
+            // Show abbreviated task names with status markers.
+            for task in tasks.iter().take(4) {
+                let marker = match task.status.as_str() {
+                    "Completed" => "\u{2713}", // checkmark
+                    "InProgress" => ">",
+                    _ => " ",
+                };
+                let name = truncate_label(&task.subject, 12);
+                task_spans.push(Span::styled(format!(" {marker}{name}"), theme.subtext0));
+            }
+            if tasks.len() > 4 {
+                task_spans.push(Span::styled(
+                    format!(" +{}", tasks.len() - 4),
+                    theme.subtext0,
+                ));
+            }
+
+            lines.push(Line::from(task_spans));
+        }
+    }
+
+    // Line 3: model shortname.
+    if let Some(model) = &summary.model {
+        let model_short = model
+            .strip_prefix("claude-")
+            .unwrap_or(model);
+        lines.push(Line::from(Span::styled(
+            format!("  {model_short}"),
+            theme.subtext0,
+        )));
+    }
+
+    // Line 4: session purpose.
+    if let Some(purpose) = &summary.session_purpose {
+        let purpose_display = truncate_label(purpose, 50);
+        lines.push(Line::from(Span::styled(
+            format!("  {purpose_display}"),
+            theme.subtext0,
+        )));
+    }
+
+    Text::from(lines)
 }
 
 /// Truncates a path for display, keeping the last N characters with a leading "~" if truncated.

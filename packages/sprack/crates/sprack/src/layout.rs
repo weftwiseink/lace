@@ -30,14 +30,16 @@ pub fn layout_tier(width: u16) -> LayoutTier {
 
 /// Splits the body area into tree and optional detail panel.
 ///
-/// Compact and Standard tiers use the full area for the tree.
-/// Wide and Full tiers split horizontally: tree (min 25 cols) + detail (fill).
+/// Compact, Standard, and Wide tiers use the full area for the tree.
+/// Inline summaries at Wide tier make a separate detail pane unnecessary.
+/// Full tier splits horizontally: tree (min 40 cols) + detail (fill) for
+/// supplemental debugging metadata.
 pub fn body_layout(area: Rect, tier: LayoutTier) -> (Rect, Option<Rect>) {
     match tier {
-        LayoutTier::Compact | LayoutTier::Standard => (area, None),
-        LayoutTier::Wide | LayoutTier::Full => {
+        LayoutTier::Compact | LayoutTier::Standard | LayoutTier::Wide => (area, None),
+        LayoutTier::Full => {
             let [tree, detail] =
-                Layout::horizontal([Constraint::Min(25), Constraint::Fill(1)]).areas(area);
+                Layout::horizontal([Constraint::Min(40), Constraint::Fill(1)]).areas(area);
             (tree, Some(detail))
         }
     }
@@ -98,20 +100,18 @@ mod tests {
     }
 
     #[test]
-    fn test_body_layout_wide_has_detail() {
+    fn test_body_layout_wide_no_detail() {
         let area = Rect::new(0, 0, 80, 20);
         let (tree, detail) = body_layout(area, LayoutTier::Wide);
-        assert!(tree.width >= 25);
-        assert!(detail.is_some());
-        let detail = detail.unwrap();
-        assert_eq!(tree.width + detail.width, area.width);
+        assert_eq!(tree, area);
+        assert!(detail.is_none());
     }
 
     #[test]
     fn test_body_layout_full_has_detail() {
         let area = Rect::new(0, 0, 120, 20);
         let (tree, detail) = body_layout(area, LayoutTier::Full);
-        assert!(tree.width >= 25);
+        assert!(tree.width >= 40);
         assert!(detail.is_some());
     }
 }

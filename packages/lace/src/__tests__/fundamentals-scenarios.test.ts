@@ -222,6 +222,68 @@ describe("Scenario F3: feature metadata validation", () => {
   });
 });
 
+// ── F3.5: LACE_DOTFILES_PATH injection ──
+
+describe("Scenario F3.5: LACE_DOTFILES_PATH containerEnv injection", () => {
+  it("injects LACE_DOTFILES_PATH matching the dotfiles mount target", async () => {
+    const featurePath = symlinkLocalFeature(ctx, "lace-fundamentals");
+    setupFundamentalsMounts(ctx);
+
+    const config = {
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      features: {
+        [featurePath]: {},
+      },
+    };
+
+    writeDevcontainerJson(ctx, config);
+
+    const result = await runUp({
+      workspaceFolder: ctx.workspaceRoot,
+      skipDevcontainerUp: true,
+      cacheDir: ctx.metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = readGeneratedConfig(ctx);
+    const containerEnv = extended.containerEnv as Record<string, string>;
+
+    expect(containerEnv.LACE_DOTFILES_PATH).toBeDefined();
+    expect(containerEnv.LACE_DOTFILES_PATH).toBe("/mnt/lace/repos/dotfiles");
+  });
+
+  it("does not override LACE_DOTFILES_PATH if already set in containerEnv", async () => {
+    const featurePath = symlinkLocalFeature(ctx, "lace-fundamentals");
+    setupFundamentalsMounts(ctx);
+
+    const config = {
+      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      features: {
+        [featurePath]: {},
+      },
+      containerEnv: {
+        LACE_DOTFILES_PATH: "/custom/dotfiles/path",
+      },
+    };
+
+    writeDevcontainerJson(ctx, config);
+
+    const result = await runUp({
+      workspaceFolder: ctx.workspaceRoot,
+      skipDevcontainerUp: true,
+      cacheDir: ctx.metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const extended = readGeneratedConfig(ctx);
+    const containerEnv = extended.containerEnv as Record<string, string>;
+
+    expect(containerEnv.LACE_DOTFILES_PATH).toBe("/custom/dotfiles/path");
+  });
+});
+
 // ── F4: postCreateCommand auto-injection ──
 
 describe("Scenario F4: postCreateCommand auto-injection", () => {

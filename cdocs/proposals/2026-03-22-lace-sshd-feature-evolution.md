@@ -5,11 +5,15 @@ first_authored:
 task_list: session-management/lace-sshd-evolution
 type: proposal
 state: deferred
-status: wip
+status: evolved
 tags: [lace-sshd, devcontainer-features, ghcr, architecture]
 ---
 
 # Evolve lace-sshd from Local Stop-Gap to Published Feature
+
+> NOTE(opus/usefun-real): This proposal has been subsumed by `lace-fundamentals`.
+> The `lace-fundamentals` feature consolidates SSH hardening, git identity, chezmoi, shell config, and staples into a single published feature, replacing the need for a standalone `lace-sshd` feature.
+> See `cdocs/proposals/2026-03-24-lace-fundamentals-feature.md`.
 
 > BLUF: The current `lace-sshd` feature is a local, metadata-only stop-gap that declares port and mount metadata but has a no-op `install.sh`.
 > This proposal designs a fully published version at `ghcr.io/weftwiseink/devcontainer-features/lace-sshd` that wraps the upstream `sshd` feature, hardens the SSH configuration, and declares both port and mount metadata for lace auto-resolution.

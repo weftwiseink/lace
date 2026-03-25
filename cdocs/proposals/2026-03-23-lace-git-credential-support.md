@@ -11,6 +11,10 @@ tags: [lace, devcontainer, git, security]
 
 # Lace Git Credential Support
 
+> NOTE(opus/usefun-real): Git identity is now handled by `user.json` git section + `lace-fundamentals` init script.
+> The `user.json` `git.name`/`git.email` fields are injected as `LACE_GIT_NAME`/`LACE_GIT_EMAIL` env vars, and the `lace-fundamentals-init` script writes them to `~/.gitconfig` at container start.
+> See `cdocs/proposals/2026-03-24-lace-user-level-config.md` and `cdocs/proposals/2026-03-24-lace-fundamentals-feature.md`.
+
 > BLUF(opus/lace-git-credential-support): Lace devcontainers cannot create git commits because no layer in the stack configures git identity.
 > The fix must provide commit-time identity (user.name, user.email) while explicitly preventing push permissions: no SSH keys, no credential helpers, no agent forwarding into the container.
 >

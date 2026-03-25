@@ -706,6 +706,75 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
+  // ── Phase: Fundamentals feature integration ──
+  // Detect lace-fundamentals and apply user config to its options.
+  {
+    const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
+    const allFeatureRefs = [
+      ...Object.keys((resolvedConfig.features ?? {}) as Record<string, unknown>),
+      ...Object.keys(extractPrebuildFeaturesRaw(resolvedConfig)),
+    ];
+
+    const fundamentalsRef = allFeatureRefs.find((ref) =>
+      extractFeatureShortId(ref) === "lace-fundamentals",
+    );
+
+    if (fundamentalsRef) {
+      // Inject defaultShell option from user config
+      if (userConfigDefaultShell) {
+        const features = (resolvedConfig.features ?? {}) as Record<string, Record<string, unknown>>;
+        const prebuildFeatures = extractPrebuildFeaturesRaw(resolvedConfig);
+
+        if (features[fundamentalsRef]) {
+          if (!features[fundamentalsRef].defaultShell) {
+            features[fundamentalsRef].defaultShell = userConfigDefaultShell;
+          }
+        } else if (prebuildFeatures[fundamentalsRef]) {
+          if (!prebuildFeatures[fundamentalsRef].defaultShell) {
+            prebuildFeatures[fundamentalsRef].defaultShell = userConfigDefaultShell;
+            // Write back
+            const customizations = (resolvedConfig.customizations ?? {}) as Record<string, unknown>;
+            const lace = (customizations.lace ?? {}) as Record<string, unknown>;
+            lace.prebuildFeatures = prebuildFeatures;
+            customizations.lace = lace;
+            resolvedConfig.customizations = customizations;
+          }
+        }
+        console.log(`Injected defaultShell="${userConfigDefaultShell}" into lace-fundamentals`);
+      }
+
+      // Auto-inject lace-fundamentals-init into postCreateCommand
+      const postCreate = resolvedConfig.postCreateCommand;
+      const initCmd = "lace-fundamentals-init";
+
+      const alreadyHasInit = (() => {
+        if (typeof postCreate === "string") return postCreate.includes(initCmd);
+        if (typeof postCreate === "object" && postCreate !== null) {
+          return Object.values(postCreate as Record<string, unknown>).some((v) => {
+            if (typeof v === "string") return v.includes(initCmd);
+            if (Array.isArray(v)) return v.some((s) => String(s).includes(initCmd));
+            return false;
+          });
+        }
+        return false;
+      })();
+
+      if (!alreadyHasInit) {
+        if (!postCreate) {
+          resolvedConfig.postCreateCommand = initCmd;
+        } else if (typeof postCreate === "string") {
+          resolvedConfig.postCreateCommand = `${initCmd} && ${postCreate}`;
+        } else if (typeof postCreate === "object" && postCreate !== null) {
+          resolvedConfig.postCreateCommand = {
+            "lace-fundamentals": initCmd,
+            ...(postCreate as Record<string, unknown>),
+          };
+        }
+        console.log("Auto-injected lace-fundamentals-init into postCreateCommand");
+      }
+    }
+  }
+
   // Build feature port metadata for enriching portsAttributes labels
   featurePortMetadata = buildFeaturePortMetadata(metadataMap);
 

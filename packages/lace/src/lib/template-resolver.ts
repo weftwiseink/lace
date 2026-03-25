@@ -326,7 +326,7 @@ export function validateMountNamespaces(
   declarations: Record<string, LaceMountDeclaration>,
   featureShortIds: Set<string>,
 ): void {
-  const validNamespaces = new Set(["project", ...featureShortIds]);
+  const validNamespaces = new Set(["project", "user", ...featureShortIds]);
   const unknownLabels: string[] = [];
 
   for (const label of Object.keys(declarations)) {

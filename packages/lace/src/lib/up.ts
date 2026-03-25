@@ -42,7 +42,15 @@ import {
   type TemplateResolutionResult,
 } from "./template-resolver";
 import { MountPathResolver, type ContainerVariables } from "./mount-resolver";
-import { loadSettings, SettingsConfigError, type LaceSettings } from "./settings";
+import { loadSettings, SettingsConfigError, type LaceSettings, expandPath } from "./settings";
+import {
+  loadUserConfig,
+  UserConfigError,
+  loadMountPolicy,
+  validateMountSources,
+  validateFeatureReferences,
+} from "./user-config";
+import { applyUserConfig } from "./user-config-merge";
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
 import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag, resolveContainerName } from "./project-name";
@@ -242,6 +250,114 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
+  // ── Phase 0c: User config loading ──
+  let userMountDeclarations: Record<string, import("./feature-metadata").LaceMountDeclaration> = {};
+  let userConfigDefaultShell: string | undefined;
+  {
+    try {
+      const userConfig = loadUserConfig();
+      const hasUserConfig = Object.keys(userConfig).length > 0;
+
+      if (hasUserConfig) {
+        console.log("Loading user config...");
+
+        // Validate mount sources against mount policy
+        if (userConfig.mounts && Object.keys(userConfig.mounts).length > 0) {
+          const policyRules = loadMountPolicy();
+          const mountValidation = validateMountSources(userConfig.mounts, policyRules);
+
+          // Emit warnings for skipped mounts
+          for (const warning of mountValidation.warnings) {
+            console.warn(`Warning: ${warning}`);
+          }
+
+          // Hard error for blocked mounts
+          if (mountValidation.errors.length > 0) {
+            const msg = mountValidation.errors.join("\n\n");
+            result.exitCode = 1;
+            result.message = msg;
+            return result;
+          }
+
+          // Replace user mounts with validated subset
+          userConfig.mounts = mountValidation.valid;
+        }
+
+        // Validate feature references (no local paths)
+        if (userConfig.features && Object.keys(userConfig.features).length > 0) {
+          const featureValidation = validateFeatureReferences(userConfig.features);
+          if (!featureValidation.valid) {
+            const msg = featureValidation.errors.join("\n");
+            result.exitCode = 1;
+            result.message = msg;
+            return result;
+          }
+        }
+
+        // Extract project features and prebuild features for merging
+        const projectFeatures = (configMinimal.raw.features ?? {}) as Record<
+          string,
+          Record<string, unknown>
+        >;
+        const projectPrebuild = extractPrebuildFeaturesRaw(configMinimal.raw);
+        const projectContainerEnv = (configMinimal.raw.containerEnv ?? {}) as Record<string, string>;
+
+        // Apply all merges
+        const mergeResult = applyUserConfig(
+          userConfig,
+          projectFeatures,
+          projectPrebuild,
+          projectContainerEnv,
+        );
+
+        // Apply merged features back to config
+        configMinimal.raw.features = mergeResult.mergedFeatures;
+        if (Object.keys(mergeResult.mergedPrebuildFeatures).length > 0) {
+          const customizations = (configMinimal.raw.customizations ?? {}) as Record<string, unknown>;
+          const lace = (customizations.lace ?? {}) as Record<string, unknown>;
+          lace.prebuildFeatures = mergeResult.mergedPrebuildFeatures;
+          customizations.lace = lace;
+          configMinimal.raw.customizations = customizations;
+        }
+
+        // Apply merged containerEnv
+        configMinimal.raw.containerEnv = mergeResult.mergedContainerEnv;
+
+        // Store user mount declarations for later merge with pipeline declarations
+        userMountDeclarations = mergeResult.userMountDeclarations;
+
+        // Store default shell for fundamentals feature integration
+        userConfigDefaultShell = mergeResult.defaultShell;
+
+        // Emit merge warnings
+        for (const warning of mergeResult.warnings) {
+          console.warn(`Warning: ${warning}`);
+        }
+
+        const parts: string[] = [];
+        if (Object.keys(userMountDeclarations).length > 0) {
+          parts.push(`${Object.keys(userMountDeclarations).length} mount(s)`);
+        }
+        if (userConfig.features && Object.keys(userConfig.features).length > 0) {
+          parts.push(`${Object.keys(userConfig.features).length} feature(s)`);
+        }
+        if (userConfig.git) {
+          parts.push("git identity");
+        }
+        if (parts.length > 0) {
+          console.log(`User config applied: ${parts.join(", ")}`);
+        }
+      }
+    } catch (err) {
+      if (err instanceof UserConfigError) {
+        result.exitCode = 1;
+        result.message = err.message;
+        return result;
+      }
+      throw err;
+    }
+  }
+
   const hasPrebuildFeatures =
     extractPrebuildFeatures(configMinimal.raw).kind === "features";
   const repoMountsResult = extractRepoMounts(configMinimal.raw);
@@ -351,6 +467,22 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     autoInjectMountTemplates(configForResolution, projectMountDeclarations, metadataMap);
   if (mountInjected.length > 0) {
     console.log(`Auto-injected mount templates for: ${mountInjected.join(", ")}`);
+  }
+
+  // Step 4.1: Merge user mount declarations into the pipeline
+  // User mounts need both: (a) declaration entries and (b) template injection
+  if (Object.keys(userMountDeclarations).length > 0) {
+    Object.assign(mountDeclarations, userMountDeclarations);
+
+    // Auto-inject ${lace.mount(user/...)} templates for each user mount
+    const mounts = (configForResolution.mounts ?? []) as string[];
+    for (const label of Object.keys(userMountDeclarations)) {
+      const alreadyReferenced = mounts.some((m: string) => m.includes(label));
+      if (!alreadyReferenced) {
+        mounts.push(`\${lace.mount(${label})}`);
+      }
+    }
+    configForResolution.mounts = mounts;
   }
 
   // Step 4.5: Deduplicate static mounts that conflict with auto-injected declarations

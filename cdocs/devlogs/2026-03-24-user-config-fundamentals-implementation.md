@@ -145,8 +145,45 @@ Auto-injected lace-fundamentals-init into postCreateCommand
 Pipeline correctly loads user.json, validates mounts, merges config, detects lace-fundamentals, and injects defaultShell + init script.
 Prebuild fails because lace-fundamentals is not yet published to GHCR (expected: Phase 4 of the proposal notes this dependency).
 
-### Verification Honest Assessment
-The implementation is verified at the config-generation level through 83 automated tests and manual CLI dry-run.
-Container-level verification (SSH hardening, git identity in container, chezmoi apply) cannot be done until lace-fundamentals is published to GHCR.
-The scenario test infrastructure uses `skipDevcontainerUp: true`, which validates the pipeline but not the feature's install script execution.
-The step scripts are written to the proposal spec but are not yet tested in a real container build.
+### Container-Level Verification (post-GHCR publish)
+
+After publishing lace-fundamentals to GHCR and rebuilding the container with `user.json` configured:
+
+**SSH hardening (7/7 directives):**
+```
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+AllowAgentForwarding no
+AllowTcpForwarding local
+X11Forwarding no
+```
+
+**SSH connectivity:**
+- Key auth: `ssh -p 22425 -i ~/.config/lace/ssh/id_ed25519 node@localhost` -> "SSH key auth works"
+- Password auth: `ssh -o PubkeyAuthentication=no` -> "Permission denied (publickey)"
+
+**Git identity (two-layer system):**
+```
+LACE_GIT_NAME=mjr
+LACE_GIT_EMAIL=mjr@weftwiseink.com
+git config --global user.name -> mjr
+git config --global user.email -> mjr@weftwiseink.com
+GIT_AUTHOR_NAME -> NOT SET (correct)
+```
+
+**Feature components:**
+- chezmoi v2.70.0 installed
+- `lace-fundamentals-init` at `/usr/local/bin/` (executable)
+- Staples: curl 7.88.1, jq-1.6, less 590
+- `LACE_DOTFILES_PATH=/mnt/lace/repos/dotfiles` in containerEnv
+- Dotfiles mount populated at `/mnt/lace/repos/dotfiles`
+- Screenshots mount populated at `/mnt/lace/screenshots` (readonly)
+- Authorized keys at `/home/node/.ssh/authorized_keys`
+
+**defaultShell:** Injection works (`defaultShell="/usr/bin/nu"` in feature options).
+Shell not changed because nushell feature moved to user.json features and isn't in the prebuild image.
+This is expected: nushell needs to be installed before lace-fundamentals for `chsh` to succeed.
+
+All 21 verification checks pass.

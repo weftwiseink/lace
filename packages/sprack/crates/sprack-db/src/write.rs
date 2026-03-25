@@ -9,9 +9,10 @@ use crate::types::{Pane, Session, Window};
 
 /// Replaces all tmux state in a single transaction.
 ///
-/// Deletes all existing sessions (CASCADE handles windows, panes, integrations),
-/// then inserts the provided sessions, windows, and panes.
-/// The caller is responsible for populating `updated_at` timestamps on sessions.
+/// Saves process_integrations before the cascade delete and restores them
+/// afterward, since the DELETE FROM sessions cascades through windows -> panes
+/// -> process_integrations. Integrations are only restored for panes that
+/// still exist in the new snapshot.
 pub fn write_tmux_state(
     conn: &Connection,
     sessions: &[Session],
@@ -20,12 +21,56 @@ pub fn write_tmux_state(
 ) -> Result<(), SprackDbError> {
     let transaction = conn.unchecked_transaction()?;
 
+    // Save integrations before cascade delete wipes them.
+    let saved_integrations = save_integrations(&transaction)?;
+
     transaction.execute("DELETE FROM sessions", [])?;
     insert_sessions(&transaction, sessions)?;
     insert_windows(&transaction, windows)?;
     insert_panes(&transaction, panes)?;
 
+    // Restore integrations for panes that survived the replacement.
+    restore_integrations(&transaction, &saved_integrations)?;
+
     transaction.commit()?;
+    Ok(())
+}
+
+/// Reads all process_integrations rows for preservation across state replacement.
+fn save_integrations(
+    conn: &Connection,
+) -> Result<Vec<(String, String, String, String, String)>, SprackDbError> {
+    let mut statement =
+        conn.prepare("SELECT pane_id, kind, summary, status, updated_at FROM process_integrations")?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
+/// Restores saved integrations. INSERT OR IGNORE skips rows whose pane_id
+/// no longer exists in the panes table (FK enforced).
+fn restore_integrations(
+    conn: &Connection,
+    integrations: &[(String, String, String, String, String)],
+) -> Result<(), SprackDbError> {
+    let mut statement = conn.prepare(
+        "INSERT OR IGNORE INTO process_integrations (pane_id, kind, summary, status, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for (pane_id, kind, summary, status, updated_at) in integrations {
+        let _ = statement.execute(rusqlite::params![pane_id, kind, summary, status, updated_at]);
+    }
     Ok(())
 }
 
@@ -128,12 +173,25 @@ fn insert_panes(conn: &Connection, panes: &[Pane]) -> Result<(), SprackDbError> 
 ///
 /// Used by write operations in this module and exported for other crates
 /// (e.g., sprack-poll) that need timestamps in the same format.
-// NOTE(opus/sprack-db): Using a simple seconds-since-epoch format for now.
-// A proper ISO 8601 library (chrono or time) would be cleaner, but avoiding
-// extra dependencies for this ephemeral timestamp.
 pub fn now_iso8601() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    format!("1970-01-01T00:00:00Z+{}s", duration.as_secs())
+    let secs = duration.as_secs();
+    let (hour, minute, second) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
+
+    // Howard Hinnant's civil_from_days algorithm.
+    let days = (secs / 86400) as i64;
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
 }

@@ -21,37 +21,37 @@ use crate::layout::LayoutTier;
 /// Mirrors sprack-claude's ClaudeSummary but owned by the TUI crate.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
-struct ClaudeSummary {
+pub struct ClaudeSummary {
     #[serde(default)]
-    state: String,
+    pub state: String,
     #[serde(default)]
-    model: Option<String>,
+    pub model: Option<String>,
     #[serde(default)]
-    subagent_count: u32,
+    pub subagent_count: u32,
     #[serde(default)]
-    context_percent: u8,
+    pub context_percent: u8,
     #[serde(default)]
-    last_tool: Option<String>,
+    pub last_tool: Option<String>,
     #[serde(default)]
-    error_message: Option<String>,
+    pub error_message: Option<String>,
     #[serde(default)]
-    tasks: Option<Vec<TaskEntry>>,
+    pub tasks: Option<Vec<TaskEntry>>,
     #[serde(default)]
-    session_summary: Option<String>,
+    pub session_summary: Option<String>,
     #[serde(default)]
-    session_purpose: Option<String>,
+    pub session_purpose: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct TaskEntry {
+pub struct TaskEntry {
     #[serde(default)]
-    subject: String,
+    pub subject: String,
     #[serde(default)]
-    status: String,
+    pub status: String,
 }
 
 /// Parses a ClaudeSummary from an integration's JSON summary field.
-fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSummary> {
+pub fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSummary> {
     serde_json::from_str(&integration.summary).ok()
 }
 

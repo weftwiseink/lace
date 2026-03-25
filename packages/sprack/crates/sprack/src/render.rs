@@ -14,7 +14,7 @@ use sprack_db::types::Integration;
 use crate::app::App;
 use crate::colors::Theme;
 use crate::layout::{body_layout, frame_layout, layout_tier, LayoutTier};
-use crate::tree::NodeId;
+use crate::tree::{self, NodeId};
 
 /// Renders a complete frame: tree, optional detail panel, and status bar.
 pub fn render_frame(frame: &mut Frame, app: &mut App) {
@@ -118,35 +118,135 @@ fn build_detail_lines<'a>(
     let mut lines = Vec::new();
 
     for integration in integrations {
-        let (status_text, status_style) = theme.detail_status(&integration.status);
-
-        // Integration kind + status.
-        lines.push(Line::from(vec![
-            Span::styled(integration.kind.clone(), theme.detail_kind_label),
-            Span::raw(" "),
-            Span::styled(status_text.to_string(), status_style),
-        ]));
-
-        // Summary line.
-        if !integration.summary.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", integration.summary),
-                theme.detail_summary,
-            )));
+        if integration.kind == "claude_code" {
+            build_claude_detail_lines(&mut lines, integration, tier, theme);
+        } else {
+            build_generic_detail_lines(&mut lines, integration, tier, theme);
         }
-
-        // Full tier shows additional metadata.
-        if tier == LayoutTier::Full {
-            lines.push(Line::from(Span::styled(
-                format!("  updated: {}", integration.updated_at),
-                theme.detail_metadata,
-            )));
-        }
-
-        lines.push(Line::default());
     }
 
     lines
+}
+
+/// Renders a structured detail view for Claude Code integrations.
+fn build_claude_detail_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    integration: &Integration,
+    tier: LayoutTier,
+    theme: &Theme,
+) {
+    let summary = match tree::parse_claude_summary(integration) {
+        Some(s) => s,
+        None => {
+            build_generic_detail_lines(lines, integration, tier, theme);
+            return;
+        }
+    };
+
+    let (status_text, status_style) = theme.detail_status(&integration.status);
+
+    // Header: model + state.
+    let model_label = summary.model.as_deref().unwrap_or("unknown");
+    lines.push(Line::from(vec![
+        Span::styled(model_label.to_string(), theme.detail_kind_label),
+        Span::raw(" "),
+        Span::styled(status_text.to_string(), status_style),
+    ]));
+
+    // Context + subagents.
+    let mut info_spans = vec![
+        Span::styled("  ctx: ", theme.detail_metadata),
+        Span::styled(format!("{}%", summary.context_percent), theme.detail_summary),
+    ];
+    if summary.subagent_count > 0 {
+        info_spans.push(Span::styled(
+            format!("  agents: {}", summary.subagent_count),
+            theme.detail_summary,
+        ));
+    }
+    lines.push(Line::from(info_spans));
+
+    // Last tool.
+    if let Some(ref tool) = summary.last_tool {
+        lines.push(Line::from(vec![
+            Span::styled("  tool: ", theme.detail_metadata),
+            Span::styled(tool.clone(), theme.detail_summary),
+        ]));
+    }
+
+    // Error message.
+    if let Some(ref error) = summary.error_message {
+        lines.push(Line::from(Span::styled(
+            format!("  error: {error}"),
+            theme.status_unhealthy,
+        )));
+    }
+
+    // Tasks list (from hook events).
+    if let Some(ref tasks) = summary.tasks {
+        lines.push(Line::from(Span::styled(
+            format!("  tasks: {}", tasks.len()),
+            theme.detail_metadata,
+        )));
+        for task in tasks {
+            let marker = if task.status == "completed" { "x" } else { " " };
+            lines.push(Line::from(Span::styled(
+                format!("    [{marker}] {}", task.subject),
+                theme.detail_summary,
+            )));
+        }
+    }
+
+    // Session summary (from hook compact events).
+    if let Some(ref session_summary) = summary.session_summary {
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            session_summary.clone(),
+            theme.detail_summary,
+        )));
+    }
+
+    // Updated timestamp (full tier only).
+    if tier == LayoutTier::Full {
+        lines.push(Line::from(Span::styled(
+            format!("  updated: {}", integration.updated_at),
+            theme.detail_metadata,
+        )));
+    }
+
+    lines.push(Line::default());
+}
+
+/// Renders a generic detail view for non-Claude integrations.
+fn build_generic_detail_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    integration: &Integration,
+    tier: LayoutTier,
+    theme: &Theme,
+) {
+    let (status_text, status_style) = theme.detail_status(&integration.status);
+
+    lines.push(Line::from(vec![
+        Span::styled(integration.kind.clone(), theme.detail_kind_label),
+        Span::raw(" "),
+        Span::styled(status_text.to_string(), status_style),
+    ]));
+
+    if !integration.summary.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", integration.summary),
+            theme.detail_summary,
+        )));
+    }
+
+    if tier == LayoutTier::Full {
+        lines.push(Line::from(Span::styled(
+            format!("  updated: {}", integration.updated_at),
+            theme.detail_metadata,
+        )));
+    }
+
+    lines.push(Line::default());
 }
 
 /// Renders the status bar at the bottom of the frame.

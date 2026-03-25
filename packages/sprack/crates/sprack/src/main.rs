@@ -109,9 +109,11 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         }
     }
 
-    // Wait up to 2 seconds for the DB to appear.
-    let max_wait = Duration::from_secs(2);
-    let poll_interval = Duration::from_millis(100);
+    // Wait up to 5 seconds for the DB to appear with the correct schema.
+    // The poller needs time to: start up, connect to tmux, query state,
+    // create the DB, run init_schema, and write the first snapshot.
+    let max_wait = Duration::from_secs(5);
+    let poll_interval = Duration::from_millis(200);
     let mut waited = Duration::ZERO;
 
     while waited < max_wait {
@@ -127,7 +129,7 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
     }
 
     bail!(
-        "Database not found at {}. Is sprack-poll running?",
+        "Database not found at {}. Is sprack-poll running?\nTry: pkill sprack-poll && cargo run -p sprack",
         default_path.display()
     );
 }

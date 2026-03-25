@@ -1,6 +1,6 @@
 {
     "id": "claude-code",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "name": "Claude Code",
     "description": "Installs Claude Code CLI globally via npm. Declares a lace mount for persistent Claude configuration.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/claude-code",

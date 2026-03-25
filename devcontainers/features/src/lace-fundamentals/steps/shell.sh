@@ -2,6 +2,10 @@
 
 if [ -n "$DEFAULT_SHELL" ]; then
     if [ -x "$DEFAULT_SHELL" ]; then
+        # Add to /etc/shells if not already listed (chsh requires it)
+        if ! grep -qxF "$DEFAULT_SHELL" /etc/shells 2>/dev/null; then
+            echo "$DEFAULT_SHELL" >> /etc/shells
+        fi
         chsh -s "$DEFAULT_SHELL" "$_REMOTE_USER" 2>/dev/null || {
             echo "WARNING: Could not set default shell to $DEFAULT_SHELL via chsh."
             echo "         Falling back to SHELL env var (set in containerEnv)."

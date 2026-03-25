@@ -7,6 +7,11 @@ type: proposal
 state: live
 status: review_ready
 tags: [lace, user_config, dotfiles, chezmoi, verification]
+last_reviewed:
+  status: revision_requested
+  by: "@claude-sonnet-4-6"
+  at: 2026-03-25T10:15:00-07:00
+  round: 1
 ---
 
 # Lace user.json Rollout and Cross-Project Verification
@@ -119,7 +124,8 @@ It should move to `user.json` features or be installed by chezmoi.
   // User-level env vars
   "containerEnv": {
     "EDITOR": "nvim",
-    "VISUAL": "nvim"
+    "VISUAL": "nvim",
+    "SHELL": "/usr/bin/nu"
   }
 }
 ```
@@ -151,6 +157,10 @@ For this to work correctly:
 2. The nushell and neovim features must install BEFORE `lace-fundamentals-init` runs (guaranteed: features install at build time, init runs at container start)
 3. Chezmoi `run_once` scripts for starship and carapace run during `chezmoi apply` (they check if the binary exists and install if missing)
 
+> NOTE(opus/user-json-rollout): The existing `run_once` scripts (`run_once_before_10-install-starship.sh`, `run_once_before_30-install-carapace.sh`) were written for host use and may not have container guards.
+> If they fail inside the container (e.g., missing `sudo`, different package manager), chezmoi apply logs a warning but continues.
+> Verify in Phase 2 that these scripts succeed; if not, add `CHEZMOI_CONTAINER=1` guards or mark them with chezmoi's `when` condition.
+
 ### Feature install ordering
 
 User features from `user.json` are merged into `prebuildFeatures` (because the project has prebuild features configured).
@@ -167,11 +177,12 @@ After all features install, the container starts and `lace-fundamentals-init` ru
 At this point nushell and neovim binaries are available, so chezmoi apply's config files are functional.
 The `chsh -s /usr/bin/nu` in lace-fundamentals' shell.sh step sets nushell as the default login shell (runs at build time, nushell binary must exist).
 
-> WARN(opus/user-json-rollout): Feature install order is not guaranteed by the devcontainer spec.
-> User features are merged into prebuildFeatures by lace, but the devcontainer CLI may reorder them based on `dependsOn` resolution.
+> NOTE(opus/user-json-rollout): Feature install order is not guaranteed by the devcontainer spec.
+> The devcontainer CLI may reorder features based on `dependsOn` resolution.
 > If nushell installs AFTER lace-fundamentals, the `chsh` call fails (with a warning, non-fatal).
-> The fallback is `SHELL=/usr/bin/nu` in containerEnv, which covers most interactive use but not all tools.
-> Mitigation: add `"installsAfter": ["ghcr.io/eitsupi/devcontainer-features/nushell:0"]` to lace-fundamentals' `devcontainer-feature.json`.
+> Two mitigations are applied proactively:
+> (a) `installsAfter` on lace-fundamentals ensures nushell is installed first (Phase 1 action item).
+> (b) `SHELL=/usr/bin/nu` in user.json containerEnv provides a runtime fallback for tools that read `$SHELL`.
 
 ## Verification Checklist
 
@@ -180,8 +191,10 @@ Every item must be verified inside a freshly rebuilt container after applying th
 ### Shell environment
 - [ ] `echo $SHELL` returns `/usr/bin/nu`
 - [ ] `getent passwd node | cut -d: -f7` returns `/usr/bin/nu`
+- [ ] `nu -c "version"` runs without error
+- [ ] Container build logs show no `chsh` failure warning for nushell binary
 - [ ] Nushell starts as the login shell on SSH connect
-- [ ] Nushell config loaded: `$env.config.show_banner` is `false` (or whatever the dotfiles set)
+- [ ] Nushell config loaded: `$env.config` table is populated (config.nu sourced)
 - [ ] Starship prompt renders in nushell (visible prompt customization)
 - [ ] Carapace completions available in nushell
 
@@ -205,6 +218,8 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] `~/.config/nvim/init.lua` exists and matches dotfiles repo
 - [ ] `~/.config/starship.toml` exists
 - [ ] `~/.config/tmux/tmux.conf` exists (if managed)
+- [ ] `chezmoi apply --source /mnt/lace/repos/dotfiles --dry-run --no-tty` exits 0 (no pending changes)
+- [ ] Init script output shows no chezmoi apply errors
 
 ### SSH and connectivity
 - [ ] SSH key auth works: `ssh -p <port> -i ~/.config/lace/ssh/id_ed25519 node@localhost`
@@ -223,16 +238,27 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] `claude --version` works (claude-code feature)
 
 ### Cross-project behavior
-- [ ] Rebuild a DIFFERENT lace-managed project with the same `user.json`: verify nushell, neovim, git identity all present
+- [ ] Rebuild the dotfiles devcontainer (`~/code/personal/dotfiles`) with the same `user.json`: verify nushell, neovim, git identity all present
 - [ ] If no `user.json` exists (rename it temporarily): container builds without errors, no user tools
 
 ## Implementation Phases
 
-### Phase 1: Update user.json
+### Phase 1: Configuration updates
 
-Update `~/.config/lace/user.json` with the target config (features, git identity, env vars, mounts).
+1. Update `~/.config/lace/user.json` with the target config (features, git identity, env vars, mounts).
+2. Add `"installsAfter"` to `devcontainers/features/src/lace-fundamentals/devcontainer-feature.json`:
+   ```json
+   "installsAfter": {
+     "ghcr.io/eitsupi/devcontainer-features/nushell:0": {}
+   }
+   ```
+   This ensures nushell is installed before lace-fundamentals runs `chsh`.
+3. Commit and push the `installsAfter` change (triggers GHCR re-publish).
 
-**Success criteria:** `cat ~/.config/lace/user.json` matches the target config.
+**Success criteria:**
+- `cat ~/.config/lace/user.json` matches the target config.
+- `devcontainer-feature.json` declares `installsAfter` for nushell.
+- Published feature version includes the `installsAfter` field.
 
 ### Phase 2: Rebuild and verify
 
@@ -246,11 +272,11 @@ Update `~/.config/lace/user.json` with the target config (features, git identity
 ### Phase 3: Fix issues
 
 Address any failures from Phase 2.
-Common issues:
-- Feature install order (nushell not available for chsh): add `installsAfter` to lace-fundamentals
-- Chezmoi `run_once` scripts failing in container context: may need `CHEZMOI_CONTAINER=1` guard
-- Neovim lazy.nvim needs network access for plugin install: verify container has outbound network
-- Nushell config referencing host-specific paths: may need chezmoi templating with `.chezmoi.hostname`
+Known likely issues to check for:
+
+1. **Chezmoi `run_once` scripts**: If starship/carapace install scripts fail in the container context (different package manager, no `sudo`), add container guards using chezmoi's `when` template condition or a `DEVCONTAINER=true` env var check.
+2. **Neovim plugin network access**: lazy.nvim needs outbound HTTP to download plugins on first launch. Verify the container has network access. If plugins fail to install, check for proxy or firewall issues.
+3. **Nushell config host-specific paths**: If nushell config references host-specific paths (e.g., `~/.cargo/bin`), add chezmoi templating with `.chezmoi.hostname` or `env "DEVCONTAINER"` conditionals.
 
 ### Phase 4: git-delta migration (optional, deferred)
 

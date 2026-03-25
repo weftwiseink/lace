@@ -106,6 +106,30 @@ fn resolve_sibling_binary(name: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Stops the sprack-poll daemon by sending SIGTERM to its PID.
+///
+/// Best-effort: logs to stderr on failure but does not return an error.
+pub fn stop_poller() {
+    let pid_path = match poll_pid_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let contents = match fs::read_to_string(&pid_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let pid: i32 = match contents.trim().parse() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    // SAFETY: SIGTERM is a standard termination signal.
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    // Remove stale PID file.
+    let _ = fs::remove_file(&pid_path);
+}
+
 /// Returns the default DB path for existence checks.
 pub fn default_db_path() -> Result<PathBuf> {
     Ok(sprack_data_dir()?.join("state.db"))

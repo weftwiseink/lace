@@ -84,12 +84,24 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
     // Try the default path.
     let default_path = daemon::default_db_path()?;
     if default_path.exists() {
-        if let Ok(conn) = sprack_db::open_db_readonly(None) {
-            return Ok(conn);
+        match sprack_db::open_db_readonly(None) {
+            Ok(conn) => return Ok(conn),
+            Err(sprack_db::SprackDbError::UnsupportedSchemaVersion(v)) => {
+                // DB was created by an older binary. Delete it so the poller
+                // recreates it with the current schema.
+                eprintln!("sprack: schema version {v} is outdated, recreating database...");
+                let _ = std::fs::remove_file(&default_path);
+                // Also remove WAL/SHM files.
+                let _ = std::fs::remove_file(default_path.with_extension("db-wal"));
+                let _ = std::fs::remove_file(default_path.with_extension("db-shm"));
+                // Kill the old poller so we can restart with the new binary.
+                daemon::stop_poller();
+            }
+            Err(_) => {}
         }
     }
 
-    // DB doesn't exist: try to start the poller daemon.
+    // DB doesn't exist or was just removed: try to start the poller daemon.
     if !daemon::is_poller_running() {
         eprintln!("sprack-poll not running, attempting to start...");
         if let Err(err) = daemon::start_sprack_poll() {

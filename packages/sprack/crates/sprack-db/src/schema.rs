@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use crate::error::SprackDbError;
 
 /// Current schema version. Increment when the schema changes.
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+pub const CURRENT_SCHEMA_VERSION: i32 = 1;
 
 /// Creates or migrates the database schema.
 ///

@@ -48,7 +48,8 @@ pub fn open_db(path: Option<&Path>) -> Result<Connection, SprackDbError> {
 ///
 /// Uses `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` flags.
 /// Verifies WAL mode is active (does not attempt to set it).
-/// Does not call `init_schema`: schema creation is the writer's responsibility.
+/// Checks schema version: returns `UnsupportedSchemaVersion` if the DB was
+/// created by an older binary that lacks the current schema columns.
 pub fn open_db_readonly(path: Option<&Path>) -> Result<Connection, SprackDbError> {
     let db_path = match path {
         Some(p) => p.to_path_buf(),
@@ -67,6 +68,12 @@ pub fn open_db_readonly(path: Option<&Path>) -> Result<Connection, SprackDbError
 
     conn.pragma_update(None, "busy_timeout", 5000)?;
     conn.pragma_update(None, "foreign_keys", "on")?;
+
+    // Verify schema version matches what this binary expects.
+    let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != schema::CURRENT_SCHEMA_VERSION {
+        return Err(SprackDbError::UnsupportedSchemaVersion(version));
+    }
 
     Ok(conn)
 }

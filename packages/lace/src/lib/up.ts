@@ -738,7 +738,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
             lace.prebuildFeatures = prebuildFeatures;
             customizations.lace = lace;
             resolvedConfig.customizations = customizations;
-            // Also propagate to configMinimal.raw so prebuild picks it up
+            // Also propagate to configMinimal.raw so prebuild picks it up.
+            // NOTE: This relies on shared object references through the extraction chain.
+            // If configMinimal.raw is ever deep-cloned before this point, this mutation
+            // would silently stop working. A refactor to pass options explicitly would be safer.
             const minCustomizations = (configMinimal.raw.customizations ?? {}) as Record<string, unknown>;
             const minLace = (minCustomizations.lace ?? {}) as Record<string, unknown>;
             const minPrebuild = (minLace.prebuildFeatures ?? {}) as Record<string, Record<string, unknown>>;

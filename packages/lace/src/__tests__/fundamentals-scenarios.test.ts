@@ -192,7 +192,7 @@ describe("Scenario F3: feature metadata validation", () => {
 
     // Verify identity
     expect(metadata.id).toBe("lace-fundamentals");
-    expect(metadata.version).toBe("1.0.0");
+    expect(metadata.version).toBe("1.0.2");
 
     // Verify dependsOn
     expect(metadata.dependsOn).toBeDefined();

@@ -16,13 +16,16 @@ last_reviewed:
 
 # Lace user.json Rollout and Cross-Project Verification
 
-> BLUF(opus/user-json-rollout): Populate `~/.config/lace/user.json` with the full set of user-specific tools and preferences (nushell, neovim, git-delta, git identity, default shell), move user-preference features out of the lace project's `devcontainer.json`, and verify the complete developer environment end-to-end.
+> BLUF(opus/user-json-rollout): Populate `~/.config/lace/user.json` with user-specific features (nushell, neovim, claude-code), git identity, default shell, and mounts.
+> Move user-preference features out of the lace project's `devcontainer.json` and verify the complete developer environment end-to-end.
 > The current container is missing nushell and neovim because they were removed from `prebuildFeatures` during the lace-fundamentals migration but not yet added to `user.json`.
-> Chezmoi apply runs but the managed configs (nushell, neovim, starship, tmux, wezterm) depend on their binaries being installed first.
-> This proposal defines the target `user.json`, the devcontainer.json cleanup, the chezmoi apply order-of-operations, and a verification checklist covering every cross-project behavior.
+> Chezmoi apply runs but the managed configs (nushell, neovim, starship, tmux) depend on their binaries being installed first.
+> This proposal defines the target `user.json`, the devcontainer.json cleanup, the chezmoi apply order-of-operations, and a verification checklist.
+> Nushell history persistence and developer tool packaging are deferred to dedicated RFPs.
 >
 > - **Depends on:** [user-level config implementation](2026-03-24-lace-user-level-config.md), [lace-fundamentals feature](2026-03-24-lace-fundamentals-feature.md)
 > - **References:** [dotfiles repo](https://github.com/micimize/dotfiles), `~/.config/lace/settings.json`
+> - **Follow-up RFPs:** [nushell history](2026-03-25-lace-nushell-history-persistence.md), [recommended tools](2026-03-25-lace-recommended-tools-feature.md), [config reorg](2026-03-25-lace-config-directory-reorganization.md), [hostname defaults](2026-03-25-lace-container-hostname-defaults.md)
 
 ## Objective
 
@@ -81,16 +84,6 @@ The correct order:
 2. `lace-fundamentals-init` runs chezmoi apply (writes config files)
 3. Neovim lazy.nvim bootstrap happens on first `nvim` invocation (or via headless `nvim --headless +qa`)
 
-### git-delta in Dockerfile
-
-The Dockerfile currently installs `git-delta` directly (lines 54-57).
-This is a user preference, not a project requirement.
-It should move to `user.json` features or be installed by chezmoi.
-
-> NOTE(opus/user-json-rollout): git-delta does not have a devcontainer feature on any major registry.
-> Options: (a) keep it in the Dockerfile as a pragmatic exception, (b) install it via a chezmoi `run_once` script, or (c) create a lace feature for it.
-> Option (b) is simplest: the dotfiles repo already has `run_once` scripts for starship and carapace.
-
 ## Proposed Solution
 
 ### Target user.json
@@ -141,23 +134,10 @@ It should move to `user.json` features or be installed by chezmoi.
 > Moving it to `user.json` means any lace project gets Claude Code without declaring it in `prebuildFeatures`.
 > Projects that need to pin a specific claude-code version can still declare it in their `devcontainer.json` (project options override user options).
 
-### Nushell history persistence
-
-Nushell history cannot be a `user.json` mount: user mounts are forced readonly, and history requires write access.
-Instead, nushell history is persisted via the existing project-level `bash-history` mount pattern.
-
-The chezmoi-managed nushell config should set the history file path to the mounted `/commandhistory/` directory:
-```nu
-# In config.nu (chezmoi-managed)
-$env.config.history.file_format = "sqlite"
-$env.config.history.isolation = false
-```
-
-The nushell `$nu.history-path` default writes to `~/.config/nushell/history.sqlite3`.
-To persist this across rebuilds, add a settings.json mount override pointing to the project's `bash-history` mount directory, or configure a dedicated history path in the nushell config that writes to `/commandhistory/.nu_history.sqlite3`.
-
-> NOTE(opus/user-json-rollout): The simplest approach: configure nushell's history path in dotfiles config.nu to write to `/commandhistory/.nu_history.sqlite3`, reusing the existing writable `project/bash-history` mount.
-> No new mounts needed, just a dotfiles change.
+> NOTE(opus/user-json-rollout): Nushell history persistence is deferred to a dedicated RFP at `cdocs/proposals/2026-03-25-lace-nushell-history-persistence.md`.
+> The core challenge: config.nu is chezmoi-managed and shared with the host, so container-specific paths can't be hardcoded.
+> Additionally, nushell uses sqlite with WAL/SHM files, complicating bind mount approaches.
+> A report at `cdocs/reports/2026-03-25-nushell-history-container-persistence.md` investigates pragmatic solutions.
 
 > NOTE(opus/user-json-rollout): The git identity uses `micimize` / `rosenthalm93@gmail.com` rather than the current `mjr` / `mjr@weftwiseink.com`.
 > The host `~/.gitconfig` uses `micimize`, so this aligns container identity with host identity.
@@ -180,10 +160,8 @@ Remove from the lace project's `customizations.lace.mounts`:
 Remove from `containerEnv`:
 - `"CLAUDE_CONFIG_DIR"`: this was set to `${lace.mount(project/claude-config).target}` and will need updating to reference the feature mount label instead.
 
-> NOTE(opus/user-json-rollout): git-delta is installed by the Dockerfile, not by any devcontainer feature.
-> Neither the anthropic upstream feature nor our wrapper installs it.
-> It stays in the Dockerfile for now: it's a 2.9MB .deb with no feature equivalent on any major registry.
-> A chezmoi `run_once` migration is possible but adds no value over the Dockerfile approach for this project.
+> NOTE(opus/user-json-rollout): git-delta and similar optional developer tools (bat, fzf) are tracked in a separate RFP at `cdocs/proposals/2026-03-25-lace-recommended-tools-feature.md`.
+> git-delta stays in the Dockerfile for this rollout.
 
 ### Chezmoi integration
 
@@ -274,10 +252,10 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] `/mnt/lace/screenshots` contains host screenshots (readonly)
 - [ ] `/mnt/lace/repos/dotfiles` contains dotfiles repo
 - [ ] `/home/node/.ssh/authorized_keys` exists
-- [ ] Nushell history persists: `history | length` returns >0 after a container restart (history written to `/commandhistory/`)
+- [ ] Nushell history persistence: deferred to nushell-history-persistence RFP (sqlite WAL complications)
 
 ### Tools
-- [ ] `git-delta`: `delta --version` works (from Dockerfile)
+- [ ] `git-delta`: `delta --version` works
 - [ ] `curl`, `jq`, `less` available (staples)
 - [ ] `chezmoi --version` works
 
@@ -333,7 +311,7 @@ Known likely issues to check for:
 2. **Neovim plugin pre-install**: If `nvim --headless "+Lazy! sync" +qa` fails or hangs, investigate: network access, treesitter compilation (may need `gcc`/`make`), plugin-specific build steps. Consider whether the nvim plugin mount from the neovim feature (`~/.local/share/nvim`) should be configured in settings.json to persist plugins across rebuilds.
 3. **Nushell config host-specific paths**: If nushell config references host-specific paths (e.g., `~/.cargo/bin`), add chezmoi templating with `.chezmoi.hostname` or `env "DEVCONTAINER"` conditionals.
 4. **Claude config mount migration**: Verify that the `.claude.json` file overlay (previously `project/claude-config-json`) is handled correctly by the feature's directory mount. If not, the implementor may need to add a secondary file mount declaration to the claude-code feature metadata.
-5. **Nushell history persistence**: Update the chezmoi-managed `config.nu` to write history to `/commandhistory/.nu_history.sqlite3`. Verify history persists across `docker rm` + `lace up`.
+5. **Nushell history persistence**: Deferred to dedicated RFP. For this rollout, nushell history is ephemeral (lost on container rebuild). Not a blocker for verification.
 
 The implementor should iterate on these until the full verification checklist passes, documenting each fix in the devlog.
 

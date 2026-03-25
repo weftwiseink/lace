@@ -37,6 +37,8 @@ export interface PrebuildOptions {
   configPath?: string;
   /** Injectable subprocess runner for testing. */
   subprocess?: RunSubprocess;
+  /** Override prebuild features (e.g., with user-merged features from up pipeline). */
+  prebuildFeatures?: Record<string, Record<string, unknown>>;
 }
 
 export interface PrebuildResult {
@@ -75,29 +77,34 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     return { exitCode: 1, message: (err as Error).message };
   }
 
-  // Step 1b: Extract prebuild features
-  const prebuildResult = extractPrebuildFeatures(config.raw);
+  // Step 1b: Extract prebuild features (use override if provided, e.g., from up pipeline with user features merged)
+  let prebuildFeatures: Record<string, Record<string, unknown>>;
+  if (options.prebuildFeatures) {
+    prebuildFeatures = options.prebuildFeatures;
+  } else {
+    const prebuildResult = extractPrebuildFeatures(config.raw);
 
-  if (prebuildResult.kind === "null") {
-    // Intentional opt-out — silent exit
-    return { exitCode: 0, message: "" };
+    if (prebuildResult.kind === "null") {
+      // Intentional opt-out — silent exit
+      return { exitCode: 0, message: "" };
+    }
+
+    if (prebuildResult.kind === "absent") {
+      const msg =
+        "No prebuildFeatures configured in devcontainer.json. Nothing to prebuild.";
+      console.log(msg);
+      return { exitCode: 0, message: msg };
+    }
+
+    if (prebuildResult.kind === "empty") {
+      const msg =
+        "prebuildFeatures is empty in devcontainer.json. Nothing to prebuild.";
+      console.log(msg);
+      return { exitCode: 0, message: msg };
+    }
+
+    prebuildFeatures = prebuildResult.features;
   }
-
-  if (prebuildResult.kind === "absent") {
-    const msg =
-      "No prebuildFeatures configured in devcontainer.json. Nothing to prebuild.";
-    console.log(msg);
-    return { exitCode: 0, message: msg };
-  }
-
-  if (prebuildResult.kind === "empty") {
-    const msg =
-      "prebuildFeatures is empty in devcontainer.json. Nothing to prebuild.";
-    console.log(msg);
-    return { exitCode: 0, message: msg };
-  }
-
-  const prebuildFeatures = prebuildResult.features;
 
   // Step 2: Validate no feature overlap
   const overlaps = validateNoOverlap(prebuildFeatures, config.features);

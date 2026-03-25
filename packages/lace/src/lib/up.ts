@@ -809,10 +809,13 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // Phase: Prebuild (if configured)
   if (hasPrebuildFeatures) {
     console.log("Running prebuild...");
+    // Pass merged prebuild features (includes user features) to avoid re-reading source file
+    const mergedPrebuild = extractPrebuildFeatures(configMinimal.raw);
     const prebuildResult = runPrebuild({
       workspaceRoot: workspaceFolder,
       subprocess,
       force: rebuild,
+      prebuildFeatures: mergedPrebuild.kind === "features" ? mergedPrebuild.features : undefined,
     });
     result.phases.prebuild = {
       exitCode: prebuildResult.exitCode,

@@ -2,13 +2,20 @@
 //!
 //! Maps crossterm events to tree state navigation and application commands.
 
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::App;
 use crate::tmux;
+use crate::tree::NodeId;
 
 /// Handles a keyboard event, updating app state accordingly.
 pub fn handle_key(app: &mut App, key: KeyEvent) {
+    // Ctrl+C quits regardless of other keybindings.
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        app.should_quit = true;
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
 
@@ -63,9 +70,30 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
             app.tree_state.scroll_down(3);
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            // Single click selects the node at the click position.
-            app.tree_state
-                .click_at(ratatui::layout::Position::new(mouse.column, mouse.row));
+            let position = ratatui::layout::Position::new(mouse.column, mouse.row);
+
+            // Check what node lives at the click position.
+            let is_non_leaf = app
+                .tree_state
+                .rendered_at(position)
+                .and_then(|ids| ids.last())
+                .is_some_and(|id| !matches!(id, NodeId::Pane(_)));
+
+            if is_non_leaf {
+                // Non-leaf nodes (session, window, host group): select and
+                // always toggle expand/collapse on single click.
+                let ids = app
+                    .tree_state
+                    .rendered_at(position)
+                    .unwrap()
+                    .to_vec();
+                app.tree_state.select(ids.clone());
+                app.tree_state.toggle(ids);
+            } else {
+                // Leaf nodes (panes): default click_at behavior (select, or
+                // toggle if already selected).
+                app.tree_state.click_at(position);
+            }
         }
         _ => {}
     }

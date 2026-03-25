@@ -169,7 +169,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
     // Help hints.
     spans.push(Span::styled(
-        "j/k:nav  h/l:collapse  enter:focus  q:quit",
+        "j/k:nav  h/l:collapse  enter:focus  q/^C:quit",
         theme.status_help,
     ));
 

@@ -22,6 +22,13 @@
                     "recommendedSource": "~/.claude",
                     "description": "Claude Code configuration, credentials, and session state",
                     "sourceMustBe": "directory"
+                },
+                "config-json": {
+                    "target": "/home/${_REMOTE_USER}/.claude/.claude.json",
+                    "recommendedSource": "~/.claude.json",
+                    "sourceMustBe": "file",
+                    "description": "Host onboarding and account state overlay. Prevents re-onboarding in containers by providing the full host state file. Claude Code writes to this on every startup (counters, feature flags, preferences).",
+                    "hint": "Run 'claude' on the host first to create this file at ~/.claude.json"
                 }
             }
         }

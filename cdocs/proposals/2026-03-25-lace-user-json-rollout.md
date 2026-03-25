@@ -169,8 +169,13 @@ Remove from the lace project's `prebuildFeatures`:
 - `"ghcr.io/anthropics/devcontainer-features/claude-code:1": {}`: now in `user.json` as the lace-specific wrapper feature.
 
 Remove from the lace project's `customizations.lace.mounts`:
-- `"claude-config"` and `"claude-config-json"`: the claude-code feature's own mount declaration (`claude-code/config`) replaces the project-level `project/claude-config` mount.
-  The `.claude.json` file overlay mount (`claude-config-json`) needs consideration: the feature declares a directory mount at `~/.claude`, but the `.claude.json` file from `~/.claude.json` on the host needs to be overlaid inside it.
+- `"claude-config"` and `"claude-config-json"`: the claude-code feature now declares both mounts in its own metadata: `claude-code/config` (directory) and `claude-code/config-json` (file overlay).
+
+> NOTE(opus/user-json-rollout): The `.claude.json` file overlay is necessary because `CLAUDE_CONFIG_DIR` makes Claude look for `.claude.json` inside the config directory.
+> The host's `~/.claude/.claude.json` (written by previous container sessions) is a sparse 12-key copy.
+> The overlay provides the host's full 55-key `~/.claude.json` (onboarding state, preferences, feature flags).
+> Claude Code writes to `.claude.json` on every startup: the mount must NOT be readonly.
+> Container writes propagate back to host, but all fields are idempotent caches and counters.
 
 Remove from `containerEnv`:
 - `"CLAUDE_CONFIG_DIR"`: this was set to `${lace.mount(project/claude-config).target}` and will need updating to reference the feature mount label instead.
@@ -298,6 +303,7 @@ Every item must be verified inside a freshly rebuilt container after applying th
    - Update `containerEnv.CLAUDE_CONFIG_DIR` to reference the feature mount: `"${lace.mount(claude-code/config).target}"`.
 4. Update `~/.config/lace/settings.json`:
    - Add `"claude-code/config": { "source": "~/.claude" }` (replaces `"project/claude-config"`)
+   - Add `"claude-code/config-json": { "source": "~/.claude.json" }` (replaces `"project/claude-config-json"`)
    - Remove the old `"project/claude-config"` override
 5. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
    `lace-fundamentals-init && nvim --headless "+Lazy! sync" +qa`

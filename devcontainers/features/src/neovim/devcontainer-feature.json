@@ -1,6 +1,6 @@
 {
     "id": "neovim",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "Neovim",
     "description": "Installs Neovim from GitHub releases. Declares a lace mount for persistent plugin state.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/neovim",
@@ -11,6 +11,9 @@
             "description": "Neovim release tag (e.g., v0.11.6, stable, nightly)."
         }
     },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/rust"
+    ],
     "customizations": {
         "lace": {
             "mounts": {

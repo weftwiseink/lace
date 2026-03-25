@@ -40,6 +40,25 @@ tar -xzf /tmp/nvim.tar.gz -C /usr/local --strip-components=1
 
 rm /tmp/nvim.tar.gz
 
+# Install tree-sitter CLI for nvim-treesitter parser compilation.
+# Pre-built binaries (npm, gh-release) require glibc 2.39+; bookworm has 2.36.
+# Build from source via cargo if available, which requires libclang-dev.
+if command -v cargo >/dev/null 2>&1; then
+    echo "Installing tree-sitter-cli via cargo (for nvim-treesitter)..."
+    # libclang-dev is needed for bindgen during cargo build
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y -qq libclang-dev 2>/dev/null && rm -rf /var/lib/apt/lists/* || true
+    fi
+    # Install as the feature user so the binary lands in their cargo bin
+    su - "${_REMOTE_USER:-root}" -c "cargo install tree-sitter-cli --locked" 2>&1 || {
+        echo "WARNING: tree-sitter-cli install failed. nvim-treesitter parsers won't compile."
+    }
+else
+    echo "WARNING: cargo not available. tree-sitter-cli not installed."
+    echo "         nvim-treesitter parser compilation will fail."
+    echo "         Add ghcr.io/devcontainers/features/rust:1 to your features."
+fi
+
 # Create the plugin state directory so the lace mount target exists.
 _REMOTE_USER="${_REMOTE_USER:-root}"
 NVIM_DATA_DIR="/home/${_REMOTE_USER}/.local/share/nvim"

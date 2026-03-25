@@ -115,6 +115,7 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
     let max_wait = Duration::from_secs(5);
     let poll_interval = Duration::from_millis(200);
     let mut waited = Duration::ZERO;
+    let mut saw_wrong_version = false;
 
     while waited < max_wait {
         thread::sleep(poll_interval);
@@ -123,6 +124,10 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         if default_path.exists() {
             match sprack_db::open_db_readonly(None) {
                 Ok(conn) => return Ok(conn),
+                Err(sprack_db::SprackDbError::UnsupportedSchemaVersion(_)) => {
+                    saw_wrong_version = true;
+                    continue;
+                }
                 Err(_) => continue,
             }
         }
@@ -139,8 +144,16 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         }
     }
 
+    if saw_wrong_version {
+        bail!(
+            "sprack-poll is creating a database with an outdated schema.\n\
+             The sprack-poll binary is stale. Rebuild all binaries:\n  \
+             cargo build && cargo run -p sprack"
+        );
+    }
+
     bail!(
-        "Database not found at {}. Is sprack-poll running?\nTry: pkill sprack-poll && cargo run -p sprack",
+        "Database not found at {}. Is sprack-poll running?\nTry: cargo build && cargo run -p sprack",
         default_path.display()
     );
 }

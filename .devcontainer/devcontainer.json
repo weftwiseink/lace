@@ -28,14 +28,6 @@
         "bash-history": {
           "target": "/commandhistory",
           "description": "Bash command history persistence"
-        },
-        // TODO(opus/user-json-rollout): Remove after claude-code feature is republished
-        // with config-json mount. The GHCR version is stale (missing config-json).
-        "claude-config-json": {
-          "target": "/home/node/.claude/.claude.json",
-          "recommendedSource": "~/.claude.json",
-          "sourceMustBe": "file",
-          "description": "Claude Code state overlay (host onboarding/account cache)"
         }
       },
       // Repo mounts: external repos cloned (or overridden via settings.json) and

@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/user-json-rollout
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [lace, user_config, dotfiles, chezmoi, verification]
 last_reviewed:
   status: revision_requested

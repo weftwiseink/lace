@@ -11,6 +11,11 @@ tags: [lace, mounts, user_experience, screenshots]
 
 # Lace Screenshot Sharing
 
+> NOTE(opus/usefun-real): Screenshots are now handled by `user.json` mounts + `lace-fundamentals` mount declaration.
+> The `lace-fundamentals` feature declares a `screenshots` mount with target `/mnt/lace/screenshots` and recommended source `~/Pictures/Screenshots`.
+> Users configure the source path in `user.json` mounts or settings overrides.
+> See `cdocs/proposals/2026-03-24-lace-user-level-config.md` and `cdocs/proposals/2026-03-24-lace-fundamentals-feature.md`.
+
 > BLUF(opus/lace-screenshot-sharing): Screenshots taken on the host cannot be referenced from inside lace devcontainers without manual copying.
 > A lace mount or shared directory convention would let host-side screenshots be immediately visible inside containers, enabling workflows like pasting a screenshot path into a Claude Code conversation.
 >

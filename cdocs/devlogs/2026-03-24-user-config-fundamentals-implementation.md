@@ -111,10 +111,9 @@ Init runs FIRST (before user commands) to ensure git identity and dotfiles are a
   Scenario tests verify config generation; container-level verification requires publish.
 - `LACE_DOTFILES_PATH` injection: the pipeline detects lace-fundamentals and injects `defaultShell`, but `LACE_DOTFILES_PATH` is not yet injected because it depends on dotfiles mount resolution (which requires repoMount configuration not yet implemented).
 
-> WARN(opus/user-config-fundamentals): Without `LACE_DOTFILES_PATH` injection, the init script defaults to `/mnt/lace/repos/dotfiles` as a hardcoded path.
-> If the dotfiles mount resolves to a different target, chezmoi apply silently no-ops on first container start: the user's dotfiles are never applied.
-> This is a first-run experience failure for users who configure dotfiles mounts with non-default paths.
-> Must be addressed before lace-fundamentals is promoted as the standard feature.
+> NOTE(opus/user-config-fundamentals): Without `LACE_DOTFILES_PATH` injection, the init script defaults to `/mnt/lace/repos/dotfiles`.
+> This default matches the `lace-fundamentals` feature's `dotfiles` mount declaration target, so the standard flow works without the env var.
+> The env var exists for override flexibility: users who configure a non-default dotfiles mount target should set `LACE_DOTFILES_PATH` in their `containerEnv`.
 
 ## Verification
 

@@ -14,6 +14,8 @@ use crate::jsonl::{AssistantMessage, JsonlEntry};
 /// Structured summary written to the process_integrations.summary column.
 ///
 /// The TUI parses this JSON to render width-adaptive status displays.
+/// Fields from hook events (tasks, session_summary, session_purpose) are optional
+/// and default to None when hooks are not configured.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClaudeSummary {
     /// Activity state: "thinking", "tool_use", "idle", "waiting", "error".
@@ -30,6 +32,36 @@ pub struct ClaudeSummary {
     pub error_message: Option<String>,
     /// ISO 8601 timestamp of the last assistant entry.
     pub last_activity: Option<String>,
+    /// Task list with completion status (from hook events).
+    #[serde(default)]
+    pub tasks: Option<Vec<TaskEntry>>,
+    /// Session summary from PostCompact hook event.
+    #[serde(default)]
+    pub session_summary: Option<String>,
+    /// Session purpose (from PostCompact or cwd).
+    #[serde(default)]
+    pub session_purpose: Option<String>,
+}
+
+/// A task entry from the Claude Code task list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskEntry {
+    /// Task identifier.
+    pub task_id: String,
+    /// Short task name.
+    pub subject: String,
+    /// Longer description.
+    pub description: Option<String>,
+    /// Current task status.
+    pub status: TaskStatus,
+}
+
+/// Status of a task in the Claude Code task list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TaskStatus {
+    Created,
+    InProgress,
+    Completed,
 }
 
 /// Entry types that are skipped when determining the "last meaningful entry".
@@ -199,6 +231,9 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
         last_tool,
         error_message: None,
         last_activity,
+        tasks: None,
+        session_summary: None,
+        session_purpose: None,
     }
 }
 
@@ -398,11 +433,25 @@ mod tests {
             last_tool: Some("Edit".to_string()),
             error_message: None,
             last_activity: Some("2026-03-22T10:00:00Z".to_string()),
+            tasks: None,
+            session_summary: None,
+            session_purpose: None,
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();
         let deserialized: ClaudeSummary = serde_json::from_str(&json_string).unwrap();
 
         assert_eq!(summary, deserialized);
+    }
+
+    #[test]
+    fn test_summary_deserialization_backward_compatible() {
+        // Old JSON without tasks/session_summary/session_purpose fields.
+        let old_json = r#"{"state":"idle","model":"opus","subagent_count":0,"context_percent":50,"last_tool":null,"error_message":null,"last_activity":null}"#;
+        let summary: ClaudeSummary = serde_json::from_str(old_json).unwrap();
+        assert_eq!(summary.state, "idle");
+        assert_eq!(summary.tasks, None);
+        assert_eq!(summary.session_summary, None);
+        assert_eq!(summary.session_purpose, None);
     }
 }

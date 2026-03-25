@@ -47,10 +47,14 @@ pub struct SessionFileState {
     pub cache_key: CacheKey,
     /// Path to the active session file.
     pub session_file: PathBuf,
-    /// Last read position for incremental reads.
+    /// Last read position for incremental JSONL reads.
     pub file_position: u64,
-    /// The most recent entries from the last read.
+    /// The most recent entries from the last JSONL read.
     pub last_entries: Vec<crate::jsonl::JsonlEntry>,
+    /// Last read position for hook event file.
+    pub event_file_position: u64,
+    /// Accumulated hook events for this session.
+    pub cached_hook_events: Vec<crate::events::HookEvent>,
 }
 
 /// Finds the active session file for a Claude Code project directory.

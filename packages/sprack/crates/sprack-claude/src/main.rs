@@ -8,6 +8,7 @@
 //! Container panes (lace devcontainer sessions) are resolved via the `~/.claude`
 //! bind mount using workspace prefix matching and mtime heuristics.
 
+mod events;
 mod jsonl;
 mod proc_walk;
 mod resolver;
@@ -168,7 +169,24 @@ fn process_claude_pane(
         return;
     }
 
-    let summary = status::build_summary(&session_state.last_entries);
+    let mut summary = status::build_summary(&session_state.last_entries);
+
+    // Read hook events and merge into summary (graceful: no-op if no event files exist).
+    if let Some(event_dir) = events::default_event_dir() {
+        if event_dir.is_dir() {
+            if let Some(event_file) =
+                events::find_event_file(&event_dir, &pane.current_path)
+            {
+                let hook_events =
+                    events::read_events(&event_file, &mut session_state.event_file_position);
+                if !hook_events.is_empty() {
+                    session_state.cached_hook_events.extend(hook_events);
+                }
+                events::merge_hook_events(&mut summary, &session_state.cached_hook_events);
+            }
+        }
+    }
+
     let process_status = status::summary_to_process_status(&summary);
     let summary_json = match serde_json::to_string(&summary) {
         Ok(json) => json,
@@ -249,6 +267,8 @@ fn resolve_session_for_pane(
         session_file,
         file_position: 0,
         last_entries: Vec::new(),
+        event_file_position: 0,
+        cached_hook_events: Vec::new(),
     })
 }
 
@@ -295,6 +315,9 @@ fn write_error_integration(
         last_tool: None,
         error_message: Some(error_message.to_string()),
         last_activity: None,
+        tasks: None,
+        session_summary: None,
+        session_purpose: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

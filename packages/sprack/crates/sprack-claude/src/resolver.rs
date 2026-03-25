@@ -86,6 +86,8 @@ impl PaneResolver for LocalResolver {
             session_file,
             file_position: 0,
             last_entries: Vec::new(),
+            event_file_position: 0,
+            cached_hook_events: Vec::new(),
         })
     }
 }
@@ -117,6 +119,8 @@ impl<'a> PaneResolver for LaceContainerResolver<'a> {
             session_file,
             file_position: 0,
             last_entries: Vec::new(),
+            event_file_position: 0,
+            cached_hook_events: Vec::new(),
         })
     }
 }
@@ -141,6 +145,8 @@ pub fn resolve_container_pane(
         session_file,
         file_position: 0,
         last_entries: Vec::new(),
+        event_file_position: 0,
+        cached_hook_events: Vec::new(),
     })
 }
 

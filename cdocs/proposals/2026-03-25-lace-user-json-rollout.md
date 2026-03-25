@@ -97,10 +97,13 @@ It should move to `user.json` features or be installed by chezmoi.
 
 ```jsonc
 {
-  // User-preference features: installed in every lace container
+  // User-preference features: installed in every lace container.
+  // The lace-specific claude-code feature wraps anthropic's upstream feature
+  // and declares the ~/.claude config mount via lace metadata.
   "features": {
     "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
-    "ghcr.io/eitsupi/devcontainer-features/nushell:0": {}
+    "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
+    "ghcr.io/weftwiseink/devcontainer-features/claude-code:1": {}
   },
 
   // Git identity: written to ~/.gitconfig by lace-fundamentals-init
@@ -118,7 +121,10 @@ It should move to `user.json` features or be installed by chezmoi.
       "source": "~/Pictures/Screenshots",
       "target": "/mnt/user/screenshots",
       "description": "Host screenshots for Claude Code image references"
-    }
+    },
+    // NOTE: nushell history is NOT here because user mounts are readonly.
+    // History persistence is configured in settings.json as a writable mount override.
+    // See "settings.json updates" section below.
   },
 
   // User-level env vars
@@ -130,22 +136,49 @@ It should move to `user.json` features or be installed by chezmoi.
 }
 ```
 
+> NOTE(opus/user-json-rollout): The claude-code feature (`ghcr.io/weftwiseink/devcontainer-features/claude-code:1`) is the lace-specific wrapper, not the upstream anthropic feature.
+> It wraps `ghcr.io/anthropics/devcontainer-features/claude-code:1` (via `dependsOn` on node) and declares a lace mount for `~/.claude` config persistence.
+> Moving it to `user.json` means any lace project gets Claude Code without declaring it in `prebuildFeatures`.
+> Projects that need to pin a specific claude-code version can still declare it in their `devcontainer.json` (project options override user options).
+
+### Nushell history persistence
+
+Nushell history cannot be a `user.json` mount: user mounts are forced readonly, and history requires write access.
+Instead, nushell history is persisted via the existing project-level `bash-history` mount pattern.
+
+The chezmoi-managed nushell config should set the history file path to the mounted `/commandhistory/` directory:
+```nu
+# In config.nu (chezmoi-managed)
+$env.config.history.file_format = "sqlite"
+$env.config.history.isolation = false
+```
+
+The nushell `$nu.history-path` default writes to `~/.config/nushell/history.sqlite3`.
+To persist this across rebuilds, add a settings.json mount override pointing to the project's `bash-history` mount directory, or configure a dedicated history path in the nushell config that writes to `/commandhistory/.nu_history.sqlite3`.
+
+> NOTE(opus/user-json-rollout): The simplest approach: configure nushell's history path in dotfiles config.nu to write to `/commandhistory/.nu_history.sqlite3`, reusing the existing writable `project/bash-history` mount.
+> No new mounts needed, just a dotfiles change.
+
 > NOTE(opus/user-json-rollout): The git identity uses `micimize` / `rosenthalm93@gmail.com` rather than the current `mjr` / `mjr@weftwiseink.com`.
 > The host `~/.gitconfig` uses `micimize`, so this aligns container identity with host identity.
 > Work projects can override via `GIT_CONFIG_*` env vars in their `containerEnv`.
 
 ### devcontainer.json cleanup
 
-Remove from the lace project's `devcontainer.json`:
-- Nothing to remove from `prebuildFeatures`: neovim and nushell are already gone.
+Remove from the lace project's `prebuildFeatures`:
+- `"ghcr.io/anthropics/devcontainer-features/claude-code:1": {}`: now in `user.json` as the lace-specific wrapper feature.
 
-Remove from the Dockerfile:
-- `git-delta` installation (lines 54-57): move to a chezmoi `run_once` script in the dotfiles repo.
+Remove from the lace project's `customizations.lace.mounts`:
+- `"claude-config"` and `"claude-config-json"`: the claude-code feature's own mount declaration (`claude-code/config`) replaces the project-level `project/claude-config` mount.
+  The `.claude.json` file overlay mount (`claude-config-json`) needs consideration: the feature declares a directory mount at `~/.claude`, but the `.claude.json` file from `~/.claude.json` on the host needs to be overlaid inside it.
 
-> NOTE(opus/user-json-rollout): The Dockerfile `git-delta` removal is optional for this proposal.
-> It works fine where it is.
-> The chezmoi migration is cleaner but adds a `run_once` script dependency.
-> Recommend deferring the Dockerfile cleanup to avoid scope creep.
+Remove from `containerEnv`:
+- `"CLAUDE_CONFIG_DIR"`: this was set to `${lace.mount(project/claude-config).target}` and will need updating to reference the feature mount label instead.
+
+> NOTE(opus/user-json-rollout): git-delta is installed by the Dockerfile, not by any devcontainer feature.
+> Neither the anthropic upstream feature nor our wrapper installs it.
+> It stays in the Dockerfile for now: it's a 2.9MB .deb with no feature equivalent on any major registry.
+> A chezmoi `run_once` migration is possible but adds no value over the Dockerfile approach for this project.
 
 ### Chezmoi integration
 
@@ -201,7 +234,7 @@ Every item must be verified inside a freshly rebuilt container after applying th
 ### Editor
 - [ ] `nvim --version` returns a version
 - [ ] Neovim config loaded: `:echo g:loaded_lazy` returns `1` (lazy.nvim bootstrapped)
-- [ ] Neovim plugins install on first launch (`:Lazy` shows installed plugins)
+- [ ] Neovim plugins pre-installed: `nvim --headless "+Lazy! check" +qa` shows no missing plugins
 - [ ] `$EDITOR` is `nvim`
 - [ ] `$VISUAL` is `nvim`
 
@@ -226,16 +259,22 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] Password auth rejected
 - [ ] `sshd_config` has all 7 hardening directives
 
+### Claude Code
+- [ ] `claude --version` works
+- [ ] `~/.claude` directory exists and is mounted from host
+- [ ] `CLAUDE_CONFIG_DIR` points to the mounted claude config directory
+- [ ] Claude does not re-prompt for sign-in (host state preserved)
+
 ### Mounts
 - [ ] `/mnt/lace/screenshots` contains host screenshots (readonly)
 - [ ] `/mnt/lace/repos/dotfiles` contains dotfiles repo
 - [ ] `/home/node/.ssh/authorized_keys` exists
+- [ ] Nushell history persists: `history | length` returns >0 after a container restart (history written to `/commandhistory/`)
 
 ### Tools
-- [ ] `git-delta`: `delta --version` works (from Dockerfile or chezmoi)
+- [ ] `git-delta`: `delta --version` works (from Dockerfile)
 - [ ] `curl`, `jq`, `less` available (staples)
 - [ ] `chezmoi --version` works
-- [ ] `claude --version` works (claude-code feature)
 
 ### Cross-project behavior
 - [ ] Rebuild the dotfiles devcontainer (`~/code/personal/dotfiles`) with the same `user.json`: verify nushell, neovim, git identity all present
@@ -253,12 +292,22 @@ Every item must be verified inside a freshly rebuilt container after applying th
    }
    ```
    This ensures nushell is installed before lace-fundamentals runs `chsh`.
-3. Commit and push the `installsAfter` change (triggers GHCR re-publish).
+3. Update `.devcontainer/devcontainer.json`:
+   - Remove `"ghcr.io/anthropics/devcontainer-features/claude-code:1": {}` from `prebuildFeatures` (now in user.json as the lace wrapper).
+   - Remove `"claude-config"` and `"claude-config-json"` from `customizations.lace.mounts` (handled by the claude-code feature's own mount declaration).
+   - Update `containerEnv.CLAUDE_CONFIG_DIR` to reference the feature mount: `"${lace.mount(claude-code/config).target}"`.
+4. Update `~/.config/lace/settings.json`:
+   - Add `"claude-code/config": { "source": "~/.claude" }` (replaces `"project/claude-config"`)
+   - Remove the old `"project/claude-config"` override
+5. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
+   `lace-fundamentals-init && nvim --headless "+Lazy! sync" +qa`
+6. Commit and push the code changes (triggers GHCR re-publish for `installsAfter`).
 
 **Success criteria:**
 - `cat ~/.config/lace/user.json` matches the target config.
 - `devcontainer-feature.json` declares `installsAfter` for nushell.
-- Published feature version includes the `installsAfter` field.
+- `devcontainer.json` no longer references claude-code in prebuildFeatures or declares claude mounts.
+- `settings.json` has sources for all new mount labels.
 
 ### Phase 2: Rebuild and verify
 
@@ -269,34 +318,38 @@ Every item must be verified inside a freshly rebuilt container after applying th
 
 **Success criteria:** All checklist items pass.
 
-### Phase 3: Fix issues
+### Phase 3: Fix issues and iterate
 
 Address any failures from Phase 2.
 Known likely issues to check for:
 
 1. **Chezmoi `run_once` scripts**: If starship/carapace install scripts fail in the container context (different package manager, no `sudo`), add container guards using chezmoi's `when` template condition or a `DEVCONTAINER=true` env var check.
-2. **Neovim plugin network access**: lazy.nvim needs outbound HTTP to download plugins on first launch. Verify the container has network access. If plugins fail to install, check for proxy or firewall issues.
+2. **Neovim plugin pre-install**: If `nvim --headless "+Lazy! sync" +qa` fails or hangs, investigate: network access, treesitter compilation (may need `gcc`/`make`), plugin-specific build steps. Consider whether the nvim plugin mount from the neovim feature (`~/.local/share/nvim`) should be configured in settings.json to persist plugins across rebuilds.
 3. **Nushell config host-specific paths**: If nushell config references host-specific paths (e.g., `~/.cargo/bin`), add chezmoi templating with `.chezmoi.hostname` or `env "DEVCONTAINER"` conditionals.
+4. **Claude config mount migration**: Verify that the `.claude.json` file overlay (previously `project/claude-config-json`) is handled correctly by the feature's directory mount. If not, the implementor may need to add a secondary file mount declaration to the claude-code feature metadata.
+5. **Nushell history persistence**: Update the chezmoi-managed `config.nu` to write history to `/commandhistory/.nu_history.sqlite3`. Verify history persists across `docker rm` + `lace up`.
 
-### Phase 4: git-delta migration (optional, deferred)
+The implementor should iterate on these until the full verification checklist passes, documenting each fix in the devlog.
 
-Move git-delta from Dockerfile to a chezmoi `run_once_after` script.
-This is low priority: the current Dockerfile installation works.
+## Resolved Questions
+
+1. **Should `user.json` be chezmoi-managed?** Out of scope for this proposal.
+   A static file is sufficient for now.
+   Chezmoi templating for platform-aware config (macOS vs Linux) can be added in a follow-up.
+
+2. **Should neovim plugins be pre-installed?** Yes.
+   Add `nvim --headless "+Lazy! sync" +qa` to the `postCreateCommand` chain.
+   This runs after `lace-fundamentals-init` applies the nvim config via chezmoi.
+   Adds a few seconds to container creation but eliminates the first-launch plugin download.
+
+3. **Should the dotfiles repoMount be in `user.json` instead of `settings.json`?**
+   No, leave it in `settings.json` as a `readonly: false` override.
+   Chezmoi's idempotent apply behavior protects against accidental modifications.
+   Moving to `user.json` would require the writable mount feature (deferred).
 
 ## Open Questions
 
-1. **Should `user.json` be chezmoi-managed?** The user-config proposal includes a chezmoi template example.
-   Managing `user.json` via chezmoi allows platform-aware config (macOS vs Linux screenshot paths).
-   For now, a static file is simpler.
-   Chezmoi templating can be added later.
-
-2. **Should neovim plugins be pre-installed in the prebuild image?**
-   Currently lazy.nvim downloads plugins on first `nvim` launch.
-   A `postCreateCommand` step like `nvim --headless "+Lazy! sync" +qa` could pre-install them.
-   This adds build time but improves first-launch experience.
-
-3. **Should the dotfiles repoMount be in `user.json` instead of `settings.json`?**
-   The dotfiles source is in `settings.json` as a mount override.
-   It could also be a `user.json` mount (which would make it truly cross-project).
-   However, `user.json` mounts are read-only, and the dotfiles override is `readonly: false`.
-   This requires the writable mount feature (deferred in the user-config proposal).
+1. **Should the neovim feature's plugin mount (`~/.local/share/nvim`) be configured in `settings.json`?**
+   This would persist lazy.nvim plugin downloads across container rebuilds, avoiding re-download.
+   The trade-off: host plugin versions may drift from container expectations.
+   Recommend: try without persistence first; add if plugin install time becomes a pain point.

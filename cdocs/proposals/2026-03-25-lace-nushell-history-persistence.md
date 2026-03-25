@@ -55,16 +55,47 @@ The full proposal should explore:
 - "shared" indicates cross-container state (vs per-project state).
 - Directory must be created on `lace up` if it doesn't exist.
 
+### Broader Question: Should We Mount User Config Directories Directly?
+
+The proposer should seriously consider whether the right approach is to mount `~/.config/nushell`, `~/.config/nvim`, and similar user tool config directories directly from the host, rather than relying on chezmoi to deploy them inside the container.
+
+Arguments for direct mounting:
+- History, state, and config are all co-located (no split between chezmoi-managed config and separately-mounted state).
+- Chezmoi applies once on the host; containers use the result via mount.
+- Changes to host config are immediately reflected in containers (no re-apply needed).
+
+Arguments against:
+- Containers can't have container-specific config overrides (mount shadows everything).
+- Chezmoi `run_once` scripts that create files in these dirs won't work inside containers.
+- Multiple containers mounting the same directory creates concurrent write risk for stateful files.
+- Tighter coupling between host and container environments.
+
+If direct mounting is the right pattern, it should be applied consistently: nushell, neovim, starship, tmux, etc.
+This has implications for the [config directory reorganization RFP](2026-03-25-lace-config-directory-reorganization.md) and the overall dotfiles strategy.
+
+> NOTE(opus/user-json-rollout): The proposer should take a step back and critically evaluate whether our current approach of "chezmoi deploys inside container + separate mount for state" is the right model, or whether "host chezmoi + direct mount" is fundamentally simpler.
+> The former gives containers independence; the latter gives them consistency.
+> There may also be a hybrid: mount config dirs readonly and only persist state (history) separately.
+
+### Reference
+
+- Report: `cdocs/reports/2026-03-25-nushell-history-container-persistence.md` (investigated 5 approaches, found nushell 0.110 has no `config.history.path`)
+- The user-json rollout proposal uses a pragmatic whole-directory mount for this rollout iteration.
+
 ## Open Questions
 
 1. **Mount granularity**: Is a dedicated history directory (not `~/.config/nushell/`) the right approach? What is the minimal mount that handles WAL/SHM correctly?
 
 2. **SQLite WAL over bind mounts**: Has anyone validated that sqlite WAL mode works reliably over Docker bind mounts on ext4/btrfs? Are there known failure modes?
 
-3. **Concurrent container access**: If two containers write to the same history sqlite, does sqlite locking work correctly? Or should each container get its own history file with periodic merge?
+3. **Concurrent container access**: If two containers write to the same history sqlite, does sqlite locking work correctly? Or should each container get its own history file (conditioned on hostname) with periodic merge?
 
 4. **Nushell config override**: Does nushell support `$env.config.history.file_path` or an equivalent env var to redirect history to a custom location without modifying `config.nu`?
 
 5. **Chezmoi reconciliation**: If chezmoi manages nushell config and history lives elsewhere, how does the config point to the non-default history path? Template the path in `config.nu`?
 
 6. **Migration**: How to handle existing in-container history when this feature is enabled? Copy-on-first-mount?
+
+7. **Direct config dir mounting**: Should we mount `~/.config/nvim`, `~/.config/nushell`, etc. from the host directly? What are the implications for chezmoi, concurrent access, and container-specific overrides? See "Broader Question" section above.
+
+8. **Conditional dotfiles**: Should lace provide affordances for making container-conditional dotfiles easier to work with (e.g., auto-setting `DEVCONTAINER=true`, providing a chezmoi data template variable)?

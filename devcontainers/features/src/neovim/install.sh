@@ -43,14 +43,16 @@ rm /tmp/nvim.tar.gz
 # Install tree-sitter CLI for nvim-treesitter parser compilation.
 # Pre-built binaries (npm, gh-release) require glibc 2.39+; bookworm has 2.36.
 # Build from source via cargo if available, which requires libclang-dev.
-if command -v cargo >/dev/null 2>&1; then
+if [ -x /usr/local/cargo/bin/cargo ] || command -v cargo >/dev/null 2>&1; then
     echo "Installing tree-sitter-cli via cargo (for nvim-treesitter)..."
     # libclang-dev is needed for bindgen during cargo build
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y -qq libclang-dev 2>/dev/null && rm -rf /var/lib/apt/lists/* || true
     fi
-    # Install as the feature user so the binary lands in their cargo bin
-    su - "${_REMOTE_USER:-root}" -c "cargo install tree-sitter-cli --locked" 2>&1 || {
+    # Source cargo env explicitly (su - may start nushell which won't load .cargo/env).
+    # Install globally so tree-sitter lands in /usr/local/cargo/bin/ (on PATH for all users).
+    . /usr/local/cargo/env 2>/dev/null || true
+    cargo install tree-sitter-cli --locked 2>&1 || {
         echo "WARNING: tree-sitter-cli install failed. nvim-treesitter parsers won't compile."
     }
 else

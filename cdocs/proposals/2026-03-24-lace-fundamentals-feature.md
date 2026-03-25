@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/fundamentals-feature
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6-20250725"

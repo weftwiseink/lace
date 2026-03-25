@@ -1,0 +1,64 @@
+{
+    "id": "lace-fundamentals",
+    "version": "1.0.0",
+    "name": "Lace Fundamentals",
+    "description": "Baseline developer environment for lace containers: hardened SSH, git identity, dotfiles integration, default shell, and screenshot access.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/lace-fundamentals",
+    "licenseURL": "https://github.com/weftwiseink/lace/blob/main/LICENSE",
+    "options": {
+        "sshPort": {
+            "type": "string",
+            "default": "2222",
+            "description": "Container-side SSH port. Lace maps this asymmetrically: the host-side port is auto-allocated from the lace range (22425-22499)."
+        },
+        "defaultShell": {
+            "type": "string",
+            "default": "",
+            "description": "Absolute path to the default login shell (e.g., /usr/bin/nu). Empty string means no shell change. Typically populated from user.json defaultShell."
+        },
+        "enableSshHardening": {
+            "type": "boolean",
+            "default": true,
+            "description": "Apply SSH hardening (key-only auth, no password, no root login). Disable only for debugging."
+        }
+    },
+    "dependsOn": {
+        "ghcr.io/devcontainers/features/sshd:1": {},
+        "ghcr.io/devcontainers/features/git:1": {}
+    },
+    "customizations": {
+        "lace": {
+            "ports": {
+                "sshPort": {
+                    "label": "sshd",
+                    "onAutoForward": "silent",
+                    "requireLocalPort": true
+                }
+            },
+            "mounts": {
+                "authorized-keys": {
+                    "target": "/home/${_REMOTE_USER}/.ssh/authorized_keys",
+                    "recommendedSource": "~/.config/lace/ssh/id_ed25519.pub",
+                    "description": "SSH public key for lace SSH access. NOTE: target uses /home/${_REMOTE_USER} which resolves to /home/root for root user; ensure remoteUser is set to a non-root user, or override this mount target in settings.",
+                    "readonly": true,
+                    "sourceMustBe": "file",
+                    "hint": "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N ''"
+                },
+                "dotfiles": {
+                    "target": "/mnt/lace/repos/dotfiles",
+                    "description": "Dotfiles repo for chezmoi apply. Can be a direct git clone or a local checkout.",
+                    "sourceMustBe": "directory",
+                    "hint": "Point to your dotfiles repo checkout, or configure a repoMount for automatic cloning"
+                },
+                "screenshots": {
+                    "target": "/mnt/lace/screenshots",
+                    "recommendedSource": "~/Pictures/Screenshots",
+                    "description": "Host screenshots directory for Claude Code image references",
+                    "readonly": true,
+                    "sourceMustBe": "directory",
+                    "hint": "Override source in settings.json. macOS: ~/Desktop/Screenshots, Linux: ~/Pictures/Screenshots"
+                }
+            }
+        }
+    }
+}

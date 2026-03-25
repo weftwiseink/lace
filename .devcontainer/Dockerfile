@@ -61,13 +61,6 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # See docs/reports/2026-01-18_devcontainer_firewall_analysis.md
 # Original: https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh
 
-# Set up SSH authorized_keys directory for wezterm SSH domain connections
-# NOTE: The sshd feature does not create per-user .ssh directories.
-# This is required for the bind-mounted authorized_keys file.
-RUN mkdir -p /home/${USERNAME}/.ssh && \
-    chmod 700 /home/${USERNAME}/.ssh && \
-    chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh
-
 # Enable passwordless sudo for container user.
 # Required by devcontainer features (e.g. sshd) whose init scripts use `sudo` at runtime.
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \

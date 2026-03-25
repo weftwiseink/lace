@@ -265,6 +265,7 @@ mod tests {
             timestamp: Some("2026-03-22T10:00:00Z".to_string()),
             is_sidechain: None,
             parent_tool_use_id: None,
+            is_compact_summary: None,
             message: Some(AssistantMessage {
                 model: Some(model.to_string()),
                 usage: Some(TokenUsage {
@@ -298,6 +299,7 @@ mod tests {
             timestamp: None,
             is_sidechain: None,
             parent_tool_use_id: None,
+            is_compact_summary: None,
             message: None,
             data: None,
         }
@@ -310,6 +312,7 @@ mod tests {
             timestamp: None,
             is_sidechain: None,
             parent_tool_use_id: None,
+            is_compact_summary: None,
             message: None,
             data: Some(ProgressData {
                 data_type: Some("agent_progress".to_string()),

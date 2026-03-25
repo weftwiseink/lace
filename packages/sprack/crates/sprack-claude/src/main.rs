@@ -8,6 +8,7 @@
 //! Container panes (lace devcontainer sessions) are resolved via the `~/.claude`
 //! bind mount using workspace prefix matching and mtime heuristics.
 
+mod cache;
 mod events;
 mod jsonl;
 mod proc_walk;

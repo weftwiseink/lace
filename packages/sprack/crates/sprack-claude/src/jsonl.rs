@@ -42,6 +42,10 @@ pub struct JsonlEntry {
     #[serde(default, deserialize_with = "deserialize_assistant_message")]
     pub message: Option<AssistantMessage>,
 
+    /// Whether this is a compact summary re-statement (skipped during ingestion).
+    #[serde(rename = "isCompactSummary", default)]
+    pub is_compact_summary: Option<bool>,
+
     /// Progress data (present on progress entries).
     #[serde(default)]
     pub data: Option<ProgressData>,

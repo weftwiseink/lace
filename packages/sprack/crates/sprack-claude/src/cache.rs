@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS subagent_tracking (
 ///
 /// Updates session_metadata counters, tool_usage, context_history, and subagent_tracking.
 /// Entries with `is_compact_summary = true` are skipped to avoid double-counting.
+#[allow(dead_code)]
 pub fn ingest_new_entries(
     conn: &Connection,
     file_path: &str,
@@ -411,6 +412,7 @@ pub fn read_session_summary(conn: &Connection, session_id: &str) -> Option<Cache
     Some(data)
 }
 
+#[allow(dead_code)]
 fn now_utc() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

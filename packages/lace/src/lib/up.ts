@@ -772,6 +772,17 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         }
         console.log("Auto-injected lace-fundamentals-init into postCreateCommand");
       }
+
+      // Inject LACE_DOTFILES_PATH from resolved dotfiles mount target
+      const dotfilesMountDecl = mountDeclarations["lace-fundamentals/dotfiles"];
+      if (dotfilesMountDecl?.target) {
+        const env = ((resolvedConfig.containerEnv ?? {}) as Record<string, string>);
+        if (!env.LACE_DOTFILES_PATH) {
+          env.LACE_DOTFILES_PATH = dotfilesMountDecl.target;
+          resolvedConfig.containerEnv = env;
+          console.log(`Injected LACE_DOTFILES_PATH="${dotfilesMountDecl.target}" into containerEnv`);
+        }
+      }
     }
   }
 

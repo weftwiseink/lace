@@ -134,42 +134,9 @@ The correct order:
 > Moving it to `user.json` means any lace project gets Claude Code without declaring it in `prebuildFeatures`.
 > Projects that need to pin a specific claude-code version can still declare it in their `devcontainer.json` (project options override user options).
 
-### Nushell history persistence
-
-Nushell history cannot be a `user.json` mount (readonly) and cannot be configured via `config.nu` (shared with host via chezmoi).
-Nushell 0.110 has no `config.history.path` setting ([PR #14434](https://github.com/nushell/nushell/pull/14434) closed without merge).
-
-For this rollout, mount the entire nushell config directory from the host at `~/.config/lace/shared/nushell/`.
-This sidesteps both the symlink fragility and the sqlite concurrent-access problem: each container gets its own bind mount of the host directory, and chezmoi applies to the host-side path directly (the mount makes container and host views identical).
-
-The mount is declared in `settings.json` (not `user.json`, since it needs write access for history):
-
-```jsonc
-// In settings.json
-"lace-fundamentals/nushell-config": {
-  "source": "~/.config/lace/shared/nushell"
-}
-```
-
-The lace-fundamentals feature needs a new mount declaration for this:
-
-```jsonc
-// In devcontainer-feature.json customizations.lace.mounts
-"nushell-config": {
-  "target": "/home/${_REMOTE_USER}/.config/nushell",
-  "description": "Nushell config and history. Chezmoi applies to host-side directory; mount makes it available in container.",
-  "sourceMustBe": "directory",
-  "hint": "Create ~/.config/lace/shared/nushell/ and run chezmoi apply on the host, or configure source in settings.json"
-}
-```
-
-> WARN(opus/user-json-rollout): This means chezmoi inside the container should NOT manage `~/.config/nushell/` (the mount shadows its writes).
-> The host's chezmoi manages the nushell config; the container just uses it via the mount.
-> The `.chezmoiignore` in the dotfiles repo should exclude `nushell/` when `DEVCONTAINER` is set (chezmoi template condition).
-> This is a pragmatic approach for the single-container case. The concurrent multi-container case and the broader question of whether to mount all user config dirs directly are explored in the nushell history RFP.
-
-> NOTE(opus/user-json-rollout): Full analysis of alternative approaches (symlinks, XDG_CONFIG_HOME, env vars, autoload) is in `cdocs/reports/2026-03-25-nushell-history-container-persistence.md`.
-> The dedicated RFP at `cdocs/proposals/2026-03-25-lace-nushell-history-persistence.md` covers the longer-term architecture: shared history across containers, whether to mount `~/.config/nvim`, `~/.config/nushell`, etc. directly, and the interaction with chezmoi.
+> NOTE(opus/user-json-rollout): Nushell history persistence is deferred to the [nushell history RFP](2026-03-25-lace-nushell-history-persistence.md).
+> History is ephemeral for this rollout (lost on container rebuild).
+> The core challenges (sqlite WAL files, shared dotfiles, no `config.history.path` in nushell 0.110, host chezmoi dependency) are documented in `cdocs/reports/2026-03-25-nushell-history-container-persistence.md`.
 
 > NOTE(opus/user-json-rollout): The git identity uses `micimize` / `rosenthalm93@gmail.com` rather than the current `mjr` / `mjr@weftwiseink.com`.
 > The host `~/.gitconfig` uses `micimize`, so this aligns container identity with host identity.
@@ -284,10 +251,7 @@ Every item must be verified inside a freshly rebuilt container after applying th
 - [ ] `/mnt/lace/screenshots` contains host screenshots (readonly)
 - [ ] `/mnt/lace/repos/dotfiles` contains dotfiles repo
 - [ ] `/home/node/.ssh/authorized_keys` exists
-- [ ] `~/.config/nushell/` is a mount (not chezmoi-managed inside container): `mount | grep nushell`
-- [ ] Nushell config files present: `config.nu`, `env.nu`, `scripts/` from host chezmoi
-- [ ] Nushell history persists: run a command, restart container, `history | length` > 0
-- [ ] History sqlite3 + WAL/SHM files are on the mounted volume (not ephemeral container fs)
+- [ ] Nushell history: ephemeral for this rollout (deferred to nushell history RFP)
 
 ### Tools
 - [ ] `git-delta`: `delta --version` works
@@ -318,13 +282,9 @@ Every item must be verified inside a freshly rebuilt container after applying th
    - Add `"claude-code/config": { "source": "~/.claude" }` (replaces `"project/claude-config"`)
    - Add `"claude-code/config-json": { "source": "~/.claude.json" }` (replaces `"project/claude-config-json"`)
    - Remove the old `"project/claude-config"` override
-5. Add `nushell-config` mount declaration to `devcontainers/features/src/lace-fundamentals/devcontainer-feature.json` (target: `~/.config/nushell`).
-6. Add mount source to `settings.json`: `"lace-fundamentals/nushell-config": { "source": "~/.config/lace/shared/nushell" }`.
-7. Bootstrap host-side nushell config: `mkdir -p ~/.config/lace/shared/nushell && chezmoi apply` (ensures config files are present at mount source).
-8. Add chezmoi ignore for nushell dir in containers: `.chezmoiignore` should exclude `nushell/` when `$DEVCONTAINER` is set, since the mount provides the config directly.
-7. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
+5. Add nvim plugin pre-installation to `postCreateCommand` (composed with init script):
    `lace-fundamentals-init && nvim --headless "+Lazy! sync" +qa`
-8. Commit and push the code changes (triggers GHCR re-publish for `installsAfter` and init script update).
+6. Commit and push the code changes (triggers GHCR re-publish for `installsAfter`).
 
 **Success criteria:**
 - `cat ~/.config/lace/user.json` matches the target config.
@@ -350,7 +310,7 @@ Known likely issues to check for:
 2. **Neovim plugin pre-install**: If `nvim --headless "+Lazy! sync" +qa` fails or hangs, investigate: network access, treesitter compilation (may need `gcc`/`make`), plugin-specific build steps. Consider whether the nvim plugin mount from the neovim feature (`~/.local/share/nvim`) should be configured in settings.json to persist plugins across rebuilds.
 3. **Nushell config host-specific paths**: If nushell config references host-specific paths (e.g., `~/.cargo/bin`), add chezmoi templating with `.chezmoi.hostname` or `env "DEVCONTAINER"` conditionals.
 4. **Claude config mount migration**: Verify that the `.claude.json` file overlay (previously `project/claude-config-json`) is handled correctly by the feature's directory mount. If not, the implementor may need to add a secondary file mount declaration to the claude-code feature metadata.
-5. **Nushell config mount**: Verify `~/.config/nushell/` is the mounted host directory. If chezmoi inside the container tries to manage nushell config (overwriting mounted files), confirm `.chezmoiignore` excludes the nushell dir when `$DEVCONTAINER` is set.
+5. **Nushell history**: Ephemeral for this rollout. No action needed. Tracked in the nushell history persistence RFP.
 
 The implementor should iterate on these until the full verification checklist passes, documenting each fix in the devlog.
 

@@ -113,6 +113,12 @@ cargo clippy --workspace
 cargo fmt --all -- --check
 ```
 
+## Future Work
+
+> TODO(opus/sprack-widget-restyle): Surface git context (branch, commit, worktree branches) in the Claude widget.
+> Requires sprack-claude to inspect the cwd of each Claude process for git state.
+> See `cdocs/proposals/2026-03-24-sprack-claude-widget-restyle.md` for the design.
+
 ## Platform Support
 
 Linux is the primary target.

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use signal_hook::consts::{SIGINT, SIGTERM, SIGUSR1};
 use signal_hook::iterator::Signals;
 
-use crate::diff::{compute_hash, compute_lace_meta_hash};
+use crate::diff::{compute_lace_meta_hash, compute_snapshot_hash};
 use crate::tmux::{
     parse_tmux_output, query_lace_options, query_tmux_state, to_db_types, TmuxError,
 };
@@ -84,7 +84,7 @@ fn run() -> anyhow::Result<()> {
         let session_names = snapshot.session_names();
         let lace_meta = query_lace_options(&session_names, None);
 
-        let current_tmux_hash = compute_hash(&raw_output);
+        let current_tmux_hash = compute_snapshot_hash(&snapshot);
         let current_lace_hash = compute_lace_meta_hash(&lace_meta);
 
         let tmux_changed = last_tmux_hash.as_ref() != Some(&current_tmux_hash);
@@ -256,7 +256,7 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use crate::diff::{compute_hash, compute_lace_meta_hash};
+    use crate::diff::{compute_lace_meta_hash, compute_snapshot_hash};
     use crate::tmux::{parse_tmux_output, to_db_types, LaceMeta};
 
     /// Opens an in-memory DB with schema for integration tests.
@@ -268,7 +268,8 @@ mod tests {
         conn
     }
 
-    /// Builds a 19-field tmux output line with sensible defaults for spatial fields.
+    /// Builds a 19-field tab-delimited tmux output line with sensible defaults for
+    /// spatial fields.
     fn make_tmux_line(
         session_name: &str,
         session_attached: &str,
@@ -304,7 +305,7 @@ mod tests {
             "0",    // pane_in_mode
             "",     // window_layout
         ]
-        .join("||")
+        .join("\t")
     }
 
     // === Integration test 11: full cycle writes DB ===
@@ -403,8 +404,9 @@ mod tests {
         let version_after_first = sprack_db::read::check_data_version(&conn2).unwrap();
 
         // Same data: hash check detects no change, so skip write.
-        let hash_first = compute_hash(&raw_output);
-        let hash_second = compute_hash(&raw_output);
+        let snapshot_again = parse_tmux_output(&raw_output);
+        let hash_first = compute_snapshot_hash(&snapshot);
+        let hash_second = compute_snapshot_hash(&snapshot_again);
         let lace_hash_first = compute_lace_meta_hash(&lace_meta);
         let lace_hash_second = compute_lace_meta_hash(&lace_meta);
 

@@ -7,12 +7,23 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::tmux::LaceMeta;
+use crate::tmux::{LaceMeta, TmuxSnapshot};
 
 /// Computes a 64-bit hash of a string for change detection.
-pub fn compute_hash(data: &str) -> u64 {
+#[cfg(test)]
+fn compute_hash(data: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     data.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Computes a 64-bit hash of a `TmuxSnapshot` for change detection.
+///
+/// Uses the derived `Hash` impl on the snapshot struct hierarchy, so changes
+/// to any field in any session/window/pane produce a different hash.
+pub fn compute_snapshot_hash(snapshot: &TmuxSnapshot) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    snapshot.hash(&mut hasher);
     hasher.finish()
 }
 

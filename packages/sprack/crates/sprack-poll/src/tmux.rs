@@ -1,8 +1,10 @@
 //! tmux CLI interaction, format string definition, and output parsing.
 //!
-//! Runs `tmux list-panes -a -F` with a unit-separator-delimited format string
-//! to fetch all panes across all sessions. Also reads per-session lace metadata
-//! via `tmux show-options`.
+//! Runs `tmux list-panes -a -F` with a tab-delimited format string to fetch
+//! all panes across all sessions. Tab is used as the delimiter because it is a
+//! control character that cannot appear in tmux session names, window names,
+//! pane titles, or paths. Also reads per-session lace metadata via
+//! `tmux show-options`.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -33,29 +35,29 @@ impl std::error::Error for TmuxError {}
 
 /// Format string for `tmux list-panes -a -F`.
 ///
-/// Fields are delimited by `||` (double pipe) because tmux 3.3a converts
-/// non-printable characters (including `\x1f`) to underscores.
-/// Double pipe is extremely unlikely to appear in session names, paths, or titles.
+/// Fields are delimited by tab (`\t`). Tab is a control character that cannot
+/// appear in tmux session names, window names, pane titles, or file paths,
+/// making it collision-proof unlike multi-character delimiters such as `||`.
 /// Each line of output represents one pane.
 const TMUX_FORMAT: &str = "\
-#{session_name}||\
-#{session_attached}||\
-#{window_index}||\
-#{window_name}||\
-#{window_active}||\
-#{pane_id}||\
-#{pane_title}||\
-#{pane_current_command}||\
-#{pane_current_path}||\
-#{pane_pid}||\
-#{pane_active}||\
-#{pane_dead}||\
-#{pane_width}||\
-#{pane_height}||\
-#{pane_left}||\
-#{pane_top}||\
-#{pane_index}||\
-#{pane_in_mode}||\
+#{session_name}\t\
+#{session_attached}\t\
+#{window_index}\t\
+#{window_name}\t\
+#{window_active}\t\
+#{pane_id}\t\
+#{pane_title}\t\
+#{pane_current_command}\t\
+#{pane_current_path}\t\
+#{pane_pid}\t\
+#{pane_active}\t\
+#{pane_dead}\t\
+#{pane_width}\t\
+#{pane_height}\t\
+#{pane_left}\t\
+#{pane_top}\t\
+#{pane_index}\t\
+#{pane_in_mode}\t\
 #{window_layout}";
 
 /// Expected number of fields per line of tmux output.
@@ -96,7 +98,7 @@ pub fn query_tmux_state(socket: Option<&str>) -> Result<String, TmuxError> {
 }
 
 /// Hierarchical snapshot of tmux state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct TmuxSnapshot {
     pub sessions: Vec<TmuxSession>,
 }
@@ -109,7 +111,7 @@ impl TmuxSnapshot {
 }
 
 /// A tmux session with its child windows.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct TmuxSession {
     pub name: String,
     pub attached: bool,
@@ -117,7 +119,7 @@ pub struct TmuxSession {
 }
 
 /// A tmux window with its child panes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct TmuxWindow {
     pub window_index: u32,
     pub name: String,
@@ -128,7 +130,7 @@ pub struct TmuxWindow {
 }
 
 /// A single tmux pane.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct TmuxPane {
     pub pane_id: String,
     pub title: String,
@@ -315,11 +317,11 @@ struct ParsedLine {
     window_layout: String,
 }
 
-/// Parses a single `||`-delimited line into a `ParsedLine`.
+/// Parses a single tab-delimited line into a `ParsedLine`.
 ///
 /// Returns `None` if the field count is wrong or numeric fields fail to parse.
 fn parse_single_line(line: &str) -> Option<ParsedLine> {
-    let fields: Vec<&str> = line.split("||").collect();
+    let fields: Vec<&str> = line.split('\t').collect();
     if fields.len() != EXPECTED_FIELD_COUNT {
         return None;
     }
@@ -415,7 +417,8 @@ fn build_snapshot(lines: Vec<ParsedLine>) -> TmuxSnapshot {
 mod tests {
     use super::*;
 
-    /// Helper: builds a 19-field tmux output line with sensible defaults for spatial fields.
+    /// Helper: builds a 19-field tab-delimited tmux output line with sensible defaults
+    /// for spatial fields.
     fn make_tmux_line(
         session_name: &str,
         session_attached: &str,
@@ -453,7 +456,7 @@ mod tests {
         )
     }
 
-    /// Helper: builds a 19-field tmux output line with all fields specified.
+    /// Helper: builds a 19-field tab-delimited tmux output line with all fields specified.
     fn make_tmux_line_full(
         session_name: &str,
         session_attached: &str,
@@ -496,7 +499,7 @@ mod tests {
             pane_in_mode,
             window_layout,
         ]
-        .join("||")
+        .join("\t")
     }
 
     #[test]

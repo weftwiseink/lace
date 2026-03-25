@@ -1,0 +1,85 @@
+#!/usr/bin/env nu
+
+# Context-aware image paste: bridges clipboard images over SSH via SCP.
+# Local panes: passes Ctrl+V through (app calls wl-paste directly).
+# SSH panes with lace metadata: saves image locally, SCPs to remote, pastes path.
+def main [pane_id: string] {
+  let passthrough = { tmux send-keys -t $pane_id C-v }
+
+  # Check clipboard for image MIME types (1s timeout guards against hung compositor)
+  let mime_types = try { ^timeout 1s wl-paste -l | lines } catch { [] }
+  let has_image = ($mime_types | any {|m| $m =~ '^image/(png|jpeg|gif|webp|bmp)$' })
+
+  if not $has_image {
+    do $passthrough
+    return
+  }
+
+  # Detect whether pane is SSH'd into a lace container
+  let current_cmd = (tmux display-message -t $pane_id -p '#{pane_current_command}' | str trim)
+
+  if $current_cmd != "ssh" {
+    do $passthrough  # local pane: app handles wl-paste directly
+    return
+  }
+
+  # Read lace metadata (pane-level first, session-level fallback)
+  let port = (lace-option $pane_id "@lace_port")
+  let user = (lace-option $pane_id "@lace_user" | default "node")
+
+  if ($port | is-empty) {
+    do $passthrough  # no lace metadata: can't bridge
+    return
+  }
+
+  # Save clipboard image to local temp file
+  let local_path = $"/tmp/lace-clipboard-($pane_id)-((date now | format date '%s')).png"
+  try { ^wl-paste --type image/png out> $local_path } catch {
+    rm -f $local_path
+    do $passthrough
+    return
+  }
+
+  if not ($local_path | path exists) or (ls $local_path | get size.0) == 0 {
+    rm -f $local_path
+    do $passthrough
+    return
+  }
+
+  # SCP to remote container (reuses lace SSH config and connection pool)
+  let remote_path = $"/tmp/(($local_path | path basename))"
+  let ssh_opts = [
+    -o $"IdentityFile=($env.HOME)/.config/lace/ssh/id_ed25519"
+    -o "IdentitiesOnly=yes"
+    -o $"UserKnownHostsFile=($env.HOME)/.ssh/lace_known_hosts"
+    -o "StrictHostKeyChecking=no"
+    -o "ControlMaster=auto"
+    -o $"ControlPath=($env.HOME)/.ssh/lace-ctrl-%C"
+    -o "ControlPersist=600"
+  ]
+
+  let scp_result = try {
+    ^scp -q ...$ssh_opts -P $port $local_path $"($user)@localhost:($remote_path)"
+    true
+  } catch { false }
+
+  rm -f $local_path
+
+  if not $scp_result {
+    do $passthrough
+    return
+  }
+
+  # Paste remote path as literal text: Claude Code detects image paths automatically
+  tmux send-keys -l -t $pane_id $remote_path
+}
+
+# Read a tmux option: pane-level first, session-level fallback
+def lace-option [pane_id: string, option: string]: nothing -> string {
+  let pane_val = try {
+    tmux show-option -pqv -t $pane_id $option | str trim
+  } catch { "" }
+  if ($pane_val | is-not-empty) { return $pane_val }
+
+  try { tmux show-option -qv -t $pane_id $option | str trim } catch { "" }
+}

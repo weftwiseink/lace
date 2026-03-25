@@ -3,6 +3,7 @@
 //! Renders the tree widget, detail panel, and status bar using
 //! the centralized catppuccin mocha theme from `colors.rs`.
 
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -276,4 +277,23 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let status_line = Line::from(spans);
     let status_bar = Paragraph::new(status_line).style(theme.status_bar_bg);
     frame.render_widget(status_bar, area);
+}
+
+/// Converts a ratatui Buffer to a plain-text string.
+///
+/// Each row becomes one line with trailing whitespace trimmed.
+/// Used by `--dump-rendered-tree` and snapshot tests.
+pub fn buffer_to_string(buffer: &Buffer) -> String {
+    let area = buffer.area;
+    let mut output = String::new();
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            let cell = &buffer[(x, y)];
+            output.push_str(cell.symbol());
+        }
+        let trimmed = output.trim_end();
+        output.truncate(trimmed.len());
+        output.push('\n');
+    }
+    output
 }

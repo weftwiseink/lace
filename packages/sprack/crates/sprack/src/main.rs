@@ -14,7 +14,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{CrosstermBackend, TestBackend};
 use ratatui::Terminal;
 
 mod app;
@@ -28,15 +28,26 @@ mod test_render;
 mod tmux;
 mod tree;
 
+/// Parsed command-line arguments.
+struct CliArgs {
+    db_path: Option<PathBuf>,
+    dump_rendered_tree: bool,
+    cols: u16,
+    rows: u16,
+}
+
 fn main() -> Result<()> {
-    // Parse optional --db-path argument.
-    let db_path = parse_db_path_arg();
+    let cli = parse_args();
+
+    if cli.dump_rendered_tree {
+        return run_dump_rendered_tree(&cli);
+    }
 
     // Install panic hook that restores the terminal before printing the panic.
     install_panic_hook();
 
     // Ensure the DB exists, starting daemons if needed.
-    let db = open_or_wait_for_db(db_path.as_deref())?;
+    let db = open_or_wait_for_db(cli.db_path.as_deref())?;
 
     // Read $TMUX_PANE for self-filtering.
     let own_pane_id = std::env::var("TMUX_PANE").ok();
@@ -54,15 +65,70 @@ fn main() -> Result<()> {
     run_result
 }
 
-/// Parses `--db-path <path>` from command line arguments.
-fn parse_db_path_arg() -> Option<PathBuf> {
+/// Parses command-line arguments.
+fn parse_args() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "--db-path" {
-            return args.get(i + 1).map(PathBuf::from);
+    let mut cli = CliArgs {
+        db_path: None,
+        dump_rendered_tree: false,
+        cols: 120,
+        rows: 40,
+    };
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--db-path" => {
+                cli.db_path = args.get(i + 1).map(PathBuf::from);
+                i += 2;
+            }
+            "--dump-rendered-tree" => {
+                cli.dump_rendered_tree = true;
+                i += 1;
+            }
+            "--cols" => {
+                if let Some(val) = args.get(i + 1) {
+                    cli.cols = val.parse().unwrap_or(120);
+                }
+                i += 2;
+            }
+            "--rows" => {
+                if let Some(val) = args.get(i + 1) {
+                    cli.rows = val.parse().unwrap_or(40);
+                }
+                i += 2;
+            }
+            _ => {
+                i += 1;
+            }
         }
     }
-    None
+
+    cli
+}
+
+/// Renders a single frame to stdout and exits.
+///
+/// No raw mode, no alternate screen, no event loop. Creates a TestBackend
+/// at the specified dimensions, refreshes from DB, renders one frame,
+/// prints the buffer text, and returns.
+fn run_dump_rendered_tree(cli: &CliArgs) -> Result<()> {
+    let db = open_or_wait_for_db(cli.db_path.as_deref())?;
+    let own_pane_id = std::env::var("TMUX_PANE").ok();
+
+    let mut app = app::App::new(db, own_pane_id);
+    app.refresh_from_db()?;
+
+    let backend = TestBackend::new(cli.cols, cli.rows);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.draw(|frame| {
+        render::render_frame(frame, &mut app);
+    })?;
+
+    let output = render::buffer_to_string(terminal.backend().buffer());
+    print!("{output}");
+
+    Ok(())
 }
 
 /// Installs a panic hook that restores the terminal before printing the panic.

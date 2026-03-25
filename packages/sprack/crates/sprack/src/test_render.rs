@@ -7,7 +7,6 @@
 #[cfg(test)]
 mod tests {
     use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
     use rusqlite::Connection;
 
@@ -18,25 +17,6 @@ mod tests {
     use crate::render;
 
     // === Helpers ===
-
-    /// Converts a ratatui Buffer to a plain-text string for snapshot comparison.
-    /// Each row becomes one line; trailing whitespace on each row is preserved
-    /// (ratatui pads cells with spaces).
-    fn buffer_to_string(buffer: &Buffer) -> String {
-        let area = buffer.area;
-        let mut output = String::new();
-        for y in area.y..area.y + area.height {
-            for x in area.x..area.x + area.width {
-                let cell = &buffer[(x, y)];
-                output.push_str(cell.symbol());
-            }
-            // Trim trailing whitespace per line for cleaner snapshots.
-            let trimmed = output.trim_end();
-            output.truncate(trimmed.len());
-            output.push('\n');
-        }
-        output
-    }
 
     /// Creates an in-memory DB and returns a Connection ready for writing.
     fn test_db() -> Connection {
@@ -53,7 +33,7 @@ mod tests {
                 render::render_frame(frame, app);
             })
             .expect("draw should succeed");
-        let raw = buffer_to_string(terminal.backend().buffer());
+        let raw = render::buffer_to_string(terminal.backend().buffer());
         // Normalize ISO 8601 timestamps (from write::now_iso8601) to a fixed value
         // so snapshots don't break on every run.
         normalize_timestamps(&raw)

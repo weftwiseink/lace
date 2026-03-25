@@ -1,184 +1,354 @@
 ---
 first_authored:
-  by: "@claude-opus-4-6-20250605"
+  by: "@claude-opus-4-6"
   at: 2026-03-24T12:00:00-07:00
 task_list: terminal-management/sprack-tmux-ipc
 type: proposal
 state: live
-status: request_for_proposal
-tags: [architecture, tmux, sprack, future_work]
+status: wip
+tags: [architecture, tmux, sprack]
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6-20250605"
+  at: 2026-03-24T14:00:00-07:00
+  round: 1
 ---
 
-# RFP: Sprack Tmux IPC Migration
+# Sprack Tmux IPC Migration
 
-> BLUF(opus/sprack-tmux-ipc): Sprack's tmux integration shells out to `tmux list-panes -a -F` with `||`-delimited format strings and parses stdout line-by-line on a 1-second poll loop.
-> This works but has known fragility: delimiter collisions, format string parsing, tmux version sensitivity, and unnecessary polling when tmux can push state changes.
-> This RFP explores migrating to `tmux-interface-rs` (typed Rust bindings), tmux control mode (`-C` flag, event-driven), or a hybrid of both.
+> BLUF(opus/sprack-tmux-ipc): Migrate sprack-poll's tmux interaction from raw `Command::new("tmux")` with `||`-delimited format string parsing to `tmux-interface-rs` for structured, type-safe command execution.
+> Keep the existing synchronous poll loop architecture.
+> Defer tmux control mode to a future iteration: the polling approach is adequate for sprack's small dataset (dozens of panes), and the primary value of this migration is correctness (eliminating delimiter collisions) rather than performance.
+> The TUI's fire-and-forget navigation commands should also migrate to `tmux-interface-rs` for consistency.
 
 ## Objective
 
-Replace sprack-poll's `std::process::Command`-based tmux interaction with a more robust integration layer that provides:
+Eliminate the fragile `||`-delimited format string parsing in sprack-poll by adopting `tmux-interface-rs` for all tmux CLI interactions.
+This fixes the core correctness issue (a session named `foo||bar` breaks parsing) while providing typed error handling and tmux version feature flags.
 
-1. **Structured output**: Typed Rust representations of tmux state instead of string parsing with fragile delimiters.
-2. **Event-driven updates**: Push-based notification of state changes instead of poll-sleep-poll.
-3. **Better error handling**: Typed errors from a library instead of stderr string matching.
-4. **Version resilience**: A maintained library that tracks tmux version differences instead of hardcoded format strings.
+The migration preserves the existing poll-sleep-poll architecture, SIGUSR1 hook integration, and hash-based change detection.
+No async runtime is introduced.
 
-## Current Architecture
+## Recommended Approach
 
-Sprack's tmux interaction spans two crates.
+Three approaches were considered:
 
-### sprack-poll (the daemon)
+- **Approach A: tmux-interface-rs only.** Replace raw `Command` calls with the tmux-interface-rs library. Keep the synchronous poll loop.
+- **Approach B: Control mode only.** Use tmux's control mode (`tmux -CC attach`) for event-driven state updates. Requires async runtime and persistent connection management.
+- **Approach C: Hybrid.** Control mode for event triggers, tmux-interface-rs for data queries. Combines complexity of both.
 
-`sprack-poll/src/tmux.rs` defines a `TMUX_FORMAT` constant with 12 fields delimited by `||` (double pipe).
-The `query_tmux_state()` function shells out to `tmux list-panes -a -F` and returns raw stdout.
-`parse_tmux_output()` splits each line on `||` and builds a hierarchical `TmuxSnapshot` (sessions, windows, panes).
-A separate function `query_lace_options()` runs `tmux show-options -qvt` per session to read lace metadata.
+Approach A is the clear recommendation.
+The rationale:
 
-The main loop in `sprack-poll/src/main.rs` runs this query on a 1-second interval, hashes the raw output to detect changes, and writes to SQLite only when state differs.
-SIGUSR1 from tmux hooks can trigger an immediate poll cycle.
+1. **Polling works fine.** sprack monitors dozens of panes at most. One `tmux list-panes` subprocess per second is negligible. The hash-based deduplication already avoids unnecessary DB writes. There is no performance problem to solve.
 
-### sprack (the TUI)
+2. **The real problem is correctness.** The `||` delimiter can collide with user-chosen session names, window names, or pane titles. This is the only fragility that has practical consequences. tmux-interface-rs eliminates delimiter-based parsing entirely by providing structured output.
 
-`sprack/src/tmux.rs` shells out to `tmux switch-client`, `select-window`, and `select-pane` for navigation.
-These are fire-and-forget commands that chain tmux subcommands with `;`.
+3. **Control mode is high cost, low value right now.** It requires a persistent connection, a custom text protocol parser, an async or threaded event loop, and careful handling of connection lifecycle (server restarts, detach/reattach). The benefit: eliminating one subprocess per second. Not worth it for sprack's scale.
 
-### Known Fragilities
+4. **Approach C is strictly worse than A for the current use case.** It adds all the complexity of control mode while still needing tmux-interface-rs for actual data queries. Two interaction mechanisms to maintain, no clear benefit over polling at sprack's scale.
 
-- **Delimiter choice**: `||` was chosen because tmux 3.3a converts non-printable characters (including `\x1f` unit separator) to underscores.
-  Double pipe is unlikely in session names but not impossible.
-  A user naming a session `foo||bar` would break parsing.
-- **Format string coupling**: The 12-field `TMUX_FORMAT` constant and `EXPECTED_FIELD_COUNT` must stay in sync manually.
-  Adding or removing a field requires coordinated changes across the format string, the parser, and the `ParsedLine` struct.
-- **Tmux version sensitivity**: Format variable names and behaviors can change across tmux versions.
-  The code has no version detection or conditional format strings.
-- **Per-session option queries**: `query_lace_options()` runs three `tmux show-options` commands per session, sequentially.
-  With many sessions, this creates a burst of subprocesses per poll cycle.
-- **Polling overhead**: Even with hash-based change detection, the daemon spawns `tmux list-panes` every second.
-  Tmux control mode can push notifications on state change, eliminating unnecessary work.
+> NOTE(opus/sprack-tmux-ipc): Control mode becomes valuable if sprack needs sub-second latency for state changes or if the dataset grows to hundreds of sessions.
+> A future proposal can layer control mode on top of the tmux-interface-rs foundation built here.
 
-## Candidate Approaches
+## tmux-interface-rs Evaluation Plan
 
-### Approach A: tmux-interface-rs
+Before committing to the migration, validate that `tmux-interface-rs` covers sprack's needs.
 
-[tmux-interface-rs](https://github.com/AntonGepting/tmux-interface-rs) is a Rust library for communicating with tmux via CLI.
-It wraps tmux commands in typed Rust structs and provides builder-pattern APIs for constructing commands.
+### Format Variables to Test
 
-**What it provides:**
+Sprack uses 12 format variables via `list-panes -a -F`:
 
-- Typed command builders for `list-panes`, `list-sessions`, `list-windows`, `show-options`, etc.
-- Parsed output structures for common commands.
-- Feature flags for tmux version compatibility.
-- Maintained crate (latest: 0.3.2 on crates.io).
+| Variable | Used For |
+|---|---|
+| `session_name` | Session grouping and identity |
+| `session_attached` | Attached indicator in TUI |
+| `window_index` | Window ordering and targeting |
+| `window_name` | Display label |
+| `window_active` | Active window highlighting |
+| `pane_id` | Unique pane identity (`%N` format) |
+| `pane_title` | Display label |
+| `pane_current_command` | Process name display |
+| `pane_current_path` | Working directory display |
+| `pane_pid` | Process identification |
+| `pane_active` | Active pane highlighting |
+| `pane_dead` | Dead pane detection |
 
-**What it does not provide (likely):**
+### Evaluation Steps
 
-- Control mode support: the library communicates via CLI subcommands, not the `-C` protocol.
-- Event-driven notifications: still requires polling.
+1. Add `tmux-interface` as a dev-dependency in sprack-poll.
+2. Write a test binary that calls `ListPanes` with `-a` flag and inspects the returned struct fields.
+3. Confirm each of the 12 variables is accessible as a typed field on the output struct, or can be retrieved via a custom `-F` format string passed through the library.
+4. Verify `ListSessions` and `ShowOptions` cover the lace metadata queries.
+5. Test against the devcontainer's tmux version (3.3a) to confirm compatibility.
 
-**Migration path:**
+### Interaction with Layout Organization
 
-- Replace `Command::new("tmux")` calls with `tmux_interface` API calls.
-- Replace manual `||`-delimited parsing with the library's output parsing.
-- Keep the existing poll loop architecture.
+> NOTE(opus/sprack-tmux-ipc): The [layout organization proposal](2026-03-24-sprack-layout-organization.md) extends the format string from 12 to 19 fields.
+> If layout organization lands first, the evaluation must cover all 19 fields.
+> If IPC migration lands first, layout organization adds new fields via tmux-interface-rs instead of extending the format string.
+> Recommended sequencing: layout organization first, then IPC migration.
 
-**Risk**: If the library's output parsing does not cover all 12 format variables sprack needs (e.g., `pane_pid`, `pane_dead`), custom format strings may still be required.
+### Acceptance Criteria
 
-### Approach B: Raw tmux control mode (-C)
+- All format variables (12 current, or 19 if layout organization has landed) are accessible via the library's API (either as struct fields or via custom format strings).
+- `show-options -qvt` equivalent is available for lace metadata queries.
+- Error types distinguish "not found" from "server not running" (matching the existing `TmuxError` variants).
+- The library compiles on the project's MSRV without feature flag conflicts.
 
-Tmux [control mode](https://github.com/tmux/tmux/wiki/Control-Mode) provides a line-based text protocol over stdin/stdout.
-A client started with `tmux -C attach` receives asynchronous `%`-prefixed notifications for state changes.
+### Fallback
 
-**Key notification types:**
+If tmux-interface-rs does not cover the required format variables:
 
-- `%sessions-changed`: Session created or destroyed.
-- `%session-changed`: Attached session changed.
-- `%window-add`, `%window-close`: Window lifecycle.
-- `%window-renamed`, `%session-renamed`: Name changes.
-- `%window-pane-changed`: Active pane changed in a window.
-- `%pane-mode-changed`: Pane mode changed.
+- **Partial coverage**: Use the library for command construction and error handling, but pass custom `-F` format strings. This still eliminates the subprocess boilerplate and stderr parsing while keeping custom format strings for fields the library does not parse.
+- **No coverage**: Abandon the library and implement a minimal abstraction layer in sprack-poll that issues individual `tmux list-sessions`, `tmux list-windows -t`, and `tmux list-panes -t` commands with single-field `-F` format strings (one field per call, no delimiter needed). This trades more subprocesses per cycle for complete delimiter safety. At sprack's scale (dozens of panes), the overhead is still negligible.
 
-**What it provides:**
+> NOTE(opus/sprack-tmux-ipc): The single-field-per-call fallback is a viable permanent solution, not just a stopgap.
+> It eliminates the delimiter problem entirely by construction, at the cost of ~36 subprocesses per cycle instead of 1.
+> For dozens of panes, this completes in under 100ms.
 
-- True event-driven updates: no polling needed for most state changes.
-- Bidirectional communication: send commands, receive structured responses.
-- Low latency: state changes arrive as they happen.
+## Control Mode Analysis
 
-**What it complicates:**
+### Feasibility
 
-- Requires a long-lived connection to the tmux server (not subprocess-per-query).
-- The control mode protocol is text-based and requires its own parser.
-- Not all state is available via notifications: initial state must be queried, and some fields (like `pane_pid`, `pane_current_path`) may require supplementary queries.
-- `-CC` (double C) is needed for programmatic use, as single `-C` leaves terminal in canonical mode.
+Control mode (`tmux -CC attach`) is technically feasible for sprack-poll.
+The relevant notifications map to sprack's data model:
 
-**Migration path:**
+- `%sessions-changed` covers session create/destroy.
+- `%window-add`, `%window-close`, `%window-renamed` cover window lifecycle.
+- `%window-pane-changed` covers active pane changes.
+- `%session-renamed` covers session renames.
 
-- Replace the poll loop with an async event loop reading from a control mode connection.
-- Build initial state via `list-panes -F` command sent through the control mode channel.
-- Update state incrementally based on notifications.
-- Fall back to full re-query for notifications that don't carry enough detail.
+However, control mode notifications carry minimal data (typically just session/window IDs).
+Sprack needs 12 fields per pane, so each notification would still require a supplementary `list-panes` query to get the full state.
+The net architecture would be: control mode triggers a re-query, replacing the 1-second timer as the trigger.
+The actual data fetching remains the same.
 
-**Risk**: Significant architectural change from synchronous poll loop to async event stream.
-The notification protocol does not provide all fields sprack needs, so supplementary queries are still required.
+### When to Pursue
 
-### Approach C: Hybrid (tmux-interface-rs + control mode)
+Defer control mode to a future proposal.
+Conditions that would justify it:
 
-Use tmux-interface-rs for typed command execution and output parsing.
-Layer control mode on top for event-driven triggering.
+- Sprack needs sub-second responsiveness to tmux state changes (latency-sensitive features).
+- The poll loop becomes a measurable resource problem (hundreds of sessions, constrained environment).
+- SIGUSR1 hook-based triggering proves unreliable and control mode notifications are a better signal source.
 
-**Architecture:**
+None of these conditions exist today.
 
-- A control mode connection watches for `%sessions-changed`, `%window-add`, `%window-close`, and similar notifications.
-- On notification, use tmux-interface-rs to run a targeted query (e.g., `list-panes` for a specific session) instead of a full re-query.
-- Retain hash-based deduplication as a safety net.
+## Architecture
 
-**Benefits:**
+### sprack-poll Integration
 
-- Event-driven without reimplementing tmux command parsing.
-- Targeted queries reduce per-cycle work.
-- Graceful degradation: if control mode connection drops, fall back to polling.
+The migration replaces the internals of `sprack-poll/src/tmux.rs` while preserving its public API surface.
 
-**Risk**: Two tmux interaction mechanisms to maintain.
-Unclear whether tmux-interface-rs can be used over a control mode channel or only via separate subprocess calls.
+```mermaid
+graph TD
+    A[main.rs poll loop] -->|calls| B[query_tmux_state]
+    A -->|calls| C[query_lace_options]
+    B -->|returns| D[TmuxSnapshot]
+    C -->|returns| E[HashMap of LaceMeta]
+    A -->|calls| F[to_db_types]
+    F -->|returns| G[DB type vectors]
 
-## Scope
+    subgraph "Current: raw Command"
+        B1[Command::new tmux list-panes -a -F] --> B2[split on || delimiter] --> B3[build TmuxSnapshot]
+    end
 
-The full proposal should address:
+    subgraph "Proposed: tmux-interface-rs"
+        B4[tmux_interface::ListPanes -a] --> B5[map library structs to TmuxSnapshot]
+    end
+```
 
-- **Library evaluation**: Does tmux-interface-rs parse the 12 format variables sprack uses (`session_name`, `session_attached`, `window_index`, `window_name`, `window_active`, `pane_id`, `pane_title`, `pane_current_command`, `pane_current_path`, `pane_pid`, `pane_active`, `pane_dead`)?
-  If not, what is the gap?
-- **Control mode feasibility**: Which notifications map to sprack's data model?
-  What supplementary queries are needed after each notification type?
-- **Architecture choice**: Recommend one of the three approaches with rationale.
-- **Async runtime implications**: Control mode requires long-lived I/O.
-  sprack-poll is currently synchronous with `std::thread::sleep`.
-  Does this require tokio or can it work with blocking I/O on a dedicated thread?
-- **Migration path**: Can the migration be incremental (e.g., replace parsing first, then add event-driven later)?
-- **sprack TUI commands**: The TUI's `focus_pane`/`focus_window`/`focus_session` calls in `sprack/src/tmux.rs` are simpler fire-and-forget commands.
-  Should these also migrate to tmux-interface-rs, or is the current `Command::new("tmux")` approach adequate for write-only operations?
-- **Lace option queries**: The per-session `tmux show-options` calls are a separate concern.
-  Should these be batched, or can control mode provide option change notifications?
+Key changes in `tmux.rs`:
 
-## Open Questions
+- **Fix** the stale module doc comment: it says "unit-separator-delimited" but the code uses `||` delimiters. The original implementation tried unit separators (`\x1f`), but tmux 3.3a converts non-printable characters to underscores, so it was changed to `||`. The doc comment was never updated. This migration eliminates both the delimiter and the stale comment.
+- **Remove** `TMUX_FORMAT` constant, `EXPECTED_FIELD_COUNT`, `parse_single_line()`, and the `ParsedLine` struct.
+- **Replace** `tmux_command()` helper with tmux-interface-rs API calls.
+- **Replace** `query_tmux_state()` implementation: call `ListPanes` via the library, map the returned structs directly to `TmuxSnapshot`. No raw string output, no delimiter splitting.
+- **Replace** `query_lace_options()` implementation: call `ShowOptions` via the library instead of `tmux_command(&["show-options", ...])`.
+- **Preserve** `TmuxSnapshot`, `TmuxSession`, `TmuxWindow`, `TmuxPane`, `LaceMeta` structs unchanged. These are the public API consumed by `main.rs` and `to_db_types()`.
+- **Preserve** `to_db_types()` unchanged.
+- **Preserve** `TmuxError` enum, mapping from tmux-interface-rs error types.
 
-1. **tmux-interface-rs format coverage**: Does the library's `ListPanes` command support custom `-F` format strings, or only predefined output parsing?
-   If custom formats are needed, does the library still add value over raw `Command`?
-2. **Control mode and tmux-interface-rs compatibility**: Can tmux-interface-rs send commands through a control mode channel, or does it always spawn subprocesses?
-3. **Control mode stability**: How robust is the control mode connection across tmux server restarts, session creation/destruction, and detach/reattach cycles?
-   sprack-poll already handles server absence with a 60-second timeout: how does control mode interact with that?
-4. **Minimum tmux version**: What is the minimum tmux version that supports all needed control mode notifications?
-   sprack currently has no minimum version requirement.
-5. **SIGUSR1 hook integration**: The current design uses tmux hooks to send SIGUSR1 for immediate poll cycles.
-   Control mode notifications would make this mechanism redundant.
-   Can the transition happen cleanly, or do both mechanisms need to coexist during migration?
-6. **Performance**: Is the current polling approach actually a problem in practice?
-   The hash-based deduplication means DB writes only happen on change.
-   The cost is one `tmux list-panes` subprocess per second.
-   If this is negligible, the migration priority is lower and the focus shifts to correctness (delimiter safety) rather than performance.
+### Hash-Based Change Detection
 
-## Prior Art
+The current approach hashes the raw tmux output string for change detection.
+With tmux-interface-rs, there is no single raw string to hash.
 
-- [tmux-interface-rs](https://github.com/AntonGepting/tmux-interface-rs): Typed Rust bindings for tmux CLI commands.
-- [tmux Control Mode wiki](https://github.com/tmux/tmux/wiki/Control-Mode): Official documentation for the `-C` protocol.
-- [iTerm2](https://iterm2.com/documentation-tmux-integration.html): Uses tmux `-CC` mode for deep integration, demonstrating the viability of control mode for a terminal application.
-- [tmux-rs](https://crates.io/crates/tmux-rs): A Rust port of tmux itself (not a client library, but useful for understanding internals).
+Two options:
+
+1. **Hash the `TmuxSnapshot` struct.** Derive `Hash` on `TmuxSnapshot`, `TmuxSession`, `TmuxWindow`, `TmuxPane`. Compare snapshot hashes between cycles. This is cleaner and decouples change detection from output format.
+2. **Serialize to a canonical string and hash that.** Construct a deterministic string representation of the snapshot and hash it. More fragile, no benefit over option 1.
+
+Recommendation: option 1.
+Add `#[derive(Hash)]` to the snapshot types and hash the struct directly.
+This also eliminates the subtle bug where whitespace differences in raw output could cause false positives.
+
+### sprack TUI Integration
+
+The TUI's `focus_pane`, `focus_window`, and `focus_session` functions in `sprack/src/tmux.rs` use `Command::new("tmux")` with chained subcommands via `;` separators.
+These should also migrate to tmux-interface-rs for consistency.
+
+The TUI commands are simpler (fire-and-forget, no output parsing), so the migration is straightforward: replace `Command::new("tmux").args(...)` with the library's `SwitchClient`, `SelectWindow`, `SelectPane` builders.
+
+> NOTE(opus/sprack-tmux-ipc): The `;` chaining of multiple tmux subcommands in a single `Command` invocation is a tmux-specific feature.
+> Verify whether tmux-interface-rs supports command chaining or if each operation needs a separate library call.
+> Separate calls are acceptable for fire-and-forget navigation: the latency difference is imperceptible.
+
+## Delimiter Safety
+
+tmux-interface-rs eliminates delimiter collisions by parsing tmux output through the library's own format handling rather than sprack's `||`-delimited string splitting.
+
+If the library uses custom format strings internally, it controls the delimiter choice and parsing, so sprack no longer needs to worry about user content containing the delimiter.
+
+If the fallback approach is needed (individual single-field queries), delimiter collisions are impossible by construction: each subprocess returns exactly one field value per line, with no delimiter between fields.
+
+Either path eliminates the `foo||bar` session name problem completely.
+
+## SIGUSR1 Hook Interaction
+
+The SIGUSR1 signal mechanism is orthogonal to the tmux interaction layer and requires no changes.
+
+The current flow:
+1. Tmux hooks (set via `set-hook`) send SIGUSR1 to the sprack-poll PID on state changes.
+2. `wait_for_signal()` in `main.rs` detects the signal and breaks out of the sleep interval.
+3. The next poll cycle runs immediately.
+
+The tmux-interface-rs migration only changes what happens inside the poll cycle (how tmux is queried and output is parsed).
+The signal-based triggering, the sleep interval, and the `wait_for_signal()` function remain unchanged.
+
+If control mode is added in a future iteration, SIGUSR1 hooks become redundant (control mode notifications replace them).
+During that future transition, both mechanisms can coexist: SIGUSR1 is harmless when the poll loop is already running event-driven.
+The hooks can be removed once control mode is stable.
+
+## Async Runtime Decision
+
+No async runtime is needed.
+
+tmux-interface-rs communicates via synchronous subprocess calls, matching sprack-poll's existing blocking I/O model.
+The poll loop in `main.rs` uses `std::thread::sleep` with periodic signal checks.
+This architecture is simple, correct, and adequate for sprack's workload.
+
+An async runtime (tokio) would only be justified for control mode's persistent connection, which is deferred.
+Adding tokio for synchronous subprocess calls would be pure overhead.
+
+## Migration Path
+
+The migration is split into independently-landable steps.
+
+### Step 1: Add tmux-interface-rs dependency and evaluate
+
+- Add `tmux-interface` to `sprack-poll/Cargo.toml`.
+- Write integration tests that call the library against a live tmux server.
+- Verify coverage of all 12 format variables.
+- Document any gaps.
+
+This step can be reverted cleanly if the library does not meet needs.
+
+### Step 2: Derive Hash on snapshot types
+
+- Add `#[derive(Hash)]` to `TmuxSnapshot`, `TmuxSession`, `TmuxWindow`, `TmuxPane`.
+- In `diff.rs`, add a `compute_snapshot_hash(snapshot: &TmuxSnapshot) -> u64` function that hashes the struct via `DefaultHasher`. The existing `compute_hash(&str)` remains for backward compatibility during the transition.
+- In `main.rs`, move parsing before hashing: call `parse_tmux_output(&raw_output)` first, then `compute_snapshot_hash(&snapshot)` instead of `compute_hash(&raw_output)`.
+- Remove the raw output string hashing path after Step 3 lands.
+
+> NOTE(opus/sprack-tmux-ipc): `DefaultHasher` is not guaranteed stable across Rust compiler versions or platforms.
+> This is fine for sprack-poll's use case: hashes are compared within a single process run and never persisted to disk.
+
+This step should land together with or after Step 3, because landing it independently means parsing runs on every cycle (before the hash check), which is a minor efficiency regression.
+The parsing cost for dozens of lines is negligible, but co-landing avoids the intermediate state.
+
+### Step 3: Replace sprack-poll tmux interaction
+
+- Rewrite `query_tmux_state()` to use tmux-interface-rs.
+- Remove `TMUX_FORMAT`, `EXPECTED_FIELD_COUNT`, `parse_single_line()`, `ParsedLine`.
+- Fix the stale module doc comment ("unit-separator-delimited" -> accurate description of the new tmux-interface-rs approach).
+- Rewrite `query_lace_options()` to use the library's `ShowOptions`.
+- Map library error types to `TmuxError`.
+- Update all tests.
+
+### Step 4: Replace sprack TUI tmux commands
+
+- Add `tmux-interface` to `sprack/Cargo.toml`.
+- Rewrite `focus_pane`, `focus_window`, `focus_session` to use library command builders.
+- Verify navigation works via manual testing.
+
+## Lace Option Queries
+
+The per-session `query_lace_options()` function runs three `tmux show-options` commands per session, sequentially.
+With tmux-interface-rs, these calls use the library's `ShowOptions` builder instead of raw `Command`, but the query pattern remains the same: three calls per session.
+
+Batching optimization is not worth pursuing now.
+For typical usage (2-5 sessions), this is 6-15 subprocesses per cycle, completing in under 50ms.
+The overhead is negligible compared to the 1-second poll interval.
+
+Control mode does not provide option-change notifications, so even with a future control mode migration, lace option queries would still require explicit calls.
+
+> TODO(opus/sprack-tmux-ipc): If session count grows beyond ~20, consider batching lace option queries.
+> One approach: `tmux show-options -g` to read all global options, then per-session overrides only.
+> Another: set all lace metadata as session environment variables and read them via `show-environment -t`.
+
+## TUI Commands
+
+The TUI's fire-and-forget tmux commands (`switch-client`, `select-window`, `select-pane`) should migrate to tmux-interface-rs.
+
+Rationale:
+- Consistency: all tmux interaction goes through one library, reducing the number of interaction patterns to understand and maintain.
+- Error handling: the library provides typed errors instead of raw exit codes.
+- Version resilience: if tmux changes command syntax, the library handles it.
+
+The TUI commands are low risk and low effort to migrate.
+The current `;`-chained multi-command invocation may need to become separate library calls (one per tmux command), which is acceptable: the latency of three sequential subprocesses for navigation is imperceptible to the user.
+
+## Implementation Phases
+
+### Phase 1: Foundation (Steps 1-2)
+
+- Evaluate tmux-interface-rs coverage.
+- Derive Hash on snapshot types, migrate change detection.
+- Outcome: validated library choice and improved change detection, with no behavioral changes visible to users.
+
+### Phase 2: sprack-poll Migration (Step 3)
+
+- Replace all tmux interaction in sprack-poll with tmux-interface-rs.
+- Remove delimiter-based parsing entirely.
+- Outcome: delimiter collision bug is fixed, typed errors and version resilience are gained.
+
+### Phase 3: TUI Migration (Step 4)
+
+- Replace tmux commands in the TUI crate.
+- Outcome: consistent tmux interaction across both crates.
+
+## Test Plan
+
+### Unit Tests
+
+- All existing `tmux.rs` unit tests are rewritten to test the new tmux-interface-rs-based implementation.
+- Snapshot struct hashing tests verify that `#[derive(Hash)]` produces deterministic, change-sensitive hashes.
+- `to_db_types()` tests remain unchanged (the function signature does not change).
+
+### Integration Tests
+
+- Live tmux server tests verify that tmux-interface-rs returns the same data as the current format string approach for a known tmux state.
+- A comparison test runs both the old and new query paths against the same tmux server and asserts output equivalence.
+- `diff.rs` tests verify that hash-based change detection works correctly with struct hashing.
+
+### Manual Verification
+
+- Run sprack-poll with the new implementation and confirm the TUI displays the same state as with the old implementation.
+- Create a session with `||` in the name and confirm it is parsed correctly (the original bug that motivated this work).
+- Test SIGUSR1 triggering to confirm immediate poll cycles still work.
+- Test tmux server absence and restart to confirm error handling and the 60-second timeout.
+- Test TUI navigation (Enter on session/window/pane nodes) after migrating to tmux-interface-rs.
+
+## Open Risks
+
+1. **tmux-interface-rs format coverage gap.** The library may not expose all 12 format variables sprack needs as typed fields. Mitigation: the fallback approach (custom format strings through the library, or single-field-per-call queries) is well-defined and eliminates the delimiter problem regardless.
+
+2. **tmux-interface-rs maintenance.** The crate is maintained but has a small user base. Evaluate commit frequency, issue response time, and tmux version tracking before committing. If it becomes unmaintained, sprack would need to fork or revert to direct `Command` calls with the single-field-per-call pattern. Mitigation: the migration is contained to `tmux.rs` in both crates, so reverting is localized.
+
+3. **tmux version compatibility.** tmux-interface-rs uses feature flags for version-specific behavior. Sprack has no minimum tmux version requirement. If the library's version detection does not match the user's tmux version, queries may fail. Mitigation: test against tmux versions in common use (3.2+), document minimum supported version.
+
+4. **Hash migration correctness.** Switching from raw-string hashing to struct hashing changes what constitutes a "change." Fields that were previously ignored in the raw output (e.g., trailing whitespace) may cause a one-time full rewrite on upgrade. This is benign: the DB write is idempotent.
+
+5. **Command chaining in TUI.** If tmux-interface-rs does not support `;`-chained commands, the TUI migration requires three sequential subprocess calls for pane focus. The latency impact is expected to be negligible but should be measured.

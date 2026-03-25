@@ -1581,7 +1581,7 @@ describe("claude-code feature metadata", () => {
     const metadata = readRealFeatureMetadata("claude-code");
 
     expect(metadata.id).toBe("claude-code");
-    expect(metadata.version).toBe("1.0.0");
+    expect(metadata.version).toBe("1.0.1");
   });
 
   it("declares a version option with default 'latest'", () => {

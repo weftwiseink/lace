@@ -39,7 +39,7 @@
                 "authorized-keys": {
                     "target": "/home/${_REMOTE_USER}/.ssh/authorized_keys",
                     "recommendedSource": "~/.config/lace/ssh/id_ed25519.pub",
-                    "description": "SSH public key for lace SSH access",
+                    "description": "SSH public key for lace SSH access. NOTE: target uses /home/${_REMOTE_USER} which resolves to /home/root for root user; ensure remoteUser is set to a non-root user, or override this mount target in settings.",
                     "readonly": true,
                     "sourceMustBe": "file",
                     "hint": "Run: mkdir -p ~/.config/lace/ssh && ssh-keygen -t ed25519 -f ~/.config/lace/ssh/id_ed25519 -N ''"

@@ -248,22 +248,11 @@ describe("Scenario F4: postCreateCommand auto-injection", () => {
 
     const extended = readGeneratedConfig(ctx);
 
-    // postCreateCommand should include lace-fundamentals-init
+    // postCreateCommand should include lace-fundamentals-init regardless of format
     const postCreateCommand = extended.postCreateCommand;
-    if (typeof postCreateCommand === "string") {
-      expect(postCreateCommand).toContain("lace-fundamentals-init");
-    } else if (typeof postCreateCommand === "object" && postCreateCommand !== null) {
-      const entries = Object.values(postCreateCommand as Record<string, unknown>);
-      const hasInit = entries.some((v) => {
-        if (typeof v === "string") return v.includes("lace-fundamentals-init");
-        if (Array.isArray(v)) return v.some((s) => String(s).includes("lace-fundamentals-init"));
-        return false;
-      });
-      expect(hasInit).toBe(true);
-    } else {
-      // If no postCreateCommand was set, the auto-injection should have added it
-      expect(postCreateCommand).toBeDefined();
-    }
+    expect(postCreateCommand).toBeDefined();
+    const serialized = JSON.stringify(postCreateCommand);
+    expect(serialized).toContain("lace-fundamentals-init");
   });
 
   it("composes with existing postCreateCommand string", async () => {
@@ -291,13 +280,10 @@ describe("Scenario F4: postCreateCommand auto-injection", () => {
     const extended = readGeneratedConfig(ctx);
     const postCreateCommand = extended.postCreateCommand;
 
-    // Should have both the original command and the init script
-    if (typeof postCreateCommand === "string") {
-      expect(postCreateCommand).toContain("echo 'hello'");
-      expect(postCreateCommand).toContain("lace-fundamentals-init");
-    } else {
-      // Object format is also acceptable
-      expect(postCreateCommand).toBeDefined();
-    }
+    // Should have both the original command and the init script regardless of format
+    expect(postCreateCommand).toBeDefined();
+    const serialized = JSON.stringify(postCreateCommand);
+    expect(serialized).toContain("echo 'hello'");
+    expect(serialized).toContain("lace-fundamentals-init");
   });
 });

@@ -6,6 +6,11 @@ task_list: lace/user-config-and-fundamentals
 type: devlog
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-sonnet-4-6"
+  at: 2026-03-25T00:00:00-07:00
+  round: 1
 tags: [lace, user_config, devcontainer_features, implementation]
 ---
 
@@ -105,6 +110,11 @@ Init runs FIRST (before user commands) to ensure git identity and dotfiles are a
 - Full container build verification: blocked on GHCR publish of lace-fundamentals.
   Scenario tests verify config generation; container-level verification requires publish.
 - `LACE_DOTFILES_PATH` injection: the pipeline detects lace-fundamentals and injects `defaultShell`, but `LACE_DOTFILES_PATH` is not yet injected because it depends on dotfiles mount resolution (which requires repoMount configuration not yet implemented).
+
+> WARN(opus/user-config-fundamentals): Without `LACE_DOTFILES_PATH` injection, the init script defaults to `/mnt/lace/repos/dotfiles` as a hardcoded path.
+> If the dotfiles mount resolves to a different target, chezmoi apply silently no-ops on first container start: the user's dotfiles are never applied.
+> This is a first-run experience failure for users who configure dotfiles mounts with non-default paths.
+> Must be addressed before lace-fundamentals is promoted as the standard feature.
 
 ## Verification
 

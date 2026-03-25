@@ -732,12 +732,19 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         } else if (prebuildFeatures[fundamentalsRef]) {
           if (!prebuildFeatures[fundamentalsRef].defaultShell) {
             prebuildFeatures[fundamentalsRef].defaultShell = userConfigDefaultShell;
-            // Write back
+            // Write back to resolvedConfig
             const customizations = (resolvedConfig.customizations ?? {}) as Record<string, unknown>;
             const lace = (customizations.lace ?? {}) as Record<string, unknown>;
             lace.prebuildFeatures = prebuildFeatures;
             customizations.lace = lace;
             resolvedConfig.customizations = customizations;
+            // Also propagate to configMinimal.raw so prebuild picks it up
+            const minCustomizations = (configMinimal.raw.customizations ?? {}) as Record<string, unknown>;
+            const minLace = (minCustomizations.lace ?? {}) as Record<string, unknown>;
+            const minPrebuild = (minLace.prebuildFeatures ?? {}) as Record<string, Record<string, unknown>>;
+            if (minPrebuild[fundamentalsRef]) {
+              minPrebuild[fundamentalsRef].defaultShell = userConfigDefaultShell;
+            }
           }
         }
         console.log(`Injected defaultShell="${userConfigDefaultShell}" into lace-fundamentals`);

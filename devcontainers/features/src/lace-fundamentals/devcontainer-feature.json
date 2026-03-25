@@ -26,9 +26,9 @@
         "ghcr.io/devcontainers/features/sshd:1": {},
         "ghcr.io/devcontainers/features/git:1": {}
     },
-    "installsAfter": {
-        "ghcr.io/eitsupi/devcontainer-features/nushell:0": {}
-    },
+    "installsAfter": [
+        "ghcr.io/eitsupi/devcontainer-features/nushell"
+    ],
     "customizations": {
         "lace": {
             "ports": {

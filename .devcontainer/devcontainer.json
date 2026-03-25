@@ -41,6 +41,9 @@
       },
       "prebuildFeatures": {
         "ghcr.io/weftwiseink/devcontainer-features/lace-fundamentals:1": {},
+        "ghcr.io/devcontainers/features/git:1": {
+          "version": "latest"
+        },
         "ghcr.io/devcontainers/features/rust:1": {
           "version": "latest",
           "profile": "default"

@@ -1,6 +1,6 @@
 {
     "id": "lace-fundamentals",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "name": "Lace Fundamentals",
     "description": "Baseline developer environment for lace containers: hardened SSH, git identity, dotfiles integration, default shell, and screenshot access.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/lace-fundamentals",

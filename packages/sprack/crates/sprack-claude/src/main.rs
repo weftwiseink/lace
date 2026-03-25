@@ -108,8 +108,12 @@ fn run_poll_cycle(
 
 /// Processes a single Claude pane: resolve session, read entries, write status.
 ///
-/// Dispatches to `LocalResolver` or `LaceContainerResolver` based on whether
-/// the pane's session has `lace_port` set.
+/// Dispatches to `LocalResolver` or `LaceContainerResolver` based on pane context.
+///
+/// For panes with "claude" in `current_command`, tries local `/proc` resolution
+/// first (the process is running on the host). Falls back to container resolution
+/// for lace sessions if local resolution fails. For non-claude panes in lace
+/// sessions (e.g., ssh tunnels), uses container resolution directly.
 fn process_claude_pane(
     db_connection: &rusqlite::Connection,
     pane: &sprack_db::types::Pane,
@@ -123,11 +127,22 @@ fn process_claude_pane(
     if !is_cache_valid {
         session_cache.remove(&pane.pane_id);
 
-        // Resolve session file using the appropriate resolver.
-        let resolved = if let Some(session) = lace_session {
+        // Resolve session file. Local claude panes (current_command contains "claude")
+        // try proc-walk first since the process runs on the host, even within lace
+        // sessions. Non-claude panes in lace sessions (e.g., ssh tunnels) go directly
+        // to container resolution.
+        let is_local_claude = pane.current_command.contains("claude");
+
+        let resolved = if is_local_claude {
+            resolve_session_for_pane(pane, claude_home).or_else(|| {
+                lace_session.and_then(|session| {
+                    resolver::resolve_container_pane(session, claude_home)
+                })
+            })
+        } else if let Some(session) = lace_session {
             resolver::resolve_container_pane(session, claude_home)
         } else {
-            resolve_session_for_pane(pane, claude_home)
+            None
         };
 
         match resolved {

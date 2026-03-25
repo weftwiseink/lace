@@ -69,6 +69,11 @@ pub fn start_sprack_poll() -> Result<()> {
 
     let poll_binary = resolve_sibling_binary("sprack-poll");
 
+    // Log file for daemon stderr (helps diagnose startup failures).
+    let log_path = data_dir.join("poll.log");
+    let log_file = fs::File::create(&log_path)
+        .context("failed to create sprack-poll log file")?;
+
     // Spawn sprack-poll as a detached daemon.
     // NOTE(opus/sprack): Do not write the PID file here. sprack-poll manages
     // its own PID file on startup. Writing it from the parent causes a race:
@@ -77,7 +82,7 @@ pub fn start_sprack_poll() -> Result<()> {
         Command::new(&poll_binary)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(log_file))
             .pre_exec(|| {
                 libc::setsid();
                 Ok(())

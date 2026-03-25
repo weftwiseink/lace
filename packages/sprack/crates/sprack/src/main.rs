@@ -128,6 +128,17 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         }
     }
 
+    // Show poller log if it exists (helps diagnose startup failures).
+    if let Ok(data_dir) = daemon::sprack_data_dir() {
+        let log_path = data_dir.join("poll.log");
+        if let Ok(log_content) = std::fs::read_to_string(&log_path) {
+            let log_content = log_content.trim();
+            if !log_content.is_empty() {
+                eprintln!("sprack-poll log:\n{log_content}");
+            }
+        }
+    }
+
     bail!(
         "Database not found at {}. Is sprack-poll running?\nTry: pkill sprack-poll && cargo run -p sprack",
         default_path.display()

@@ -51,6 +51,18 @@ pub struct ClaudeSummary {
     /// `/rename`), falling back to `slug` from JSONL entries (auto-generated).
     #[serde(default)]
     pub session_name: Option<String>,
+    /// Total user turns from the session cache.
+    #[serde(default)]
+    pub user_turns: Option<u32>,
+    /// Total assistant turns from the session cache.
+    #[serde(default)]
+    pub assistant_turns: Option<u32>,
+    /// Top tool usage counts from the session cache, ordered by frequency descending.
+    #[serde(default)]
+    pub tool_counts: Option<Vec<(String, u32)>>,
+    /// Context window usage trend: "rising", "falling", or "stable".
+    #[serde(default)]
+    pub context_trend: Option<String>,
 }
 
 /// A task entry from the Claude Code task list.
@@ -284,6 +296,10 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
         tokens_used,
         tokens_max,
         session_name,
+        user_turns: None,
+        assistant_turns: None,
+        tool_counts: None,
+        context_trend: None,
     }
 }
 
@@ -495,6 +511,10 @@ mod tests {
             tokens_used: Some(420_000),
             tokens_max: Some(1_000_000),
             session_name: None,
+            user_turns: None,
+            assistant_turns: None,
+            tool_counts: None,
+            context_trend: None,
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();

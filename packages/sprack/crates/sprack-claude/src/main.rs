@@ -61,8 +61,22 @@ fn run() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
     let claude_home = PathBuf::from(&home).join(".claude");
 
+    // Open session cache DB. Non-fatal: if it fails, proceed without cache enrichment.
+    let cache_connection = match cache::open_cache_db(None) {
+        Ok(conn) => Some(conn),
+        Err(error) => {
+            eprintln!("sprack-claude: failed to open session cache DB: {error}");
+            None
+        }
+    };
+
     loop {
-        run_poll_cycle(&db_connection, &mut session_cache, &claude_home);
+        run_poll_cycle(
+            &db_connection,
+            &mut session_cache,
+            &claude_home,
+            cache_connection.as_ref(),
+        );
 
         if wait_for_shutdown_signal(&mut signals, POLL_INTERVAL) {
             return Ok(());
@@ -75,6 +89,7 @@ fn run_poll_cycle(
     db_connection: &rusqlite::Connection,
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
+    cache_connection: Option<&rusqlite::Connection>,
 ) {
     let snapshot = match sprack_db::read::read_full_state(db_connection) {
         Ok(snapshot) => snapshot,
@@ -97,6 +112,7 @@ fn run_poll_cycle(
             session_cache,
             claude_home,
             lace_session,
+            cache_connection,
         );
     }
 
@@ -120,6 +136,7 @@ fn process_claude_pane(
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
     lace_session: Option<&sprack_db::types::Session>,
+    cache_connection: Option<&rusqlite::Connection>,
 ) {
     // Check if we have a cached session and whether it's still valid.
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
@@ -177,6 +194,28 @@ fn process_claude_pane(
 
     // Merge with previously cached entries if we got new ones.
     if !entries.is_empty() {
+        // Ingest new entries into the session cache DB for aggregated metrics.
+        if let Some(cache_conn) = cache_connection {
+            let file_path_str = session_state
+                .session_file
+                .to_str()
+                .unwrap_or("unknown");
+            // Derive project_path from session file: parent of the JSONL file's parent dir.
+            let project_path_str = session_state
+                .session_file
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("unknown");
+            if let Err(error) = cache::ingest_new_entries(
+                cache_conn,
+                file_path_str,
+                project_path_str,
+                &entries,
+            ) {
+                eprintln!("sprack-claude: cache ingestion failed: {error}");
+            }
+        }
+
         session_state.last_entries = entries;
     }
 
@@ -262,6 +301,29 @@ fn process_claude_pane(
                     session_state.cached_hook_events.extend(hook_events);
                 }
                 events::merge_hook_events(&mut summary, &session_state.cached_hook_events);
+            }
+        }
+    }
+
+    // Enrich summary with cached session data (turn counts, tool usage, context trend).
+    if let Some(cache_conn) = cache_connection {
+        let session_id = session_state
+            .hook_session_id
+            .as_deref()
+            .or_else(|| {
+                session_state
+                    .last_entries
+                    .iter()
+                    .find_map(|e| e.session_id.as_deref())
+            });
+        if let Some(sid) = session_id {
+            if let Some(cached) = cache::read_session_summary(cache_conn, sid) {
+                summary.user_turns = Some(cached.user_turns);
+                summary.assistant_turns = Some(cached.assistant_turns);
+                if !cached.tool_counts.is_empty() {
+                    summary.tool_counts = Some(cached.tool_counts);
+                }
+                summary.context_trend = cached.context_trend;
             }
         }
     }
@@ -403,6 +465,10 @@ fn write_error_integration(
         tokens_used: None,
         tokens_max: None,
         session_name: None,
+        user_turns: None,
+        assistant_turns: None,
+        tool_counts: None,
+        context_trend: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

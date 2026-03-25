@@ -14,7 +14,6 @@ use crate::status::{extract_context_percent, extract_last_tool, extract_model};
 /// Opens the session cache database, creating it if needed.
 ///
 /// Uses WAL mode and foreign keys, same as sprack-db.
-#[allow(dead_code)]
 pub fn open_cache_db(path: Option<&Path>) -> anyhow::Result<Connection> {
     let db_path = match path {
         Some(p) => p.to_path_buf(),
@@ -33,7 +32,6 @@ pub fn open_cache_db(path: Option<&Path>) -> anyhow::Result<Connection> {
     Ok(conn)
 }
 
-#[allow(dead_code)]
 fn default_cache_path() -> anyhow::Result<PathBuf> {
     let home = std::env::var("HOME")
         .map_err(|_| anyhow::anyhow!("HOME not set"))?;
@@ -110,7 +108,6 @@ CREATE TABLE IF NOT EXISTS subagent_tracking (
 ///
 /// Updates session_metadata counters, tool_usage, context_history, and subagent_tracking.
 /// Entries with `is_compact_summary = true` are skipped to avoid double-counting.
-#[allow(dead_code)]
 pub fn ingest_new_entries(
     conn: &Connection,
     file_path: &str,
@@ -345,7 +342,6 @@ pub struct CachedSessionData {
 }
 
 /// Reads session summary data from the cache.
-#[allow(dead_code)]
 pub fn read_session_summary(conn: &Connection, session_id: &str) -> Option<CachedSessionData> {
     let row = conn.query_row(
         "SELECT session_id, model, user_turns, assistant_turns,
@@ -412,12 +408,31 @@ pub fn read_session_summary(conn: &Connection, session_id: &str) -> Option<Cache
     Some(data)
 }
 
-#[allow(dead_code)]
 fn now_utc() -> String {
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    format!("1970-01-01T00:00:00Z+{}s", duration.as_secs())
+    let secs = duration.as_secs();
+    let days = secs / 86400;
+    let remaining = secs % 86400;
+    let hours = remaining / 3600;
+    let minutes = (remaining % 3600) / 60;
+    let seconds = remaining % 60;
+
+    // Convert days since epoch to Y-M-D using a civil calendar algorithm.
+    // Based on Howard Hinnant's chrono-compatible algorithm.
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
 }
 
 #[cfg(test)]

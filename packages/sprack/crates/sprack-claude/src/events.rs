@@ -580,6 +580,10 @@ mod tests {
             tokens_used: None,
             tokens_max: None,
             session_name: None,
+            user_turns: None,
+            assistant_turns: None,
+            tool_counts: None,
+            context_trend: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -612,6 +616,10 @@ mod tests {
             tokens_used: None,
             tokens_max: None,
             session_name: None,
+            user_turns: None,
+            assistant_turns: None,
+            tool_counts: None,
+            context_trend: None,
         };
 
         merge_hook_events(&mut summary, &events);

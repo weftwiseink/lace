@@ -46,6 +46,14 @@ pub(crate) struct ClaudeSummary {
     pub(crate) tokens_max: Option<u64>,
     #[serde(default)]
     pub(crate) session_name: Option<String>,
+    #[serde(default)]
+    pub(crate) user_turns: Option<u32>,
+    #[serde(default)]
+    pub(crate) assistant_turns: Option<u32>,
+    #[serde(default)]
+    pub(crate) tool_counts: Option<Vec<(String, u32)>>,
+    #[serde(default)]
+    pub(crate) context_trend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -430,6 +438,10 @@ fn format_pane_label(
             parts.push(format!("{}ag", s.subagent_count));
         }
         parts.push(format_context_display(s));
+        // Show turn count when available (Standard/Wide/Full only).
+        if let Some(turns) = s.user_turns {
+            parts.push(format!("{turns}t"));
+        }
         if let Some(ref status) = primary_integration {
             if status.status == ProcessStatus::ToolUse {
                 if let Some(ref tool) = s.last_tool {
@@ -683,13 +695,22 @@ fn format_rich_widget(
 
     let mut lines = vec![Line::from(line1_spans)];
 
-    // Line 2: model | tokens | subagents.
+    // Line 2: model | tokens | subagents | turns.
     let model_short = summary
         .model
         .as_deref()
         .map(|m| m.strip_prefix("claude-").unwrap_or(m))
         .unwrap_or("unknown");
-    let context_display = format_context_display(summary);
+    let mut context_display = format_context_display(summary);
+    // Append context trend arrow indicator.
+    if let Some(ref trend) = summary.context_trend {
+        let arrow = match trend.as_str() {
+            "rising" => "^",
+            "falling" => "v",
+            _ => "=",
+        };
+        context_display.push_str(arrow);
+    }
     let subagent_label = if matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
         format!("{} subagents", summary.subagent_count)
     } else {
@@ -698,10 +719,28 @@ fn format_rich_widget(
     let mut line2_parts = vec![model_short.to_string()];
     line2_parts.push(context_display);
     line2_parts.push(subagent_label);
+    if let Some(turns) = summary.user_turns {
+        line2_parts.push(format!("{turns} turns"));
+    }
     lines.push(Line::from(Span::styled(
         format!("  {}", line2_parts.join(" | ")),
         theme.subtext0,
     )));
+
+    // Tool usage line: show top 3 tools in compact format (e.g., "Read:47 Edit:12 Bash:8").
+    if let Some(ref tool_counts) = summary.tool_counts {
+        if !tool_counts.is_empty() {
+            let tool_display: Vec<String> = tool_counts
+                .iter()
+                .take(3)
+                .map(|(name, count)| format!("{name}:{count}"))
+                .collect();
+            lines.push(Line::from(Span::styled(
+                format!("  {}", tool_display.join(" ")),
+                theme.subtext0,
+            )));
+        }
+    }
 
     // Line 3: session purpose (git context line will be added in Phase 2).
     if let Some(purpose) = &summary.session_purpose {

@@ -56,10 +56,15 @@ const EXPECTED_FIELD_COUNT: usize = 12;
 
 /// Runs a tmux command and returns stdout as a string.
 ///
+/// When `socket` is `Some`, passes `-L <socket>` to target an isolated tmux server.
 /// Maps IO errors to `TmuxError::NotFound` (tmux not on PATH)
 /// and "no server running" / "no current client" stderr to `TmuxError::ServerNotRunning`.
-fn tmux_command(args: &[&str]) -> Result<String, TmuxError> {
-    let output = Command::new("tmux")
+fn tmux_command(args: &[&str], socket: Option<&str>) -> Result<String, TmuxError> {
+    let mut cmd = Command::new("tmux");
+    if let Some(socket_name) = socket {
+        cmd.args(["-L", socket_name]);
+    }
+    let output = cmd
         .args(args)
         .output()
         .map_err(|_| TmuxError::NotFound)?;
@@ -77,9 +82,10 @@ fn tmux_command(args: &[&str]) -> Result<String, TmuxError> {
 
 /// Queries all tmux panes across all sessions via `tmux list-panes -a -F`.
 ///
+/// When `socket` is `Some`, targets an isolated tmux server (for testing).
 /// Returns the raw output string for hashing before parsing.
-pub fn query_tmux_state() -> Result<String, TmuxError> {
-    tmux_command(&["list-panes", "-a", "-F", TMUX_FORMAT])
+pub fn query_tmux_state(socket: Option<&str>) -> Result<String, TmuxError> {
+    tmux_command(&["list-panes", "-a", "-F", TMUX_FORMAT], socket)
 }
 
 /// Hierarchical snapshot of tmux state.
@@ -158,14 +164,15 @@ pub struct LaceMeta {
 /// Reads lace-specific tmux user options for each session.
 ///
 /// Calls `tmux show-options -qvt $session @lace_port/user/workspace` per session.
+/// When `socket` is `Some`, targets an isolated tmux server (for testing).
 /// Missing options produce `None` values, not errors.
-pub fn query_lace_options(session_names: &[String]) -> HashMap<String, LaceMeta> {
+pub fn query_lace_options(session_names: &[String], socket: Option<&str>) -> HashMap<String, LaceMeta> {
     let mut result = HashMap::new();
     for session_name in session_names {
-        let port = read_lace_option(session_name, "@lace_port")
+        let port = read_lace_option(session_name, "@lace_port", socket)
             .and_then(|value| value.parse::<u16>().ok());
-        let user = read_lace_option(session_name, "@lace_user");
-        let workspace = read_lace_option(session_name, "@lace_workspace");
+        let user = read_lace_option(session_name, "@lace_user", socket);
+        let workspace = read_lace_option(session_name, "@lace_workspace", socket);
 
         result.insert(
             session_name.clone(),
@@ -182,8 +189,8 @@ pub fn query_lace_options(session_names: &[String]) -> HashMap<String, LaceMeta>
 /// Reads a single lace tmux user option for a session.
 ///
 /// Returns `None` if the option is not set or the command fails.
-fn read_lace_option(session_name: &str, option_name: &str) -> Option<String> {
-    let output = tmux_command(&["show-options", "-qvt", session_name, option_name]).ok()?;
+fn read_lace_option(session_name: &str, option_name: &str, socket: Option<&str>) -> Option<String> {
+    let output = tmux_command(&["show-options", "-qvt", session_name, option_name], socket).ok()?;
     parse_lace_option(&output)
 }
 

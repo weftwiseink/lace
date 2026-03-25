@@ -61,7 +61,7 @@ fn run() -> anyhow::Result<()> {
 
     loop {
         // Query tmux state.
-        let raw_output = match query_tmux_state() {
+        let raw_output = match query_tmux_state(None) {
             Ok(output) => {
                 server_absent_since = None;
                 output
@@ -82,7 +82,7 @@ fn run() -> anyhow::Result<()> {
         // Parse and check for changes.
         let snapshot = parse_tmux_output(&raw_output);
         let session_names = snapshot.session_names();
-        let lace_meta = query_lace_options(&session_names);
+        let lace_meta = query_lace_options(&session_names, None);
 
         let current_tmux_hash = compute_hash(&raw_output);
         let current_lace_hash = compute_lace_meta_hash(&lace_meta);

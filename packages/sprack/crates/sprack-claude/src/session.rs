@@ -124,3 +124,111 @@ fn find_via_jsonl_listing(project_dir: &Path) -> Option<PathBuf> {
 
     jsonl_files.into_iter().next().map(|(path, _)| path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_session_file_via_jsonl_listing() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path();
+
+        // Create two .jsonl files with different mtimes.
+        let older = project_dir.join("session-old.jsonl");
+        std::fs::write(&older, r#"{"type":"user"}"#).unwrap();
+
+        // Brief pause to ensure different mtime.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let newer = project_dir.join("session-new.jsonl");
+        std::fs::write(&newer, r#"{"type":"user"}"#).unwrap();
+
+        let result = find_session_file(project_dir);
+        assert_eq!(result, Some(newer));
+    }
+
+    #[test]
+    fn find_session_file_ignores_subdirectory_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path();
+
+        // Create a .jsonl in root and one in a subdirectory.
+        let root_file = project_dir.join("session-root.jsonl");
+        std::fs::write(&root_file, r#"{"type":"user"}"#).unwrap();
+
+        let subdir = project_dir.join("subagent");
+        std::fs::create_dir(&subdir).unwrap();
+        let sub_file = subdir.join("session-sub.jsonl");
+        std::fs::write(&sub_file, r#"{"type":"user"}"#).unwrap();
+
+        // find_session_file should return the root file only.
+        let result = find_session_file(project_dir);
+        assert_eq!(result, Some(root_file));
+    }
+
+    #[test]
+    fn find_session_file_via_sessions_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path();
+
+        // Create a session file.
+        let session_file = project_dir.join("session-abc.jsonl");
+        std::fs::write(&session_file, r#"{"type":"user"}"#).unwrap();
+
+        // Create sessions-index.json pointing to it.
+        let index = serde_json::json!([
+            {
+                "fullPath": session_file.to_str().unwrap(),
+                "fileMtime": 1700000000000u64,
+                "isSidechain": false,
+                "sessionId": "abc"
+            }
+        ]);
+        let index_path = project_dir.join("sessions-index.json");
+        std::fs::write(&index_path, serde_json::to_string(&index).unwrap()).unwrap();
+
+        let result = find_session_file(project_dir);
+        assert_eq!(result, Some(session_file));
+    }
+
+    #[test]
+    fn find_session_file_skips_sidechains() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path();
+
+        let main_file = project_dir.join("session-main.jsonl");
+        std::fs::write(&main_file, r#"{"type":"user"}"#).unwrap();
+
+        let sidechain_file = project_dir.join("session-side.jsonl");
+        std::fs::write(&sidechain_file, r#"{"type":"user"}"#).unwrap();
+
+        let index = serde_json::json!([
+            {
+                "fullPath": sidechain_file.to_str().unwrap(),
+                "fileMtime": 1700000002000u64,
+                "isSidechain": true,
+                "sessionId": "side"
+            },
+            {
+                "fullPath": main_file.to_str().unwrap(),
+                "fileMtime": 1700000001000u64,
+                "isSidechain": false,
+                "sessionId": "main"
+            }
+        ]);
+        let index_path = project_dir.join("sessions-index.json");
+        std::fs::write(&index_path, serde_json::to_string(&index).unwrap()).unwrap();
+
+        // Should pick main (non-sidechain) even though sidechain has higher mtime.
+        let result = find_session_file(project_dir);
+        assert_eq!(result, Some(main_file));
+    }
+
+    #[test]
+    fn find_session_file_returns_none_for_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = find_session_file(dir.path());
+        assert_eq!(result, None);
+    }
+}

@@ -8,3 +8,7 @@ sprack-db = { path = "../sprack-db" }
 rusqlite = { workspace = true }
 anyhow = { workspace = true }
 signal-hook = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = "3"

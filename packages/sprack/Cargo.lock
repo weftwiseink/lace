@@ -779,11 +779,13 @@ name = "sprack-claude"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "insta",
  "rusqlite",
  "serde",
  "serde_json",
  "signal-hook",
  "sprack-db",
+ "tempfile",
 ]
 
 [[package]]
@@ -800,9 +802,11 @@ name = "sprack-poll"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "insta",
  "rusqlite",
  "signal-hook",
  "sprack-db",
+ "tempfile",
 ]
 
 [[package]]

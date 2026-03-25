@@ -51,8 +51,12 @@ fn run() -> anyhow::Result<()> {
     let mut signals = Signals::new([SIGINT, SIGTERM])?;
     let mut session_cache: HashMap<String, SessionFileState> = HashMap::new();
 
+    let home = std::env::var("HOME")
+        .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
+    let claude_home = PathBuf::from(&home).join(".claude");
+
     loop {
-        run_poll_cycle(&db_connection, &mut session_cache);
+        run_poll_cycle(&db_connection, &mut session_cache, &claude_home);
 
         if wait_for_shutdown_signal(&mut signals, POLL_INTERVAL) {
             return Ok(());
@@ -64,13 +68,14 @@ fn run() -> anyhow::Result<()> {
 fn run_poll_cycle(
     db_connection: &rusqlite::Connection,
     session_cache: &mut HashMap<String, SessionFileState>,
+    claude_home: &std::path::Path,
 ) {
     let claude_panes = find_claude_panes(db_connection);
     let mut active_pane_ids: Vec<String> = Vec::new();
 
     for pane in &claude_panes {
         active_pane_ids.push(pane.pane_id.clone());
-        process_claude_pane(db_connection, pane, session_cache);
+        process_claude_pane(db_connection, pane, session_cache, claude_home);
     }
 
     clean_stale_integrations(db_connection, &active_pane_ids);
@@ -101,6 +106,7 @@ fn process_claude_pane(
     db_connection: &rusqlite::Connection,
     pane: &sprack_db::types::Pane,
     session_cache: &mut HashMap<String, SessionFileState>,
+    claude_home: &std::path::Path,
 ) {
     // Check if we have a cached session and whether it's still valid.
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
@@ -109,7 +115,7 @@ fn process_claude_pane(
         session_cache.remove(&pane.pane_id);
 
         // Resolve session file from /proc.
-        match resolve_session_for_pane(pane) {
+        match resolve_session_for_pane(pane, claude_home) {
             Some(state) => {
                 session_cache.insert(pane.pane_id.clone(), state);
             }
@@ -194,17 +200,18 @@ fn is_session_cache_valid(
 }
 
 /// Resolves a pane to its Claude Code session file via /proc.
-fn resolve_session_for_pane(pane: &sprack_db::types::Pane) -> Option<SessionFileState> {
+///
+/// `claude_home` is the base path to the Claude Code data directory (typically `$HOME/.claude`).
+fn resolve_session_for_pane(
+    pane: &sprack_db::types::Pane,
+    claude_home: &std::path::Path,
+) -> Option<SessionFileState> {
     let shell_pid = pane.pane_pid?;
     let claude_pid = proc_walk::find_claude_pid(shell_pid)?;
     let process_cwd = proc_walk::read_process_cwd(claude_pid)?;
     let encoded_path = proc_walk::encode_project_path(&process_cwd);
 
-    let home = std::env::var("HOME").ok()?;
-    let project_dir = PathBuf::from(&home)
-        .join(".claude")
-        .join("projects")
-        .join(&encoded_path);
+    let project_dir = claude_home.join("projects").join(&encoded_path);
 
     let session_file = session::find_session_file(&project_dir)?;
 

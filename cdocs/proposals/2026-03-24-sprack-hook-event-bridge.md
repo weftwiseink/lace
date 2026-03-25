@@ -7,6 +7,11 @@ type: proposal
 state: live
 status: wip
 tags: [sprack, claude_code, hooks, architecture, data_bridge]
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-6"
+  at: 2026-03-24T21:30:00-07:00
+  round: 1
 ---
 
 # Sprack Hook Event Bridge

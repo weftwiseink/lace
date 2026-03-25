@@ -194,10 +194,25 @@ fn parse_event(raw: &RawEvent) -> Option<HookEvent> {
     }
 }
 
-/// Locates the event file for a pane by scanning the event directory.
+/// Locates the event file for a session by its session_id.
 ///
-/// Matches event files whose most recent `cwd` field matches the pane's working directory.
-/// Falls back to the most recently modified event file if no cwd match is found.
+/// Returns the path if the corresponding event file exists.
+/// Used when a SessionStart event has been seen and the session_id is known.
+#[allow(dead_code)]
+pub fn find_event_file_by_session_id(event_dir: &Path, session_id: &str) -> Option<PathBuf> {
+    let path = event_dir.join(format!("{session_id}.jsonl"));
+    if path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Locates the event file for a pane by scanning the event directory for matching `cwd`.
+///
+/// Only matches event files whose most recent `cwd` field matches the pane's working directory.
+/// Returns `None` if no exact cwd match is found (conservative: avoids matching the wrong
+/// event file when multiple sessions share the same working directory).
 pub fn find_event_file(event_dir: &Path, pane_cwd: &str) -> Option<PathBuf> {
     let read_dir = std::fs::read_dir(event_dir).ok()?;
 
@@ -218,10 +233,10 @@ pub fn find_event_file(event_dir: &Path, pane_cwd: &str) -> Option<PathBuf> {
     // Sort by mtime descending (most recent first).
     candidates.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // Try to match by cwd from the event file content.
+    // Only return an exact cwd match. No fallback to most-recent file:
+    // without a cwd match, we cannot be sure which session the file belongs to.
     for (path, _) in &candidates {
         if let Ok(content) = std::fs::read_to_string(path) {
-            // Check the last line for a cwd match.
             if let Some(last_line) = content.lines().rev().find(|l| !l.is_empty()) {
                 if let Ok(raw) = serde_json::from_str::<RawEvent>(last_line) {
                     if raw.cwd == pane_cwd {
@@ -232,8 +247,7 @@ pub fn find_event_file(event_dir: &Path, pane_cwd: &str) -> Option<PathBuf> {
         }
     }
 
-    // No cwd match: return the most recently modified file (heuristic).
-    candidates.into_iter().next().map(|(path, _)| path)
+    None
 }
 
 /// Merges hook events into a ClaudeSummary, populating task list, session summary,
@@ -299,8 +313,10 @@ pub fn merge_hook_events(
                 }
             }
             HookEvent::PostCompact { compact_summary } => {
+                // PostCompact provides a semantic summary of the session's work.
+                // session_summary is the raw compact output.
+                // session_purpose is derived: PostCompact > cwd fallback.
                 session_summary = Some(compact_summary.clone());
-                // PostCompact summary is a better session purpose than cwd.
                 session_purpose = Some(compact_summary.clone());
             }
             _ => {}
@@ -310,7 +326,9 @@ pub fn merge_hook_events(
     if !tasks.is_empty() {
         summary.tasks = Some(tasks);
     }
-    summary.session_summary = session_summary;
+    if session_summary.is_some() {
+        summary.session_summary = session_summary;
+    }
     if session_purpose.is_some() {
         summary.session_purpose = session_purpose;
     }

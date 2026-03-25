@@ -1,0 +1,34 @@
+---
+source: crates/sprack/src/test_render.rs
+expression: output
+---
+â¼ LOCAL                                                     âSelect a pane to view details
+  â¼ dev (1w)                                                â
+    â¼ editor (1 panes)                                      â
+        * bash [error] 78%                                  â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+ [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

@@ -23,6 +23,8 @@ mod daemon;
 mod input;
 mod layout;
 mod render;
+#[cfg(test)]
+mod test_render;
 mod tmux;
 mod tree;
 

@@ -1,0 +1,9 @@
+---
+source: crates/sprack/src/test_render.rs
+expression: output
+---
+â¼ LOCAL
+  â¼ dev (1w)
+    â¼ editor (1 panes)
+        * bash [thinking] 2ag 45%
+ [poller: ok] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

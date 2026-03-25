@@ -123,7 +123,7 @@ impl App {
     }
 
     /// Reads full state from the DB and rebuilds the tree.
-    fn refresh_from_db(&mut self) -> Result<()> {
+    pub(crate) fn refresh_from_db(&mut self) -> Result<()> {
         let snapshot = sprack_db::read::read_full_state(&self.db)?;
 
         // Update heartbeat status.

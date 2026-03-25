@@ -805,6 +805,7 @@ dependencies = [
  "anyhow",
  "catppuccin",
  "crossterm",
+ "insta",
  "libc",
  "ratatui",
  "rusqlite",

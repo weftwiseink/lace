@@ -85,6 +85,19 @@ fn default_db_path() -> Result<PathBuf, SprackDbError> {
     Ok(PathBuf::from(home).join(".local/share/sprack/state.db"))
 }
 
+/// Opens an in-memory SQLite connection with the schema initialized.
+///
+/// Intended for use in tests across crates that need a populated sprack DB
+/// without touching the filesystem. WAL mode is not applicable to in-memory DBs.
+#[cfg(any(test, feature = "test-support"))]
+pub fn open_test_db() -> Connection {
+    let conn = Connection::open_in_memory().expect("failed to open in-memory db");
+    conn.pragma_update(None, "foreign_keys", "on")
+        .expect("failed to enable foreign keys");
+    schema::init_schema(&conn).expect("failed to init schema");
+    conn
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -135,14 +148,9 @@ mod tests {
         }
     }
 
-    /// Helper: opens an in-memory DB with schema, WAL not applicable.
-    /// For tests that only need schema + read/write, not WAL verification.
+    /// Helper: delegates to the public `open_test_db` from `lib.rs`.
     fn open_test_db() -> Connection {
-        let conn = Connection::open_in_memory().expect("failed to open in-memory db");
-        conn.pragma_update(None, "foreign_keys", "on")
-            .expect("failed to enable foreign keys");
-        schema::init_schema(&conn).expect("failed to init schema");
-        conn
+        super::open_test_db()
     }
 
     // === 1. Schema creation ===

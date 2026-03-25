@@ -1,0 +1,34 @@
+---
+source: crates/sprack/src/test_render.rs
+expression: output
+---
+â¼ REMOTE-APP                                                âSelect a pane to view details
+  â¼ remote-app (1w)                                         â
+    â¼ code (1 panes)                                        â
+        * bash [thinking] 2ag 45%                           â
+â¼ LOCAL                                                     â
+  â¼ dev (2w)                                                â
+    â¼ editor (2 panes)                                      â
+        * bash                                              â
+          nvim                                              â
+    â¼ terminal (1 panes)                                    â
+        * bash                                              â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+                                                            â
+ [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

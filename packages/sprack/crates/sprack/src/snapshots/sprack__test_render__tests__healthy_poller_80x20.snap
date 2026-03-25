@@ -5,5 +5,5 @@ expression: output
 â¼ LOCAL
   â¼ dev (1w)
     â¼ editor (1 panes)
-        * bash/dev [thinking] 2ag 450K/1M
+        * bash/sprack-trouble [thinking] 2ag 450K/1M
  [poller: ok] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

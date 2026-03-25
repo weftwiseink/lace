@@ -526,6 +526,7 @@ mod tests {
             session_purpose: None,
             tokens_used: None,
             tokens_max: None,
+            session_name: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -557,6 +558,7 @@ mod tests {
             session_purpose: None,
             tokens_used: None,
             tokens_max: None,
+            session_name: None,
         };
 
         merge_hook_events(&mut summary, &events);

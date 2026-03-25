@@ -47,6 +47,10 @@ pub struct ClaudeSummary {
     /// Absolute token count: model context window size.
     #[serde(default)]
     pub tokens_max: Option<u64>,
+    /// Claude Code session name: `customTitle` from sessions-index.json (user-set via
+    /// `/rename`), falling back to `slug` from JSONL entries (auto-generated).
+    #[serde(default)]
+    pub session_name: Option<String>,
 }
 
 /// A task entry from the Claude Code task list.
@@ -234,6 +238,14 @@ pub fn find_last_assistant_message(entries: &[JsonlEntry]) -> Option<&AssistantM
         .and_then(|entry| entry.message.as_ref())
 }
 
+/// Extracts the auto-generated session slug from the most recent JSONL entry that has one.
+pub fn extract_slug(entries: &[JsonlEntry]) -> Option<String> {
+    entries
+        .iter()
+        .rev()
+        .find_map(|entry| entry.slug.clone())
+}
+
 /// Builds a complete ClaudeSummary from parsed entries.
 pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
     let state = extract_activity_state(entries);
@@ -256,6 +268,8 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
 
     let state_string = state.to_string();
 
+    let session_name = extract_slug(entries);
+
     ClaudeSummary {
         state: state_string,
         model,
@@ -269,6 +283,7 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
         session_purpose: None,
         tokens_used,
         tokens_max,
+        session_name,
     }
 }
 
@@ -301,6 +316,7 @@ mod tests {
             is_sidechain: None,
             parent_tool_use_id: None,
             is_compact_summary: None,
+            slug: None,
             message: Some(AssistantMessage {
                 model: Some(model.to_string()),
                 usage: Some(TokenUsage {
@@ -335,6 +351,7 @@ mod tests {
             is_sidechain: None,
             parent_tool_use_id: None,
             is_compact_summary: None,
+            slug: None,
             message: None,
             data: None,
         }
@@ -348,6 +365,7 @@ mod tests {
             is_sidechain: None,
             parent_tool_use_id: None,
             is_compact_summary: None,
+            slug: None,
             message: None,
             data: Some(ProgressData {
                 data_type: Some("agent_progress".to_string()),
@@ -476,6 +494,7 @@ mod tests {
             session_purpose: None,
             tokens_used: Some(420_000),
             tokens_max: Some(1_000_000),
+            session_name: None,
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();

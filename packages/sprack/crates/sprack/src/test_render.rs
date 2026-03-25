@@ -162,7 +162,8 @@ mod tests {
                 {"subject": "Fix rendering", "status": "InProgress"},
                 {"subject": "Add tests", "status": "Completed"}
             ],
-            "session_purpose": "sprack TUI development"
+            "session_purpose": "sprack TUI development",
+            "session_name": "sprack-trouble"
         })
         .to_string()
     }

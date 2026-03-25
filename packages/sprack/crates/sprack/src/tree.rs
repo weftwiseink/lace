@@ -44,6 +44,8 @@ pub(crate) struct ClaudeSummary {
     pub(crate) tokens_used: Option<u64>,
     #[serde(default)]
     pub(crate) tokens_max: Option<u64>,
+    #[serde(default)]
+    pub(crate) session_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -397,9 +399,14 @@ fn format_pane_label(
     let summary = primary_integration.and_then(|i| parse_claude_summary(i));
     let is_claude = primary_integration.is_some_and(|i| i.kind == "claude_code");
 
-    // Scoped display name: "claude/session_name" for claude panes (except compact).
+    // Scoped display name: "claude/{claude_session_name}" for claude panes (except compact).
+    // Prefers the Claude Code session name (customTitle or slug) over the tmux session name.
     let scoped_name = if is_claude && !matches!(tier, LayoutTier::Compact) {
-        format!("{}/{}", process_name, pane.session_name)
+        let claude_session = summary
+            .as_ref()
+            .and_then(|s| s.session_name.as_deref())
+            .unwrap_or(&pane.session_name);
+        format!("{}/{}", process_name, claude_session)
     } else {
         process_name.clone()
     };
@@ -659,7 +666,11 @@ fn format_rich_widget(
         .unwrap_or("?")
         .to_string();
 
-    let scoped_name = format!("{}/{}", process_name, pane.session_name);
+    let claude_session = summary
+        .session_name
+        .as_deref()
+        .unwrap_or(&pane.session_name);
+    let scoped_name = format!("{}/{}", process_name, claude_session);
     let primary_integration = integrations.first();
 
     // Line 1: process/session [status].

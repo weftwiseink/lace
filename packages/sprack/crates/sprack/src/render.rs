@@ -35,6 +35,16 @@ pub fn render_frame(frame: &mut Frame, app: &mut App) {
     render_status_bar(frame, app, status_area, &theme);
 }
 
+/// Renders a dump frame: tree only, no detail panel, no status bar.
+///
+/// Used by `--dump-rendered-tree` to produce a clean full-hierarchy output.
+pub fn render_dump_frame(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let theme = Theme::mocha();
+
+    render_tree(frame, app, area, &theme);
+}
+
 /// Renders the tree widget.
 fn render_tree(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let tree_widget = Tree::new(&app.tree_items)

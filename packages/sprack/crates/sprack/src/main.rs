@@ -112,6 +112,10 @@ fn parse_args() -> CliArgs {
 /// No raw mode, no alternate screen, no event loop. Creates a TestBackend
 /// at the specified dimensions, refreshes from DB, renders one frame,
 /// prints the buffer text, and returns.
+///
+/// Differs from interactive mode: all tree nodes are expanded, the detail
+/// panel is suppressed, and the status bar is omitted. This produces a
+/// clean full-hierarchy dump suitable for scripting and debugging.
 fn run_dump_rendered_tree(cli: &CliArgs) -> Result<()> {
     let db = open_or_wait_for_db(cli.db_path.as_deref())?;
     let own_pane_id = std::env::var("TMUX_PANE").ok();
@@ -119,16 +123,40 @@ fn run_dump_rendered_tree(cli: &CliArgs) -> Result<()> {
     let mut app = app::App::new(db, own_pane_id);
     app.refresh_from_db()?;
 
+    // Expand all tree nodes so the full hierarchy is visible.
+    expand_all_nodes(&app.tree_items, &mut app.tree_state);
+
     let backend = TestBackend::new(cli.cols, cli.rows);
     let mut terminal = Terminal::new(backend)?;
     terminal.draw(|frame| {
-        render::render_frame(frame, &mut app);
+        render::render_dump_frame(frame, &mut app);
     })?;
 
     let output = render::buffer_to_string(terminal.backend().buffer());
     print!("{output}");
 
     Ok(())
+}
+
+/// Recursively opens all tree nodes so the full hierarchy is rendered.
+fn expand_all_nodes(
+    items: &[tui_tree_widget::TreeItem<'static, tree::NodeId>],
+    state: &mut tui_tree_widget::TreeState<tree::NodeId>,
+) {
+    expand_all_recursive(items, state, vec![]);
+}
+
+fn expand_all_recursive(
+    items: &[tui_tree_widget::TreeItem<'static, tree::NodeId>],
+    state: &mut tui_tree_widget::TreeState<tree::NodeId>,
+    path: Vec<tree::NodeId>,
+) {
+    for item in items {
+        let mut item_path = path.clone();
+        item_path.push(item.identifier().clone());
+        state.open(item_path.clone());
+        expand_all_recursive(item.children(), state, item_path);
+    }
 }
 
 /// Installs a panic hook that restores the terminal before printing the panic.

@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/nushell-history
 type: proposal
 state: live
-status: review_ready
+status: wip
 last_reviewed:
   status: revision_requested
   by: "@claude-opus-4-6-20250605"
@@ -140,31 +140,60 @@ Even if nushell adds `config.history.path` in the future, the symlink approach r
 
 ## Proposed Solution
 
+### Dedicated feature: `nushell-history`
+
+Nushell history persistence is implemented as its own lace feature wrapper at `devcontainers/features/src/nushell-history/`, not as part of `lace-fundamentals`.
+This keeps fundamentals focused on baseline infrastructure (SSH, git, chezmoi, shell) and isolates nushell-specific concerns.
+
+The feature:
+- Declares a `history` mount for the persistent sqlite directory.
+- Provides a `postCreateCommand` init script that creates the symlink after chezmoi apply has run.
+- Uses `installsAfter` to ensure nushell and lace-fundamentals are installed first.
+
+Users add it to `user.json` alongside the nushell feature:
+
+```jsonc
+{
+  "features": {
+    "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
+    "ghcr.io/weftwiseink/devcontainer-features/nushell-history:1": {}
+  }
+}
+```
+
 ### Architecture
 
 ```mermaid
 flowchart TD
-    A[lace-fundamentals feature metadata] -->|declares| B["nushell-history mount<br/>(no sourceMustBe)"]
-    B -->|auto-derived by| C["~/.config/lace/&lt;project&gt;/mounts/<br/>lace-fundamentals/nushell-history/"]
-    D[lace-fundamentals-init] -->|1. runs| E[chezmoi apply]
+    A[nushell-history feature metadata] -->|declares| B["history mount"]
+    B -->|default source| C["~/.config/lace/shared/nushell-history/"]
+    D[lace-fundamentals-init] -->|runs first| E[chezmoi apply]
     E -->|deploys| F["~/.config/nushell/config.nu, env.nu, ..."]
-    D -->|2. runs| G[history symlink step]
-    G -->|creates| H["~/.config/nushell/history.sqlite3<br/>→ /mnt/lace/nushell-history/history.sqlite3"]
-    C -->|bind-mounted at| I[/mnt/lace/nushell-history/]
-    H -.->|sqlite follows symlink| I
-    I -->|WAL/SHM files created in| C
+    G[nushell-history-init] -->|runs after| H[history symlink step]
+    H -->|creates| I["~/.config/nushell/history.sqlite3<br/>→ /mnt/lace/nushell-history/history.sqlite3"]
+    C -->|bind-mounted at| J[/mnt/lace/nushell-history/]
+    I -.->|sqlite resolves symlink| J
+    J -->|WAL/SHM files created in| C
 ```
 
 ### Mount declaration
 
-The `lace-fundamentals` feature metadata declares a new mount:
+The `nushell-history` feature metadata declares the mount:
 
 ```json
 {
+  "id": "nushell-history",
+  "version": "1.0.0",
+  "name": "Nushell History Persistence",
+  "description": "Persists nushell command history across container rebuilds via symlink to a bind-mounted host directory.",
+  "installsAfter": {
+    "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
+    "ghcr.io/weftwiseink/devcontainer-features/lace-fundamentals:1": {}
+  },
   "customizations": {
     "lace": {
       "mounts": {
-        "nushell-history": {
+        "history": {
           "target": "/mnt/lace/nushell-history",
           "description": "Persistent nushell command history (sqlite)",
           "recommendedSource": "~/.config/lace/shared/nushell-history"
@@ -175,26 +204,38 @@ The `lace-fundamentals` feature metadata declares a new mount:
 }
 ```
 
-The mount has no `sourceMustBe` constraint.
-Lace auto-derives the host path to `~/.config/lace/<project>/mounts/lace-fundamentals/nushell-history/` and creates the directory if it does not exist.
-This gives each project its own history by default.
+The mount has no `sourceMustBe` constraint and uses `recommendedSource` to guide users toward the shared location.
+Without a `settings.json` override, lace auto-derives the host path to `~/.config/lace/<project>/mounts/nushell-history/history/` and creates the directory.
 
-> NOTE(opus/nushell-history): The `recommendedSource` is guidance-only: it appears in lace's mount configuration messages but does not affect path resolution.
-> Without a `settings.json` override, lace always auto-derives the host path to `~/.config/lace/<project>/mounts/lace-fundamentals/nushell-history/`.
-> To share history across containers, configure a `settings.json` override (see "Shared history via settings.json override" below).
+To use the shared default, add a `settings.json` entry:
+
+```json
+{
+  "mounts": {
+    "nushell-history/history": {
+      "source": "~/.config/lace/shared/nushell-history"
+    }
+  }
+}
+```
+
+> TODO(opus/nushell-history): Document per-project history isolation as an alternative in the feature's README.md.
+> Users who prefer project-scoped history can omit the `settings.json` override and use the auto-derived per-project path.
 
 ### Symlink in init script
 
-After chezmoi apply, the init script creates a symlink from nushell's hardcoded history path to the persistent mount:
+The feature's `install.sh` creates an init script at `/usr/local/bin/nushell-history-init`.
+This script runs as a `postCreateCommand` (auto-injected by lace) after `lace-fundamentals-init`.
 
 ```sh
-# After chezmoi apply in lace-fundamentals-init:
-NUSHELL_CONFIG="$HOME/.config/nushell"
-if [ -d "/mnt/lace/nushell-history" ] && [ -d "$NUSHELL_CONFIG" ]; then
-    HISTORY_TARGET="/mnt/lace/nushell-history"
+#!/bin/sh
+# nushell-history-init: symlink nushell history to persistent mount.
+# Runs after lace-fundamentals-init (chezmoi apply must complete first).
 
-    # Determine history filename based on nushell config
-    # Default to sqlite (lace's nushell setup uses sqlite format)
+NUSHELL_CONFIG="$HOME/.config/nushell"
+HISTORY_MOUNT="/mnt/lace/nushell-history"
+
+if [ -d "$HISTORY_MOUNT" ] && [ -d "$NUSHELL_CONFIG" ]; then
     HISTORY_FILE="history.sqlite3"
 
     # Remove any existing history file (chezmoi may have created an empty one)
@@ -203,15 +244,19 @@ if [ -d "/mnt/lace/nushell-history" ] && [ -d "$NUSHELL_CONFIG" ]; then
     rm -f "$NUSHELL_CONFIG/${HISTORY_FILE}-wal"
 
     # Symlink to persistent mount
-    ln -sf "$HISTORY_TARGET/$HISTORY_FILE" "$NUSHELL_CONFIG/$HISTORY_FILE"
+    ln -sf "$HISTORY_MOUNT/$HISTORY_FILE" "$NUSHELL_CONFIG/$HISTORY_FILE"
 
-    echo "lace: nushell history linked to $HISTORY_TARGET/$HISTORY_FILE"
+    echo "nushell-history: linked to $HISTORY_MOUNT/$HISTORY_FILE"
 fi
 ```
 
-SQLite follows symlinks: when nushell opens `~/.config/nushell/history.sqlite3`, the kernel resolves the symlink to `/mnt/lace/nushell-history/history.sqlite3`.
-WAL and SHM files are created relative to the resolved (real) path, so they land in the persistent mount directory.
+SQLite (>= 3.39.0) resolves the symlink via `unixFullPathname()` before constructing WAL/SHM paths.
+When nushell opens `~/.config/nushell/history.sqlite3`, the kernel follows the symlink to `/mnt/lace/nushell-history/history.sqlite3`.
+SQLite then appends `-wal` and `-shm` to the resolved canonical path, so all auxiliary files land in the persistent mount directory.
 All three files persist across container rebuilds.
+
+> NOTE(opus/nushell-history): Nushell 0.110 bundles SQLite >= 3.49 via rusqlite 0.37, well above the 3.39.0 threshold for full symlink resolution.
+> Verified empirically: auxiliary files appear exclusively at the symlink target, not the symlink source.
 
 ### Chezmoi ignore rule
 
@@ -231,35 +276,24 @@ Without this, `chezmoi apply` would overwrite the symlink with a real file on re
 
 ## Important Design Decisions
 
-### Per-container history by default
+### Dedicated feature, not part of lace-fundamentals
 
-Each container gets its own history database, auto-derived to `~/.config/lace/<project>/mounts/lace-fundamentals/nushell-history/`.
-This is the correct default for three reasons:
+Nushell history persistence is nushell-specific, not baseline infrastructure.
+Bundling it into lace-fundamentals would couple a tool-specific concern to the core feature, making fundamentals harder to reason about and test.
+A dedicated feature also lets users opt out cleanly by removing a single line from `user.json`.
 
-1. **No concurrent access risk.** Each container has exclusive access to its history file. SQLite WAL corruption from multi-process access is impossible.
-2. **Project-specific history is useful.** Different projects use different commands. Searching history for `cargo test` in a Rust project is more useful when it is not polluted with `npm run` from a Node project.
-3. **Fits lace's existing mount derivation pattern.** The auto-derive logic already creates per-project directories under `~/.config/lace/<project>/mounts/`.
+### Shared history by default
 
-### Shared history via settings.json override
+All containers share a single history database at `~/.config/lace/shared/nushell-history/` (configured via `settings.json` override of the `recommendedSource`).
+This is the correct default for single-developer use:
 
-Users who prefer unified history across containers can override the mount source in `settings.json`:
+1. **Unified command recall.** Commands typed in one project are available in all others. In practice, a single developer's history is more useful unified than fragmented.
+2. **Concurrent access is safe.** All containers share the host Linux kernel. SQLite WAL uses `fcntl` locking, which works correctly across bind mounts on the same kernel. Lock contention from concurrent nushell sessions may cause brief (millisecond) blocks on history writes, which is imperceptible for interactive use.
+3. **Simpler mental model.** One history location, one `settings.json` entry, no per-project state to manage.
 
-```json
-{
-  "mounts": {
-    "lace-fundamentals/nushell-history": {
-      "source": "~/.config/lace/shared/nushell-history"
-    }
-  }
-}
-```
-
-All containers using this override share the same history database.
-
-> WARN(opus/nushell-history): Shared history with concurrent containers is risky.
-> If two containers run nushell simultaneously, both write to the same WAL database.
-> SQLite WAL on a single Linux kernel with bind mounts supports `fcntl` locking, so corruption should not occur, but lock contention may cause one shell to block briefly on history writes.
-> This is acceptable for interactive use but should be documented as a known limitation.
+> NOTE(opus/nushell-history): Per-project history isolation is available by omitting the `settings.json` override.
+> Without it, lace auto-derives the host path to `~/.config/lace/<project>/mounts/nushell-history/history/`, giving each project its own database.
+> This is useful in multi-user or multi-tenant scenarios where history should not leak across projects.
 
 ### Symlink over alternatives
 
@@ -275,8 +309,8 @@ The symlink approach is chosen over:
 - **Docker named volume**: Mounting a volume at `~/.config/nushell/` shadows chezmoi-deployed config files.
   Rejected.
 - **Reusing `/commandhistory` mount**: The existing bash history mount could hold a `nushell/` subdirectory.
-  However, bash history uses a project-scoped mount declaration, while nushell history belongs to the `lace-fundamentals` feature namespace.
-  Using the wrong namespace creates confusion.
+  However, bash history is a project-level concern declared in devcontainer.json, while nushell history is a user-level concern owned by a dedicated feature.
+  Mixing concerns in one mount creates confusion.
   A dedicated mount is cleaner.
 
 ### Mount target path
@@ -291,7 +325,7 @@ A separate mount point with a symlink avoids this entirely.
 
 If a user runs `chezmoi apply` manually inside a running container, chezmoi will skip `history.sqlite3` because of the `.chezmoiignore` rule.
 If the ignore rule is missing (dotfiles repo not yet updated), chezmoi overwrites the symlink with an empty file.
-Mitigation: the init script always re-creates the symlink. A manual `chezmoi apply` without re-running init would break persistence until the next container restart.
+Mitigation: `nushell-history-init` always re-creates the symlink. A manual `chezmoi apply` without re-running init would break persistence until the next container restart.
 
 > TODO(opus/nushell-history): Consider adding a chezmoi `run_after` script that re-creates the symlink after every apply. This is a dotfiles-repo concern, not a lace concern.
 
@@ -310,10 +344,10 @@ On first container creation with a fresh auto-derived directory, the mount targe
 The symlink points to a non-existent file.
 Nushell handles this gracefully: it creates the history file (and WAL/SHM files) at the symlink target on first command entry.
 
-### Container without nushell
+### Feature without nushell installed
 
-If nushell is not installed (no nushell feature in user.json), the `~/.config/nushell/` directory does not exist.
-The init script checks for the mount directory (`/mnt/lace/nushell-history`) and the nushell config directory before creating the symlink.
+If the `nushell-history` feature is added but nushell itself is not installed, `~/.config/nushell/` does not exist.
+The init script checks for both the mount directory (`/mnt/lace/nushell-history`) and the nushell config directory before creating the symlink.
 If either is missing, the step is skipped silently.
 
 ### Migration from ephemeral history
@@ -332,58 +366,60 @@ After implementation, verify in a freshly rebuilt container:
 3. Rebuild the container (`docker rm -f` + `lace up`)
 4. `history | last 5` still shows commands from step 2
 5. `ls /mnt/lace/nushell-history/` shows `history.sqlite3` (and `-shm`, `-wal` if recently written)
-6. On the host: `ls ~/.config/lace/<project>/mounts/lace-fundamentals/nushell-history/` shows the same files
+6. On the host: `ls ~/.config/lace/shared/nushell-history/` shows the same files
 
-Negative case (container without nushell):
-7. Temporarily remove nushell feature from user.json
-8. Rebuild the container
-9. Verify init script output shows no errors (symlink step skipped silently)
-10. Restore nushell feature
+Cross-container shared history:
+7. Rebuild two different project containers (both with `nushell-history` feature)
+8. Run commands in container A, verify they appear in `history` in container B (after nushell restart to reload the database)
 
-For shared history (optional):
-11. Configure `settings.json` override pointing to `~/.config/lace/shared/nushell-history`
-12. Rebuild two different project containers
-13. Run commands in container A, verify they appear in `history` in container B (after nushell restart to reload the database)
+Negative case (feature without nushell):
+9. Temporarily remove nushell feature from user.json (keep nushell-history)
+10. Rebuild the container
+11. Verify init script output shows no errors (symlink step skipped silently)
+12. Restore nushell feature
 
 ## Implementation Phases
 
-### Phase 1: Feature metadata and init script
+### Phase 1: Create the `nushell-history` feature
 
-**Scope:** lace repo only.
+**Scope:** lace repo, `devcontainers/features/src/nushell-history/`.
 
-1. Add `nushell-history` mount declaration to `devcontainers/features/src/lace-fundamentals/devcontainer-feature.json`.
-2. Update the init script generation in `steps/git-identity.sh` to include the history symlink step after chezmoi apply. The init script (`lace-fundamentals-init`) is generated inline via heredoc in this file, not a standalone script.
+1. Create `devcontainer-feature.json` with the mount declaration, `installsAfter` for nushell and lace-fundamentals.
+2. Create `install.sh` that generates `/usr/local/bin/nushell-history-init` via heredoc (following the same pattern as lace-fundamentals' `git-identity.sh`).
 3. Guard the symlink step: only run if `/mnt/lace/nushell-history` exists and `~/.config/nushell/` exists.
+4. Create a minimal `README.md` for the feature.
 
 **Success criteria:**
-- `devcontainer-feature.json` has the new mount declaration.
-- `lace-fundamentals-init` creates the symlink on container start.
+- Feature directory structure matches other lace features.
+- `nushell-history-init` creates the symlink on container start.
 - No errors when nushell is not installed (symlink step skipped).
 
-### Phase 2: Chezmoi ignore rule
+### Phase 2: User config and chezmoi
 
-**Scope:** dotfiles repo.
+**Scope:** `user.json`, dotfiles repo.
 
-1. Add `history.sqlite3*` patterns to `.chezmoiignore`.
-2. Verify `chezmoi managed` no longer lists history files.
-3. Verify `chezmoi apply` does not overwrite the symlink.
+1. Add `"ghcr.io/weftwiseink/devcontainer-features/nushell-history:1": {}` to `user.json` features.
+2. Add `"nushell-history/history": { "source": "~/.config/lace/shared/nushell-history" }` to `settings.json` mounts.
+3. Add `history.sqlite3*` patterns to `.chezmoiignore` in the dotfiles repo.
+4. Verify `chezmoi managed` does not list history files.
 
 **Success criteria:**
+- `user.json` includes the new feature.
+- `settings.json` override points all containers at shared history.
 - `chezmoi apply --dry-run` shows no changes to history files.
-- Manual `chezmoi apply` inside a running container preserves the symlink.
 
 ### Phase 3: End-to-end verification
 
 **Scope:** Cross-repo.
 
-1. Publish updated lace-fundamentals feature (version bump or rebuild).
-2. Rebuild a lace container with both changes applied.
-3. Walk through the verification checklist above.
-4. Test the settings.json shared history override.
+1. Publish the new feature to GHCR.
+2. Rebuild a lace container with all changes applied.
+3. Walk through the verification checklist above (including cross-container shared history).
 
 **Success criteria:**
 - All verification steps pass.
 - History survives a container rebuild.
+- History is shared across containers.
 
 ## Resolved Questions
 

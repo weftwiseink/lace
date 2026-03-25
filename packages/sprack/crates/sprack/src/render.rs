@@ -155,9 +155,16 @@ fn build_claude_detail_lines<'a>(
     ]));
 
     // Context + subagents.
+    let context_display = match (summary.tokens_used, summary.tokens_max) {
+        (Some(used), Some(max)) => {
+            use crate::tree::format_token_count;
+            format!("{}/{} ({}%)", format_token_count(used), format_token_count(max), summary.context_percent)
+        }
+        _ => format!("{}%", summary.context_percent),
+    };
     let mut info_spans = vec![
         Span::styled("  ctx: ", theme.detail_metadata),
-        Span::styled(format!("{}%", summary.context_percent), theme.detail_summary),
+        Span::styled(context_display, theme.detail_summary),
     ];
     if summary.subagent_count > 0 {
         info_spans.push(Span::styled(

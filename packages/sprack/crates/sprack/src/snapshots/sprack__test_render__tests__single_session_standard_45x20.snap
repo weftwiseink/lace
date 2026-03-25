@@ -5,5 +5,5 @@ expression: output
 â¼ LOCAL
   â¼ dev (1w)
     â¼ editor (1 panes)
-        * bash [thinking] 2ag 45%
+        * bash/dev [thinking] 2ag 450K/1M
  [poller: not started] | j/k:nav  h/l:collaps

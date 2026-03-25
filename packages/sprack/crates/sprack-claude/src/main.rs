@@ -334,6 +334,8 @@ fn write_error_integration(
         tasks: None,
         session_summary: None,
         session_purpose: None,
+        tokens_used: None,
+        tokens_max: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

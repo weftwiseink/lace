@@ -41,6 +41,12 @@ pub struct ClaudeSummary {
     /// Session purpose (from PostCompact or cwd).
     #[serde(default)]
     pub session_purpose: Option<String>,
+    /// Absolute token count: total input tokens consumed.
+    #[serde(default)]
+    pub tokens_used: Option<u64>,
+    /// Absolute token count: model context window size.
+    #[serde(default)]
+    pub tokens_max: Option<u64>,
 }
 
 /// A task entry from the Claude Code task list.
@@ -142,6 +148,30 @@ pub fn extract_context_percent(message: &AssistantMessage) -> u8 {
     percent.min(100) as u8
 }
 
+/// Extracts absolute token counts: (tokens_used, tokens_max).
+///
+/// Uses the same computation as `extract_context_percent`:
+/// input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+/// against the model's context window size.
+pub fn extract_token_counts(message: &AssistantMessage) -> (Option<u64>, Option<u64>) {
+    let usage = match &message.usage {
+        Some(usage) => usage,
+        None => return (None, None),
+    };
+
+    let total_context_tokens = usage.input_tokens
+        + usage.cache_read_input_tokens.unwrap_or(0)
+        + usage.cache_creation_input_tokens.unwrap_or(0);
+
+    let context_window = message
+        .model
+        .as_deref()
+        .map(model_context_window)
+        .unwrap_or(200_000);
+
+    (Some(total_context_tokens), Some(context_window))
+}
+
 /// Extracts the name of the last tool used from an assistant message's content blocks.
 pub fn extract_last_tool(message: &AssistantMessage) -> Option<String> {
     let content = message.content.as_ref()?;
@@ -211,6 +241,9 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
 
     let model = last_assistant.and_then(extract_model);
     let context_percent = last_assistant.map(extract_context_percent).unwrap_or(0);
+    let (tokens_used, tokens_max) = last_assistant
+        .map(extract_token_counts)
+        .unwrap_or((None, None));
     let last_tool = last_assistant.and_then(extract_last_tool);
     let subagent_count = count_subagents(entries);
 
@@ -234,6 +267,8 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
         tasks: None,
         session_summary: None,
         session_purpose: None,
+        tokens_used,
+        tokens_max,
     }
 }
 
@@ -439,6 +474,8 @@ mod tests {
             tasks: None,
             session_summary: None,
             session_purpose: None,
+            tokens_used: Some(420_000),
+            tokens_max: Some(1_000_000),
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();
@@ -456,5 +493,7 @@ mod tests {
         assert_eq!(summary.tasks, None);
         assert_eq!(summary.session_summary, None);
         assert_eq!(summary.session_purpose, None);
+        assert_eq!(summary.tokens_used, None);
+        assert_eq!(summary.tokens_max, None);
     }
 }

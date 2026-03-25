@@ -5,7 +5,7 @@ expression: output
 â¼ REMOTE-APP
   â¼ remote-app (1w)
     â¼ code (1 panes)
-        * bash [thinking] 2ag 45%
+        * bash/remote-app [thinking] 2ag 450K
 â¼ LOCAL
   â¼ dev (2w)
     â¼ editor (2 panes)

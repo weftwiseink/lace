@@ -156,6 +156,8 @@ mod tests {
             "subagent_count": 2,
             "context_percent": 45,
             "last_tool": "Read",
+            "tokens_used": 450_000,
+            "tokens_max": 1_000_000,
             "tasks": [
                 {"subject": "Fix rendering", "status": "InProgress"},
                 {"subject": "Add tests", "status": "Completed"}
@@ -324,6 +326,8 @@ mod tests {
             "model": "claude-opus-4-6",
             "subagent_count": 0,
             "context_percent": 78,
+            "tokens_used": 156_000,
+            "tokens_max": 200_000,
             "error_message": "Rate limit exceeded",
             "tasks": [
                 {"subject": "Fix rendering", "status": "InProgress"}

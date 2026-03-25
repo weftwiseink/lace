@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/user-config-proposal
 type: proposal
 state: live
-status: review_ready
+status: implementation_wip
 tags: [lace, user_config, architecture, security, chezmoi]
 last_reviewed:
   status: accepted

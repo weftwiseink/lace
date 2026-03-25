@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/user-json-rollout
 type: devlog
 state: live
-status: review_ready
+status: done
 tags: [lace, user_config, dotfiles, chezmoi, verification]
 last_reviewed:
   status: accepted

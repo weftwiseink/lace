@@ -5,11 +5,10 @@
 # If the active pane is local, creates a local split preserving the current path.
 #
 # Detection priority:
-#   1. Pane-level @lace_port option (set by lace-into --pane and propagated by prior splits)
-#   2. Session-level @lace_port option (set by lace-into for the whole session)
-#   3. pane_current_command == "ssh" (fallback for ad-hoc SSH panes)
-# This ordering is more reliable than process detection alone because the
-# foreground process in an SSH pane is the remote shell (nu, bash), not ssh.
+#   1. Pane-level @lace_port option (set by lace-into and propagated by prior splits)
+#   2. pane_current_command == "ssh" (fallback for ad-hoc SSH panes)
+# Only pane-level metadata is checked (not session-level), so local panes
+# in a lace session correctly get local splits.
 #
 # Usage: lace-split [-h|-v] [-U]
 #   -h   Horizontal split (split-window -h, default)
@@ -32,10 +31,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Check lace metadata first (more reliable than process detection).
-# Prefer pane-level options (-p), fall back to session-level.
+# Check pane-level lace metadata (more reliable than process detection).
+# Only pane-level: session-level @lace_port exists but applies to all panes
+# in the session, including local ones. Pane-level is set by lace-into on
+# the initial pane and propagated by lace-split to each new container split.
 port=$(tmux show-option -pqv @lace_port 2>/dev/null)
-[ -z "$port" ] && port=$(tmux show-option -qv @lace_port 2>/dev/null)
 
 # If no metadata, check if the pane is running SSH as a fallback
 if [ -z "$port" ]; then
@@ -52,10 +52,7 @@ fi
 
 # Container pane: read remaining lace connection details
 user=$(tmux show-option -pqv @lace_user 2>/dev/null)
-[ -z "$user" ] && user=$(tmux show-option -qv @lace_user 2>/dev/null)
-
 ws=$(tmux show-option -pqv @lace_workspace 2>/dev/null)
-[ -z "$ws" ] && ws=$(tmux show-option -qv @lace_workspace 2>/dev/null)
 
 if [ -n "$port" ]; then
   # SSH split into the same container

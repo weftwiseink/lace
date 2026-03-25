@@ -9,7 +9,7 @@ status: wip
 tags: [sprack, testing, verifiability, implementation]
 ---
 
-# Phase 0: Verifiability Infrastructure Implementation
+# Sprack Phase 0-1 Implementation Session
 
 > BLUF: Implementing the mock infrastructure from the verifiability strategy proposal.
 > Four refactoring targets: ProcFs trait extraction, find_process_pid predicate refactoring, tmux socket parameterization, and claude_home injection.
@@ -72,6 +72,53 @@ The `RealProcFs::children()` implementation includes the `task/<tid>/children` f
 
 ## Issues Encountered and Solved
 
-No issues encountered.
+No issues encountered in Phase 0.
 All changes were mechanical: replacing hardcoded defaults with parameterized alternatives.
 Existing 76 tests continued passing throughout with no modifications needed.
+
+## Phase 1A: Layout Organization
+
+### Changes
+
+1. **Format string extension** (sprack-poll): 12 -> 19 fields, adding spatial coordinates and metadata.
+2. **Schema v1** (sprack-db): 6 new pane columns, 1 window column, `user_version` pragma migration.
+3. **Spatial sorting** (sprack TUI): `panes_for_window` sorts by `(pane_top, pane_left)`.
+4. **Enriched metadata** (sprack TUI): dimensions, path, PID, pane count, window count per tier.
+
+Test count: 88 -> 99 (5 spatial sort tests, 6 updated to new field count).
+
+## Phase 1B: Process Host Awareness
+
+### Changes
+
+Implemented by a parallel background agent. Delivered:
+1. **PaneResolver trait** with `resolve()` method in new `resolver.rs`.
+2. **LocalResolver**: wraps existing `/proc` walk logic.
+3. **LaceContainerResolver**: prefix-matching workspace directories + mtime heuristic for bind-mount session discovery.
+4. **Dispatch wiring** in `main.rs`: panes in sessions with `lace_port` use container resolver.
+5. **`find_via_jsonl_listing` made public** for container resolver access.
+6. `// TODO(opus/sprack-hooks)` comments marking fallback code for removal once hooks land.
+
+Test count: 99 -> 105 (12 new resolver tests).
+
+### Issue: Worktree Isolation
+
+The Phase 1B agent was launched with `isolation: "worktree"` but its changes landed in the main working directory.
+This caused Phase 1B changes to be committed together with Phase 1A.
+No functional impact: all 105 tests pass.
+
+## Phase 1.5: Hook Event Bridge Proposal
+
+Elaborated the hook event bridge RFP into a 734-line full proposal via background agent.
+Covers 7 hook events, per-session event files, ClaudeSummary extensions, graceful fallback.
+Pending review.
+
+## Summary
+
+Three phases completed in this session:
+- Phase 0: verifiability infrastructure (76 -> 88 tests)
+- Phase 1A: layout organization (88 -> 99 tests)
+- Phase 1B: process host awareness (99 -> 105 tests)
+- Hook bridge proposal elaborated
+
+Total test count: 76 -> 105 (29 new tests, zero failures).

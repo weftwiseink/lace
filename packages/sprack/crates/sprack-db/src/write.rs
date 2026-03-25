@@ -82,8 +82,8 @@ fn insert_sessions(conn: &Connection, sessions: &[Session]) -> Result<(), Sprack
 
 fn insert_windows(conn: &Connection, windows: &[Window]) -> Result<(), SprackDbError> {
     let mut statement = conn.prepare(
-        "INSERT INTO windows (session_name, window_index, name, active)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO windows (session_name, window_index, name, active, layout)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     for window in windows {
         statement.execute(rusqlite::params![
@@ -91,6 +91,7 @@ fn insert_windows(conn: &Connection, windows: &[Window]) -> Result<(), SprackDbE
             window.window_index,
             window.name,
             window.active as i32,
+            window.layout,
         ])?;
     }
     Ok(())
@@ -98,8 +99,8 @@ fn insert_windows(conn: &Connection, windows: &[Window]) -> Result<(), SprackDbE
 
 fn insert_panes(conn: &Connection, panes: &[Pane]) -> Result<(), SprackDbError> {
     let mut statement = conn.prepare(
-        "INSERT INTO panes (pane_id, session_name, window_index, title, current_command, current_path, pane_pid, active, dead)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO panes (pane_id, session_name, window_index, title, current_command, current_path, pane_pid, active, dead, pane_width, pane_height, pane_left, pane_top, pane_index, pane_in_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
     )?;
     for pane in panes {
         statement.execute(rusqlite::params![
@@ -112,6 +113,12 @@ fn insert_panes(conn: &Connection, panes: &[Pane]) -> Result<(), SprackDbError> 
             pane.pane_pid,
             pane.active as i32,
             pane.dead as i32,
+            pane.pane_width,
+            pane.pane_height,
+            pane.pane_left,
+            pane.pane_top,
+            pane.pane_index,
+            pane.in_mode as i32,
         ])?;
     }
     Ok(())

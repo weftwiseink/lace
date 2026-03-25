@@ -208,11 +208,26 @@ fn windows_for_session<'a>(session_name: &str, windows: &'a [Window]) -> Vec<&'a
         .collect()
 }
 
+/// Returns panes for a given window, sorted by spatial position `(pane_top, pane_left)`.
+///
+/// This produces visual layout order (top-to-bottom, left-to-right) rather than
+/// tmux creation order. Panes with `None` coordinates sort first via `Option`'s
+/// natural ordering (should not occur in practice).
 fn panes_for_window<'a>(session_name: &str, window_index: i32, panes: &'a [Pane]) -> Vec<&'a Pane> {
-    panes
+    let mut matched: Vec<&Pane> = panes
         .iter()
         .filter(|p| p.session_name == session_name && p.window_index == window_index)
-        .collect()
+        .collect();
+
+    matched.sort_by(|a, b| {
+        let top_cmp = a.pane_top.cmp(&b.pane_top);
+        if top_cmp != std::cmp::Ordering::Equal {
+            return top_cmp;
+        }
+        a.pane_left.cmp(&b.pane_left)
+    });
+
+    matched
 }
 
 /// Finds integrations for a given pane.
@@ -244,7 +259,8 @@ fn build_window_item(
     tier: LayoutTier,
     theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let line = format_window_label(window, tier, theme);
+    let pane_count = pane_items.len();
+    let line = format_window_label(window, pane_count, tier, theme);
     let node_id = NodeId::Window(window.session_name.clone(), window.window_index);
     TreeItem::new(node_id, line, pane_items).ok()
 }
@@ -255,7 +271,8 @@ fn build_session_item(
     tier: LayoutTier,
     theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let line = format_session_label(session, tier, theme);
+    let window_count = window_items.len();
+    let line = format_session_label(session, window_count, tier, theme);
     let node_id = NodeId::Session(session.name.clone());
     TreeItem::new(node_id, line, window_items).ok()
 }
@@ -288,6 +305,18 @@ fn format_pane_label(
 
     let primary_integration = integrations.first();
 
+    // Active pane prefix.
+    let active_prefix = if pane.active { "* " } else { "  " };
+
+    // Dimensions string (e.g., "[80x24]").
+    let dims = match (pane.pane_width, pane.pane_height) {
+        (Some(w), Some(h)) => format!("[{w}x{h}]"),
+        _ => String::new(),
+    };
+
+    // Copy mode suffix.
+    let mode_suffix = if pane.in_mode { " [copy]" } else { "" };
+
     match tier {
         LayoutTier::Compact => {
             let icon = primary_integration
@@ -303,48 +332,128 @@ fn format_pane_label(
             ])
         }
         LayoutTier::Standard => {
-            let mut spans = vec![Span::raw(truncate_label(&process_name, 20))];
+            let mut spans = vec![
+                Span::raw(active_prefix.to_string()),
+                Span::raw(truncate_label(&process_name, 20)),
+            ];
+            if !dims.is_empty() {
+                spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
+            }
             if let Some(integration) = primary_integration {
                 let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(badge.to_string(), style));
             }
+            if !mode_suffix.is_empty() {
+                spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
+            }
             Line::from(spans)
         }
-        LayoutTier::Wide | LayoutTier::Full => {
-            let title = if pane.title.is_empty() {
-                process_name.clone()
-            } else {
-                truncate_label(&pane.title, 25)
-            };
+        LayoutTier::Wide => {
+            let path = truncate_path(&pane.current_path, 25);
             let mut spans = vec![
-                Span::raw(title),
-                Span::styled(format!(" ({process_name})"), theme.subtext0),
+                Span::raw(active_prefix.to_string()),
+                Span::raw(truncate_label(&process_name, 20)),
             ];
+            if !dims.is_empty() {
+                spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
+            }
+            spans.push(Span::styled(format!(" {path}"), theme.subtext0));
             if let Some(integration) = primary_integration {
                 let (badge, style) = theme.status_badge(&integration.status);
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(badge.to_string(), style));
+            }
+            if !mode_suffix.is_empty() {
+                spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
+            }
+            Line::from(spans)
+        }
+        LayoutTier::Full => {
+            let title = if pane.title.is_empty() || pane.title == pane.current_command {
+                process_name.clone()
+            } else {
+                truncate_label(&pane.title, 25)
+            };
+            let path = truncate_path(&pane.current_path, 30);
+            let pid_str = pane
+                .pane_pid
+                .map(|pid| format!(" pid:{pid}"))
+                .unwrap_or_default();
+            let mut spans = vec![
+                Span::raw(active_prefix.to_string()),
+                Span::raw(title),
+                Span::styled(format!(" ({process_name})"), theme.subtext0),
+            ];
+            if !dims.is_empty() {
+                spans.push(Span::styled(format!(" {dims}"), theme.subtext0));
+            }
+            spans.push(Span::styled(pid_str, theme.subtext0));
+            spans.push(Span::styled(format!(" {path}"), theme.subtext0));
+            if let Some(integration) = primary_integration {
+                let (badge, style) = theme.status_badge(&integration.status);
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(badge.to_string(), style));
+            }
+            if !mode_suffix.is_empty() {
+                spans.push(Span::styled(mode_suffix.to_string(), theme.subtext0));
             }
             Line::from(spans)
         }
     }
 }
 
-fn format_window_label(window: &Window, tier: LayoutTier, theme: &Theme) -> Line<'static> {
+fn format_window_label(
+    window: &Window,
+    pane_count: usize,
+    tier: LayoutTier,
+    theme: &Theme,
+) -> Line<'static> {
     let style = if window.active {
         theme.window_active
     } else {
         theme.window_inactive
     };
 
+    let active_flag = if window.active { "*" } else { "" };
+
     match tier {
         LayoutTier::Compact => Line::from(Span::styled(truncate_label(&window.name, 15), style)),
-        _ => Line::from(Span::styled(truncate_label(&window.name, 30), style)),
+        LayoutTier::Standard => {
+            let mut spans = vec![Span::styled(truncate_label(&window.name, 25), style)];
+            if pane_count > 0 {
+                spans.push(Span::styled(
+                    format!(" ({pane_count} panes)"),
+                    theme.subtext0,
+                ));
+            }
+            Line::from(spans)
+        }
+        LayoutTier::Wide | LayoutTier::Full => {
+            let mut spans = vec![Span::styled(truncate_label(&window.name, 25), style)];
+            if pane_count > 0 {
+                spans.push(Span::styled(
+                    format!(" ({pane_count} panes)"),
+                    theme.subtext0,
+                ));
+            }
+            if !active_flag.is_empty() {
+                spans.push(Span::styled(
+                    format!(" {active_flag}"),
+                    theme.subtext0,
+                ));
+            }
+            Line::from(spans)
+        }
     }
 }
 
-fn format_session_label(session: &Session, tier: LayoutTier, theme: &Theme) -> Line<'static> {
+fn format_session_label(
+    session: &Session,
+    window_count: usize,
+    tier: LayoutTier,
+    theme: &Theme,
+) -> Line<'static> {
     let style = if session.attached {
         theme.session_attached
     } else {
@@ -353,10 +462,43 @@ fn format_session_label(session: &Session, tier: LayoutTier, theme: &Theme) -> L
 
     match tier {
         LayoutTier::Compact => Line::from(Span::styled(truncate_label(&session.name, 15), style)),
-        _ => {
+        LayoutTier::Standard => {
             let mut spans = vec![Span::styled(truncate_label(&session.name, 25), style)];
+            if window_count > 0 {
+                spans.push(Span::styled(format!(" ({window_count}w)"), theme.subtext0));
+            }
+            Line::from(spans)
+        }
+        LayoutTier::Wide => {
+            let mut spans = vec![Span::styled(truncate_label(&session.name, 25), style)];
+            if window_count > 0 {
+                spans.push(Span::styled(format!(" ({window_count}w)"), theme.subtext0));
+            }
+            let status = if session.attached {
+                " attached"
+            } else {
+                ""
+            };
+            if !status.is_empty() {
+                spans.push(Span::styled(status.to_string(), theme.subtext0));
+            }
+            Line::from(spans)
+        }
+        LayoutTier::Full => {
+            let mut spans = vec![Span::styled(truncate_label(&session.name, 25), style)];
+            if window_count > 0 {
+                spans.push(Span::styled(format!(" ({window_count}w)"), theme.subtext0));
+            }
             if let Some(port) = session.lace_port {
-                spans.push(Span::styled(format!(" ({port})"), theme.surface2_fg));
+                spans.push(Span::styled(format!(" :{port}"), theme.surface2_fg));
+            }
+            let status = if session.attached {
+                " attached"
+            } else {
+                ""
+            };
+            if !status.is_empty() {
+                spans.push(Span::styled(status.to_string(), theme.subtext0));
             }
             Line::from(spans)
         }
@@ -374,6 +516,32 @@ fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -
             theme.host_group_header,
         )),
     }
+}
+
+/// Truncates a path for display, keeping the last N characters with a leading "~" if truncated.
+fn truncate_path(path: &str, max_chars: usize) -> String {
+    // Replace $HOME prefix with ~.
+    let display_path = if let Ok(home) = std::env::var("HOME") {
+        if let Some(rest) = path.strip_prefix(&home) {
+            format!("~{rest}")
+        } else {
+            path.to_string()
+        }
+    } else {
+        path.to_string()
+    };
+
+    if display_path.chars().count() <= max_chars {
+        return display_path;
+    }
+    if max_chars <= 2 {
+        return "\u{2026}".to_string();
+    }
+    // Keep the tail of the path (most informative part).
+    let chars: Vec<char> = display_path.chars().collect();
+    let start = chars.len() - (max_chars - 1);
+    let tail: String = chars[start..].iter().collect();
+    format!("\u{2026}{tail}")
 }
 
 /// Truncates a label to a max character count, appending ellipsis if needed.
@@ -501,6 +669,83 @@ mod tests {
         assert_eq!(groups[1].name, "local");
     }
 
+    fn make_pane(pane_id: &str, session: &str, window: i32, top: u32, left: u32) -> Pane {
+        Pane {
+            pane_id: pane_id.to_string(),
+            session_name: session.to_string(),
+            window_index: window,
+            title: String::new(),
+            current_command: "bash".to_string(),
+            current_path: "/home".to_string(),
+            pane_pid: Some(1000),
+            active: false,
+            dead: false,
+            pane_width: Some(80),
+            pane_height: Some(24),
+            pane_left: Some(left),
+            pane_top: Some(top),
+            pane_index: None,
+            in_mode: false,
+        }
+    }
+
+    #[test]
+    fn test_spatial_sort_2x2_grid() {
+        let panes = vec![
+            make_pane("%3", "s", 0, 25, 80),
+            make_pane("%0", "s", 0, 0, 0),
+            make_pane("%2", "s", 0, 25, 0),
+            make_pane("%1", "s", 0, 0, 80),
+        ];
+        let sorted = panes_for_window("s", 0, &panes);
+        let ids: Vec<&str> = sorted.iter().map(|p| p.pane_id.as_str()).collect();
+        assert_eq!(ids, vec!["%0", "%1", "%2", "%3"]);
+    }
+
+    #[test]
+    fn test_spatial_sort_tall_left_stacked_right() {
+        let panes = vec![
+            make_pane("%2", "s", 0, 25, 80),
+            make_pane("%0", "s", 0, 0, 0),
+            make_pane("%1", "s", 0, 0, 80),
+        ];
+        let sorted = panes_for_window("s", 0, &panes);
+        let ids: Vec<&str> = sorted.iter().map(|p| p.pane_id.as_str()).collect();
+        assert_eq!(ids, vec!["%0", "%1", "%2"]);
+    }
+
+    #[test]
+    fn test_spatial_sort_horizontal_stacks() {
+        let panes = vec![
+            make_pane("%2", "s", 0, 33, 0),
+            make_pane("%0", "s", 0, 0, 0),
+            make_pane("%1", "s", 0, 16, 0),
+        ];
+        let sorted = panes_for_window("s", 0, &panes);
+        let ids: Vec<&str> = sorted.iter().map(|p| p.pane_id.as_str()).collect();
+        assert_eq!(ids, vec!["%0", "%1", "%2"]);
+    }
+
+    #[test]
+    fn test_spatial_sort_same_top_left_to_right() {
+        let panes = vec![
+            make_pane("%2", "s", 0, 0, 120),
+            make_pane("%0", "s", 0, 0, 0),
+            make_pane("%1", "s", 0, 0, 60),
+        ];
+        let sorted = panes_for_window("s", 0, &panes);
+        let ids: Vec<&str> = sorted.iter().map(|p| p.pane_id.as_str()).collect();
+        assert_eq!(ids, vec!["%0", "%1", "%2"]);
+    }
+
+    #[test]
+    fn test_spatial_sort_single_pane() {
+        let panes = vec![make_pane("%0", "s", 0, 0, 0)];
+        let sorted = panes_for_window("s", 0, &panes);
+        assert_eq!(sorted.len(), 1);
+        assert_eq!(sorted[0].pane_id, "%0");
+    }
+
     #[test]
     fn test_build_tree_self_filter_excludes_own_pane() {
         let snapshot = DbSnapshot {
@@ -517,6 +762,7 @@ mod tests {
                 window_index: 0,
                 name: "win".to_string(),
                 active: true,
+                layout: String::new(),
             }],
             panes: vec![
                 sprack_db::types::Pane {
@@ -529,6 +775,12 @@ mod tests {
                     pane_pid: Some(1234),
                     active: true,
                     dead: false,
+                    pane_width: Some(80),
+                    pane_height: Some(24),
+                    pane_left: Some(0),
+                    pane_top: Some(0),
+                    pane_index: Some(0),
+                    in_mode: false,
                 },
                 sprack_db::types::Pane {
                     pane_id: "%1".to_string(),
@@ -540,6 +792,12 @@ mod tests {
                     pane_pid: Some(1235),
                     active: false,
                     dead: false,
+                    pane_width: Some(80),
+                    pane_height: Some(24),
+                    pane_left: Some(80),
+                    pane_top: Some(0),
+                    pane_index: Some(1),
+                    in_mode: false,
                 },
             ],
             integrations: vec![],

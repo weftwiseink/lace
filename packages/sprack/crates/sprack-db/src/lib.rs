@@ -104,6 +104,7 @@ mod tests {
             window_index,
             name: format!("win-{window_index}"),
             active: window_index == 0,
+            layout: String::new(),
         }
     }
 
@@ -118,6 +119,12 @@ mod tests {
             pane_pid: Some(1234),
             active: true,
             dead: false,
+            pane_width: None,
+            pane_height: None,
+            pane_left: None,
+            pane_top: None,
+            pane_index: None,
+            in_mode: false,
         }
     }
 

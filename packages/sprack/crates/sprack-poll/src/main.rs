@@ -268,7 +268,7 @@ mod tests {
         conn
     }
 
-    /// Builds a tmux output line from field values.
+    /// Builds a 19-field tmux output line with sensible defaults for spatial fields.
     fn make_tmux_line(
         session_name: &str,
         session_attached: &str,
@@ -296,6 +296,13 @@ mod tests {
             pane_pid,
             pane_active,
             pane_dead,
+            "80",   // pane_width
+            "24",   // pane_height
+            "0",    // pane_left
+            "0",    // pane_top
+            "0",    // pane_index
+            "0",    // pane_in_mode
+            "",     // window_layout
         ]
         .join("||")
     }

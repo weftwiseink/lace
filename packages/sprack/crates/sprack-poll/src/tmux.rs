@@ -49,10 +49,17 @@ const TMUX_FORMAT: &str = "\
 #{pane_current_path}||\
 #{pane_pid}||\
 #{pane_active}||\
-#{pane_dead}";
+#{pane_dead}||\
+#{pane_width}||\
+#{pane_height}||\
+#{pane_left}||\
+#{pane_top}||\
+#{pane_index}||\
+#{pane_in_mode}||\
+#{window_layout}";
 
 /// Expected number of fields per line of tmux output.
-const EXPECTED_FIELD_COUNT: usize = 12;
+const EXPECTED_FIELD_COUNT: usize = 19;
 
 /// Runs a tmux command and returns stdout as a string.
 ///
@@ -116,6 +123,8 @@ pub struct TmuxWindow {
     pub name: String,
     pub active: bool,
     pub panes: Vec<TmuxPane>,
+    /// tmux layout string for this window.
+    pub layout: String,
 }
 
 /// A single tmux pane.
@@ -128,6 +137,18 @@ pub struct TmuxPane {
     pub pane_pid: u32,
     pub active: bool,
     pub dead: bool,
+    /// Pane width in columns.
+    pub pane_width: u32,
+    /// Pane height in rows.
+    pub pane_height: u32,
+    /// X coordinate of the pane's left edge.
+    pub pane_left: u32,
+    /// Y coordinate of the pane's top edge.
+    pub pane_top: u32,
+    /// Pane index within its window.
+    pub pane_index: u32,
+    /// Whether the pane is in copy/scroll mode.
+    pub in_mode: bool,
 }
 
 /// Parses raw `tmux list-panes -a -F` output into a hierarchical `TmuxSnapshot`.
@@ -241,6 +262,7 @@ pub fn to_db_types(
                 window_index: tmux_window.window_index as i32,
                 name: tmux_window.name.clone(),
                 active: tmux_window.active,
+                layout: tmux_window.layout.clone(),
             });
 
             for tmux_pane in &tmux_window.panes {
@@ -254,6 +276,12 @@ pub fn to_db_types(
                     pane_pid: Some(tmux_pane.pane_pid),
                     active: tmux_pane.active,
                     dead: tmux_pane.dead,
+                    pane_width: Some(tmux_pane.pane_width),
+                    pane_height: Some(tmux_pane.pane_height),
+                    pane_left: Some(tmux_pane.pane_left),
+                    pane_top: Some(tmux_pane.pane_top),
+                    pane_index: Some(tmux_pane.pane_index),
+                    in_mode: tmux_pane.in_mode,
                 });
             }
         }
@@ -278,6 +306,13 @@ struct ParsedLine {
     pane_pid: u32,
     pane_active: bool,
     pane_dead: bool,
+    pane_width: u32,
+    pane_height: u32,
+    pane_left: u32,
+    pane_top: u32,
+    pane_index: u32,
+    pane_in_mode: bool,
+    window_layout: String,
 }
 
 /// Parses a single `||`-delimited line into a `ParsedLine`.
@@ -302,6 +337,13 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
         pane_pid: fields[9].parse().ok()?,
         pane_active: fields[10] == "1",
         pane_dead: fields[11] == "1",
+        pane_width: fields[12].parse().ok()?,
+        pane_height: fields[13].parse().ok()?,
+        pane_left: fields[14].parse().ok()?,
+        pane_top: fields[15].parse().ok()?,
+        pane_index: fields[16].parse().ok()?,
+        pane_in_mode: fields[17] == "1",
+        window_layout: fields[18].to_string(),
     })
 }
 
@@ -344,6 +386,7 @@ fn build_snapshot(lines: Vec<ParsedLine>) -> TmuxSnapshot {
                 name: line.window_name,
                 active: line.window_active,
                 panes: Vec::new(),
+                layout: line.window_layout,
             });
             session.windows.last_mut().unwrap()
         };
@@ -356,6 +399,12 @@ fn build_snapshot(lines: Vec<ParsedLine>) -> TmuxSnapshot {
             pane_pid: line.pane_pid,
             active: line.pane_active,
             dead: line.pane_dead,
+            pane_width: line.pane_width,
+            pane_height: line.pane_height,
+            pane_left: line.pane_left,
+            pane_top: line.pane_top,
+            pane_index: line.pane_index,
+            in_mode: line.pane_in_mode,
         });
     }
 
@@ -366,7 +415,7 @@ fn build_snapshot(lines: Vec<ParsedLine>) -> TmuxSnapshot {
 mod tests {
     use super::*;
 
-    /// Helper: builds a single-pane tmux output line.
+    /// Helper: builds a 19-field tmux output line with sensible defaults for spatial fields.
     fn make_tmux_line(
         session_name: &str,
         session_attached: &str,
@@ -381,6 +430,51 @@ mod tests {
         pane_active: &str,
         pane_dead: &str,
     ) -> String {
+        make_tmux_line_full(
+            session_name,
+            session_attached,
+            window_index,
+            window_name,
+            window_active,
+            pane_id,
+            pane_title,
+            pane_command,
+            pane_path,
+            pane_pid,
+            pane_active,
+            pane_dead,
+            "80",
+            "24",
+            "0",
+            "0",
+            "0",
+            "0",
+            "",
+        )
+    }
+
+    /// Helper: builds a 19-field tmux output line with all fields specified.
+    fn make_tmux_line_full(
+        session_name: &str,
+        session_attached: &str,
+        window_index: &str,
+        window_name: &str,
+        window_active: &str,
+        pane_id: &str,
+        pane_title: &str,
+        pane_command: &str,
+        pane_path: &str,
+        pane_pid: &str,
+        pane_active: &str,
+        pane_dead: &str,
+        pane_width: &str,
+        pane_height: &str,
+        pane_left: &str,
+        pane_top: &str,
+        pane_index: &str,
+        pane_in_mode: &str,
+        window_layout: &str,
+    ) -> String {
         [
             session_name,
             session_attached,
@@ -394,6 +488,13 @@ mod tests {
             pane_pid,
             pane_active,
             pane_dead,
+            pane_width,
+            pane_height,
+            pane_left,
+            pane_top,
+            pane_index,
+            pane_in_mode,
+            window_layout,
         ]
         .join("||")
     }
@@ -601,7 +702,14 @@ mod tests {
                         pane_pid: 1234,
                         active: true,
                         dead: false,
+                        pane_width: 80,
+                        pane_height: 24,
+                        pane_left: 0,
+                        pane_top: 0,
+                        pane_index: 0,
+                        in_mode: false,
                     }],
+                    layout: "abc,80x24,0,0,0".to_string(),
                 }],
             }],
         };
@@ -630,6 +738,7 @@ mod tests {
         assert_eq!(windows[0].window_index, 0);
         assert_eq!(windows[0].name, "editor");
         assert!(windows[0].active);
+        assert_eq!(windows[0].layout, "abc,80x24,0,0,0");
 
         assert_eq!(panes.len(), 1);
         assert_eq!(panes[0].pane_id, "%0");
@@ -641,6 +750,12 @@ mod tests {
         assert_eq!(panes[0].pane_pid, Some(1234));
         assert!(panes[0].active);
         assert!(!panes[0].dead);
+        assert_eq!(panes[0].pane_width, Some(80));
+        assert_eq!(panes[0].pane_height, Some(24));
+        assert_eq!(panes[0].pane_left, Some(0));
+        assert_eq!(panes[0].pane_top, Some(0));
+        assert_eq!(panes[0].pane_index, Some(0));
+        assert!(!panes[0].in_mode);
     }
 
     #[test]
@@ -661,7 +776,14 @@ mod tests {
                         pane_pid: 9999,
                         active: true,
                         dead: false,
+                        pane_width: 120,
+                        pane_height: 40,
+                        pane_left: 0,
+                        pane_top: 0,
+                        pane_index: 0,
+                        in_mode: false,
                     }],
+                    layout: String::new(),
                 }],
             }],
         };

@@ -36,6 +36,8 @@ pub struct Window {
     pub name: String,
     /// Whether this is the currently active window in its session.
     pub active: bool,
+    /// tmux layout string (e.g., "34a1,159x48,0,0{79x48,0,0,0,79x48,80,0,1}").
+    pub layout: String,
 }
 
 /// A tmux pane within a window.
@@ -59,6 +61,18 @@ pub struct Pane {
     pub active: bool,
     /// Whether the pane's process has exited.
     pub dead: bool,
+    /// Pane width in columns.
+    pub pane_width: Option<u32>,
+    /// Pane height in rows.
+    pub pane_height: Option<u32>,
+    /// X coordinate of the pane's left edge.
+    pub pane_left: Option<u32>,
+    /// Y coordinate of the pane's top edge.
+    pub pane_top: Option<u32>,
+    /// Pane index within its window.
+    pub pane_index: Option<u32>,
+    /// Whether the pane is in copy/scroll mode.
+    pub in_mode: bool,
 }
 
 /// A process enrichment written by a summarizer.

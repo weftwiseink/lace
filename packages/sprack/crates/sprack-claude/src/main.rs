@@ -2,11 +2,15 @@
 //!
 //! Detects Claude Code instances running in tmux panes, reads their JSONL
 //! session files via efficient tail-seeking, and writes structured status
-//! to the shared SQLite process_integrations table. Resolves pane-to-session
-//! mappings by walking the Linux /proc filesystem from pane PIDs.
+//! to the shared SQLite process_integrations table.
+//!
+//! Local panes are resolved by walking the Linux /proc filesystem from pane PIDs.
+//! Container panes (lace devcontainer sessions) are resolved via the `~/.claude`
+//! bind mount using workspace prefix matching and mtime heuristics.
 
 mod jsonl;
 mod proc_walk;
+mod resolver;
 mod session;
 mod status;
 
@@ -70,12 +74,28 @@ fn run_poll_cycle(
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
 ) {
-    let claude_panes = find_claude_panes(db_connection);
+    let snapshot = match sprack_db::read::read_full_state(db_connection) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("sprack-claude: failed to read DB state: {error}");
+            return;
+        }
+    };
+
+    let candidate_panes = resolver::find_candidate_panes(&snapshot);
+    let lace_sessions = resolver::build_lace_session_map(&snapshot.sessions);
     let mut active_pane_ids: Vec<String> = Vec::new();
 
-    for pane in &claude_panes {
+    for pane in &candidate_panes {
         active_pane_ids.push(pane.pane_id.clone());
-        process_claude_pane(db_connection, pane, session_cache, claude_home);
+        let lace_session = lace_sessions.get(&pane.session_name);
+        process_claude_pane(
+            db_connection,
+            pane,
+            session_cache,
+            claude_home,
+            lace_session,
+        );
     }
 
     clean_stale_integrations(db_connection, &active_pane_ids);
@@ -84,29 +104,16 @@ fn run_poll_cycle(
     session_cache.retain(|pane_id, _| active_pane_ids.contains(pane_id));
 }
 
-/// Queries the database for panes whose current_command contains "claude".
-fn find_claude_panes(db_connection: &rusqlite::Connection) -> Vec<sprack_db::types::Pane> {
-    let snapshot = match sprack_db::read::read_full_state(db_connection) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            eprintln!("sprack-claude: failed to read DB state: {error}");
-            return Vec::new();
-        }
-    };
-
-    snapshot
-        .panes
-        .into_iter()
-        .filter(|pane| pane.current_command.contains("claude"))
-        .collect()
-}
-
 /// Processes a single Claude pane: resolve session, read entries, write status.
+///
+/// Dispatches to `LocalResolver` or `LaceContainerResolver` based on whether
+/// the pane's session has `lace_port` set.
 fn process_claude_pane(
     db_connection: &rusqlite::Connection,
     pane: &sprack_db::types::Pane,
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
+    lace_session: Option<&sprack_db::types::Session>,
 ) {
     // Check if we have a cached session and whether it's still valid.
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
@@ -114,8 +121,14 @@ fn process_claude_pane(
     if !is_cache_valid {
         session_cache.remove(&pane.pane_id);
 
-        // Resolve session file from /proc.
-        match resolve_session_for_pane(pane, claude_home) {
+        // Resolve session file using the appropriate resolver.
+        let resolved = if let Some(session) = lace_session {
+            resolver::resolve_container_pane(session, claude_home)
+        } else {
+            resolve_session_for_pane(pane, claude_home)
+        };
+
+        match resolved {
             Some(state) => {
                 session_cache.insert(pane.pane_id.clone(), state);
             }
@@ -168,9 +181,13 @@ fn process_claude_pane(
     write_integration_with_retry(db_connection, &pane.pane_id, &summary_json, &process_status);
 }
 
+/// Maximum age for a container session file to be considered "still active".
+/// Container panes have no PID to check, so staleness relies on file mtime.
+const CONTAINER_SESSION_MAX_AGE: Duration = Duration::from_secs(60);
+
 /// Checks whether the cached session state is still valid for a pane.
 fn is_session_cache_valid(
-    pane: &sprack_db::types::Pane,
+    _pane: &sprack_db::types::Pane,
     cached_state: Option<&SessionFileState>,
 ) -> bool {
     let state = match cached_state {
@@ -178,22 +195,34 @@ fn is_session_cache_valid(
         None => return false,
     };
 
-    // Check if the Claude process is still alive.
-    let proc_path = format!("/proc/{}", state.claude_pid);
-    if !std::path::Path::new(&proc_path).exists() {
-        return false;
-    }
-
-    // Check if pane PID changed.
-    if let Some(pane_pid) = pane.pane_pid {
-        // Verify the claude pid is still a descendant of this pane's pid.
-        // Simple check: the proc path exists (already checked above).
-        let _ = pane_pid;
-    }
-
     // Check if session file still exists.
     if !state.session_file.exists() {
         return false;
+    }
+
+    match &state.cache_key {
+        session::CacheKey::Pid(pid) => {
+            // Local pane: check if the Claude process is still alive.
+            let proc_path = format!("/proc/{pid}");
+            if !std::path::Path::new(&proc_path).exists() {
+                return false;
+            }
+        }
+        session::CacheKey::ContainerSession(_path) => {
+            // Container pane: check that the session file has been modified recently.
+            // No PID to check across PID namespace boundaries.
+            if let Ok(metadata) = std::fs::metadata(&state.session_file) {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.elapsed() {
+                        if elapsed > CONTAINER_SESSION_MAX_AGE {
+                            return false;
+                        }
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
     }
 
     true
@@ -216,7 +245,7 @@ fn resolve_session_for_pane(
     let session_file = session::find_session_file(&project_dir)?;
 
     Some(SessionFileState {
-        claude_pid,
+        cache_key: session::CacheKey::Pid(claude_pid),
         session_file,
         file_position: 0,
         last_entries: Vec::new(),

@@ -18,4 +18,8 @@ pub enum SprackDbError {
     /// WAL journal mode could not be activated on the database.
     #[error("WAL mode activation failed, got: {0}")]
     WalActivationFailed(String),
+
+    /// Database schema version is newer than this binary supports.
+    #[error("Unsupported schema version {0}: rebuild all sprack binaries")]
+    UnsupportedSchemaVersion(i32),
 }

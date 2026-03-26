@@ -13,6 +13,7 @@ import type { RunSubprocess } from "@/lib/subprocess";
 import { clearMetadataCache } from "@/lib/feature-metadata";
 import { deriveProjectId } from "@/lib/repo-clones";
 import { clearClassificationCache } from "@/lib/workspace-detector";
+import { resetPodmanCommandCache } from "@/lib/container-runtime";
 import {
   createBareRepoWorkspace,
 } from "../../__tests__/helpers/scenario-utils";
@@ -72,17 +73,18 @@ beforeEach(() => {
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
   clearClassificationCache();
+  resetPodmanCommandCache();
 
-  process.env.LACE_SETTINGS = join(
-    workspaceRoot,
-    ".config",
-    "lace",
-    "settings.json",
-  );
+  // Create an empty default settings so loadSettings() does not throw
+  const settingsDir = join(workspaceRoot, ".config", "lace");
+  mkdirSync(settingsDir, { recursive: true });
+  writeFileSync(join(settingsDir, "settings.json"), "{}", "utf-8");
+  process.env.LACE_SETTINGS = join(settingsDir, "settings.json");
 });
 
 afterEach(() => {
   clearMetadataCache(metadataCacheDir);
+  resetPodmanCommandCache();
   rmSync(workspaceRoot, { recursive: true, force: true });
   for (const dir of createdMountDirs) {
     rmSync(dir, { recursive: true, force: true });

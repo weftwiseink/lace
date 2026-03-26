@@ -16,6 +16,7 @@ import { clearMetadataCache } from "@/lib/feature-metadata";
 import type { MountAssignmentsFile } from "@/lib/mount-resolver";
 import { deriveProjectId } from "@/lib/repo-clones";
 import { clearClassificationCache } from "@/lib/workspace-detector";
+import { resetPodmanCommandCache } from "@/lib/container-runtime";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -139,18 +140,20 @@ beforeEach(() => {
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
   clearClassificationCache();
+  resetPodmanCommandCache();
 
-  // Set LACE_SETTINGS to point to our test settings location
-  process.env.LACE_SETTINGS = join(
-    workspaceRoot,
-    ".config",
-    "lace",
-    "settings.json",
-  );
+  // Set LACE_SETTINGS to point to our test settings location.
+  // Create an empty default so loadSettings() does not throw when
+  // tests do not call setupSettings() explicitly.
+  const settingsDir = join(workspaceRoot, ".config", "lace");
+  mkdirSync(settingsDir, { recursive: true });
+  writeFileSync(join(settingsDir, "settings.json"), "{}", "utf-8");
+  process.env.LACE_SETTINGS = join(settingsDir, "settings.json");
 });
 
 afterEach(() => {
   clearMetadataCache(metadataCacheDir);
+  resetPodmanCommandCache();
   rmSync(workspaceRoot, { recursive: true, force: true });
   // Clean up any auto-created default mount directories under ~/.config/lace
   for (const dir of createdMountDirs) {

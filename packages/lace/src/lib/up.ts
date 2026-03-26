@@ -60,18 +60,19 @@ import {
   writeRuntimeFingerprint,
   deleteRuntimeFingerprint,
 } from "./config-drift";
+import { getPodmanCommand } from "./container-runtime";
 
 /**
- * Query Docker for host ports held by this workspace's running container.
+ * Query the container runtime for host ports held by this workspace's running container.
  * Returns a Set of host port numbers, or an empty set if no container is
- * running or Docker is unavailable.
+ * running or the runtime is unavailable.
  */
 export function getContainerHostPorts(
   workspaceFolder: string,
   subprocess: RunSubprocess,
 ): Set<number> {
   // Find running container by devcontainer label
-  const psResult = subprocess("docker", [
+  const psResult = subprocess(getPodmanCommand(), [
     "ps", "-q",
     "--filter", `label=devcontainer.local_folder=${workspaceFolder}`,
   ]);
@@ -79,7 +80,7 @@ export function getContainerHostPorts(
   if (!containerId || psResult.exitCode !== 0) return new Set();
 
   // Get port bindings
-  const portResult = subprocess("docker", ["port", containerId]);
+  const portResult = subprocess(getPodmanCommand(), ["port", containerId]);
   if (portResult.exitCode !== 0) return new Set();
 
   // Parse lines like "2222/tcp -> 0.0.0.0:22425"
@@ -1206,6 +1207,7 @@ function runDevcontainerUp(
     }
   }
 
+  args.push("--docker-path", getPodmanCommand());
   args.push("--workspace-folder", workspaceFolder);
   args.push(...devcontainerArgs);
 

@@ -2,15 +2,16 @@
 import { defineCommand } from "citty";
 import { runUp, type UpOptions } from "@/lib/up";
 import { runSubprocess as defaultRunSubprocess } from "@/lib/subprocess";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 /**
- * Quick check: is a Docker container running for this workspace folder?
+ * Quick check: is a container running for this workspace folder?
  * Used to annotate failure results for callers (e.g., lace-into) that need
  * to decide whether to retry discovery.
  */
 function isContainerRunning(workspaceFolder: string): boolean {
   try {
-    const result = defaultRunSubprocess("docker", [
+    const result = defaultRunSubprocess(getPodmanCommand(), [
       "ps",
       "--filter", `label=devcontainer.local_folder=${workspaceFolder}`,
       "--format", "{{.ID}}",

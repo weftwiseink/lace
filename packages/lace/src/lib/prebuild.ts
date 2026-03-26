@@ -27,6 +27,7 @@ import {
 } from "@/lib/metadata";
 import { mergeLockFile, extractPrebuiltEntries, writeLockFile } from "@/lib/lockfile";
 import { runSubprocess, type RunSubprocess } from "@/lib/subprocess";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 export interface PrebuildOptions {
   dryRun?: boolean;
@@ -208,8 +209,8 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     !options.dryRun &&
     !contextsChanged(join(prebuildDir, ".devcontainer"), tempDockerfile, tempDevcontainerJson)
   ) {
-    // Cache is fresh — but verify the Docker image actually exists before skipping.
-    const imageCheck = run("docker", ["image", "inspect", "--format", "{{.Id}}", prebuildTag]);
+    // Cache is fresh — but verify the image actually exists locally before skipping.
+    const imageCheck = run(getPodmanCommand(), ["image", "inspect", "--format", "{{.Id}}", prebuildTag]);
     const imageExists = imageCheck.exitCode === 0;
 
     if (!imageExists) {
@@ -318,6 +319,8 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     join(prebuildConfigDir, "devcontainer.json"),
     "--image-name",
     prebuildTag,
+    "--docker-path",
+    getPodmanCommand(),
   ];
 
   if (options.force) {

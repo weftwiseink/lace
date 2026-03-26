@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, statSync, readdirSync } from "node:fs";
 import { join, resolve, dirname, basename, isAbsolute, sep } from "node:path";
 import type { RunSubprocess } from "./subprocess";
+import { getPodmanCommand } from "./container-runtime";
 
 // ── Types ──
 
@@ -492,7 +493,7 @@ export function compareVersions(a: string, b: string): number {
  * Verify that a running container's git version supports all detected
  * repository extensions.
  *
- * Runs `docker exec <containerName> git --version` to get the actual
+ * Runs `<runtime> exec <containerName> git --version` to get the actual
  * version, then compares against GIT_EXTENSION_MIN_VERSIONS.
  *
  * Extensions not in the minimum-versions map produce warnings but do
@@ -503,7 +504,7 @@ export function verifyContainerGitVersion(
   detectedExtensions: Record<string, string>,
   subprocess: RunSubprocess,
 ): ContainerGitVerificationResult {
-  const versionResult = subprocess("docker", [
+  const versionResult = subprocess(getPodmanCommand(), [
     "exec", containerName, "git", "--version",
   ]);
 

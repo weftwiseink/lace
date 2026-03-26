@@ -13,6 +13,7 @@ import { runUp } from "@/lib/up";
 import type { RunSubprocess } from "@/lib/subprocess";
 import { clearMetadataCache, type FeatureMetadata } from "@/lib/feature-metadata";
 import { clearClassificationCache } from "@/lib/workspace-detector";
+import { resetPodmanCommandCache } from "@/lib/container-runtime";
 
 let workspaceRoot: string;
 let devcontainerDir: string;
@@ -175,18 +176,20 @@ beforeEach(() => {
   mkdirSync(workspaceRoot, { recursive: true });
   clearMetadataCache(metadataCacheDir);
   clearClassificationCache();
+  resetPodmanCommandCache();
 
-  // Set LACE_SETTINGS to point to our test settings location
-  process.env.LACE_SETTINGS = join(
-    workspaceRoot,
-    ".config",
-    "lace",
-    "settings.json",
-  );
+  // Set LACE_SETTINGS to point to our test settings location.
+  // Create an empty default so loadSettings() does not throw when
+  // tests do not call setupSettings() explicitly.
+  const settingsDir = join(workspaceRoot, ".config", "lace");
+  mkdirSync(settingsDir, { recursive: true });
+  writeFileSync(join(settingsDir, "settings.json"), "{}", "utf-8");
+  process.env.LACE_SETTINGS = join(settingsDir, "settings.json");
 });
 
 afterEach(() => {
   clearMetadataCache(metadataCacheDir);
+  resetPodmanCommandCache();
   rmSync(workspaceRoot, { recursive: true, force: true });
   delete process.env.LACE_SETTINGS;
 });
@@ -2368,7 +2371,7 @@ function createVerificationMock(
 
     // Handle docker exec <container> git --version
     if (
-      command === "docker" &&
+      command === "podman" &&
       args[0] === "exec" &&
       args.includes("git") &&
       args.includes("--version")
@@ -2498,7 +2501,7 @@ describe("lace up: T12 -- no extensions skips verification", () => {
     // No docker exec call should have been made
     expect(
       mockCalls.some(
-        (c) => c.command === "docker" && c.args[0] === "exec",
+        (c) => c.command === "podman" && c.args[0] === "exec",
       ),
     ).toBe(false);
   });
@@ -2534,7 +2537,7 @@ describe("lace up: T13 -- non-prebuild config with extensions runs verification"
     // Verify docker exec was called
     expect(
       mockCalls.some(
-        (c) => c.command === "docker" && c.args[0] === "exec",
+        (c) => c.command === "podman" && c.args[0] === "exec",
       ),
     ).toBe(true);
   });
@@ -2569,7 +2572,7 @@ describe("lace up: T13b -- custom --name in runArgs targets correct container", 
     expect(result.phases.containerVerification?.exitCode).toBe(0);
     // Verify docker exec was called with "my-custom" as the container name
     const dockerExecCall = mockCalls.find(
-      (c) => c.command === "docker" && c.args[0] === "exec",
+      (c) => c.command === "podman" && c.args[0] === "exec",
     );
     expect(dockerExecCall).toBeDefined();
     expect(dockerExecCall!.args[1]).toBe("my-custom");

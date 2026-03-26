@@ -58,3 +58,28 @@ Only `lace-into` writes metadata to tmux.
   Both levels need updating when the port changes.
 - **Bidirectional sync**: If sprack detects staleness, it could write corrected metadata back to tmux options, or it could invalidate/remove stale entries so `lace-split` fails fast with a clear message.
 - **Graceful degradation**: If the container is down entirely (not just port-changed), the split should fail with a clear message, not silently create a dead pane.
+
+## `@lace_workspace` Flakiness
+
+A related but distinct failure mode: the `lace` tmux session sometimes has `@lace_port` set but `@lace_workspace` is empty.
+This causes sprack-claude's `LaceContainerResolver` to fail silently: `resolve()` returns `None` on the very first line (`self.session.lace_workspace.as_deref()?`), and the convenience function `resolve_container_pane()` does the same.
+The pane appears as a valid lace session candidate (because `lace_port` is set), but resolution produces "no session file found" with no error or log.
+
+This is a different category from port staleness: the metadata is not *stale*, it is *incomplete*.
+The likely root cause is a race condition or ordering issue in `lace-into` where `@lace_port` is set before `@lace_workspace`, or `@lace_workspace` fails to be set at all due to an early exit or error in the connection flow.
+
+### Impact on Sprack
+
+- `find_candidate_panes()` filters on `lace_port.is_some()`, so the pane is included as a candidate.
+- `resolve_container_pane()` immediately returns `None` due to the missing workspace.
+- The pane is silently dropped from session resolution with no diagnostic output.
+- From the user's perspective, the container's Claude session simply does not appear in sprack.
+
+### Considerations
+
+- **Validation at ingest**: sprack-poll could log a warning when `lace_port` is set but `lace_workspace` is empty, making the inconsistency visible.
+- **Defensive filtering**: `find_candidate_panes()` could require *both* `lace_port` and `lace_workspace` to be `Some`, preventing silent downstream failures.
+- **Root cause in lace-into**: The fix may belong in `lace-into` itself, ensuring all three metadata fields are set atomically or rolled back together.
+- **Retry/backfill**: sprack-poll could re-query lace options for sessions where `lace_port` is set but `lace_workspace` is missing, catching transient races on the next poll cycle.
+
+This issue should be addressed alongside port staleness, as both represent incomplete or incorrect tmux metadata causing silent resolution failures.

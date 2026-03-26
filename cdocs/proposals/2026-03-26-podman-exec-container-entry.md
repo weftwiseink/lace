@@ -5,13 +5,13 @@ first_authored:
 task_list: lace/podman-migration
 type: proposal
 state: live
-status: wip
+status: implementation_ready
 tags: [architecture, podman, ssh, migration, lace_into]
 last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6-20250725"
-  at: 2026-03-26T17:30:00-07:00
-  round: 2
+  status: accepted
+  by: "@mjr"
+  at: 2026-03-26T14:30:00-07:00
+  round: 3
 ---
 
 # Podman Exec Container Entry: SSH Replacement for lace Entry Tooling

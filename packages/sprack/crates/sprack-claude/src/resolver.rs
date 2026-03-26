@@ -91,6 +91,10 @@ impl PaneResolver for LocalResolver {
             session_name: resolved.custom_title,
             hook_transcript_path: None,
             hook_session_id: None,
+            git_dir: None,
+            git_head_mtime: None,
+            git_branch: None,
+            git_commit_short: None,
         })
     }
 }
@@ -127,6 +131,10 @@ impl<'a> PaneResolver for LaceContainerResolver<'a> {
             session_name: None,
             hook_transcript_path: None,
             hook_session_id: None,
+            git_dir: None,
+            git_head_mtime: None,
+            git_branch: None,
+            git_commit_short: None,
         })
     }
 }
@@ -156,6 +164,10 @@ pub fn resolve_container_pane(
         session_name: None,
         hook_transcript_path: None,
         hook_session_id: None,
+        git_dir: None,
+        git_head_mtime: None,
+        git_branch: None,
+        git_commit_short: None,
     })
 }
 

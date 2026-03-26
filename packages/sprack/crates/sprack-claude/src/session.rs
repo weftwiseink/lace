@@ -84,6 +84,14 @@ pub struct SessionFileState {
     /// Used to locate the correct event file via `find_event_file_by_session_id`
     /// instead of the cwd-based `find_event_file` scan.
     pub hook_session_id: Option<String>,
+    /// Resolved `.git` directory path (avoids re-walking parents each cycle).
+    pub git_dir: Option<std::path::PathBuf>,
+    /// Last observed mtime of `.git/HEAD` for cache invalidation.
+    pub git_head_mtime: Option<std::time::SystemTime>,
+    /// Cached branch name from `.git/HEAD`.
+    pub git_branch: Option<String>,
+    /// Cached short commit hash (7 characters).
+    pub git_commit_short: Option<String>,
 }
 
 /// Result of resolving a session file: the path and optional user-set session name.
@@ -353,6 +361,10 @@ mod tests {
             session_name: None,
             hook_transcript_path: None,
             hook_session_id: None,
+            git_dir: None,
+            git_head_mtime: None,
+            git_branch: None,
+            git_commit_short: None,
         };
 
         assert!(state.hook_transcript_path.is_none());
@@ -377,6 +389,10 @@ mod tests {
             session_name: None,
             hook_transcript_path: None,
             hook_session_id: None,
+            git_dir: None,
+            git_head_mtime: None,
+            git_branch: None,
+            git_commit_short: None,
         };
 
         // Simulate receiving a SessionStart hook event with a different transcript_path.

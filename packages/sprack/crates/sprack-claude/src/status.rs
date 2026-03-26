@@ -63,6 +63,13 @@ pub struct ClaudeSummary {
     /// Context window usage trend: "rising", "falling", or "stable".
     #[serde(default)]
     pub context_trend: Option<String>,
+    /// Current git branch name (e.g., "feat/inline-summaries").
+    /// "HEAD" when detached.
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    /// Short commit hash (e.g., "a1b2c3d").
+    #[serde(default)]
+    pub git_commit_short: Option<String>,
 }
 
 /// A task entry from the Claude Code task list.
@@ -305,6 +312,8 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
         assistant_turns: None,
         tool_counts: None,
         context_trend: None,
+        git_branch: None,
+        git_commit_short: None,
     }
 }
 
@@ -520,6 +529,8 @@ mod tests {
             assistant_turns: None,
             tool_counts: None,
             context_trend: None,
+            git_branch: None,
+            git_commit_short: None,
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();

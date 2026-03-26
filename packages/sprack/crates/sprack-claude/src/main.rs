@@ -10,6 +10,7 @@
 
 mod cache;
 mod events;
+mod git;
 mod jsonl;
 mod proc_walk;
 mod resolver;
@@ -332,6 +333,12 @@ fn process_claude_pane(
         }
     }
 
+    // Resolve git state for local panes using pane cwd.
+    // Only attempt for local panes (PID-keyed cache entries).
+    if matches!(session_state.cache_key, session::CacheKey::Pid(_)) {
+        resolve_git_state(session_state, &pane.current_path, &mut summary);
+    }
+
     let process_status = status::summary_to_process_status(&summary);
     let summary_json = match serde_json::to_string(&summary) {
         Ok(json) => json,
@@ -417,7 +424,59 @@ fn resolve_session_for_pane(
         session_name: resolved.custom_title,
         hook_transcript_path: None,
         hook_session_id: None,
+        git_dir: None,
+        git_head_mtime: None,
+        git_branch: None,
+        git_commit_short: None,
     })
+}
+
+/// Resolves git state for a pane and populates the summary fields.
+///
+/// Uses mtime-based caching: only re-reads `.git/HEAD` when its mtime changes.
+/// The git_dir is resolved once (on first call or when None) and cached on
+/// `SessionFileState` to avoid re-walking parent directories each cycle.
+fn resolve_git_state(
+    session_state: &mut SessionFileState,
+    pane_cwd: &str,
+    summary: &mut ClaudeSummary,
+) {
+    let cwd = std::path::Path::new(pane_cwd);
+
+    // Resolve git_dir once if not cached.
+    if session_state.git_dir.is_none() {
+        session_state.git_dir = git::resolve_git_dir(cwd);
+    }
+
+    let git_dir = match &session_state.git_dir {
+        Some(dir) => dir.clone(),
+        None => return,
+    };
+
+    // Check HEAD mtime to avoid re-reading unchanged state.
+    let head_path = git_dir.join("HEAD");
+    let current_mtime = std::fs::metadata(&head_path)
+        .and_then(|m| m.modified())
+        .ok();
+
+    let needs_refresh = match (&session_state.git_head_mtime, &current_mtime) {
+        (Some(cached), Some(current)) => cached != current,
+        (None, Some(_)) => true,
+        _ => false,
+    };
+
+    if needs_refresh {
+        session_state.git_head_mtime = current_mtime;
+        session_state.git_branch = git::read_git_branch(&git_dir);
+        session_state.git_commit_short = session_state
+            .git_branch
+            .as_deref()
+            .and_then(|branch| git::read_commit_short(&git_dir, branch));
+    }
+
+    // Populate summary from cached git state.
+    summary.git_branch = session_state.git_branch.clone();
+    summary.git_commit_short = session_state.git_commit_short.clone();
 }
 
 /// Writes an integration with a single retry on failure.
@@ -473,6 +532,8 @@ fn write_error_integration(
         assistant_turns: None,
         tool_counts: None,
         context_trend: None,
+        git_branch: None,
+        git_commit_short: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

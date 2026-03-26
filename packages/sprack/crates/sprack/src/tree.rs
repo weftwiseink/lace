@@ -54,6 +54,10 @@ pub(crate) struct ClaudeSummary {
     pub(crate) tool_counts: Option<Vec<(String, u32)>>,
     #[serde(default)]
     pub(crate) context_trend: Option<String>,
+    #[serde(default)]
+    pub(crate) git_branch: Option<String>,
+    #[serde(default)]
+    pub(crate) git_commit_short: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -664,8 +668,9 @@ fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -
 ///
 /// Line 1: process/session [status]
 /// Line 2: model | tokens | subagents
-/// Line 3: session_purpose (git context comes in Phase 2)
-/// Line 4: Tasks: done/total done task_markers
+/// Line 3: on {branch}@{commit} (git context, Wide/Full only)
+/// Line 4: session_purpose
+/// Line 5: Tasks: done/total done task_markers
 fn format_rich_widget(
     _pane: &Pane,
     integrations: &[&Integration],
@@ -744,7 +749,15 @@ fn format_rich_widget(
         }
     }
 
-    // Line 3: session purpose (git context line will be added in Phase 2).
+    // Git context line: "on {branch}@{commit}" at Wide/Full tiers.
+    if let (Some(branch), Some(commit)) = (&summary.git_branch, &summary.git_commit_short) {
+        lines.push(Line::from(Span::styled(
+            format!("  on {branch}@{commit}"),
+            theme.subtext0,
+        )));
+    }
+
+    // Session purpose line.
     if let Some(purpose) = &summary.session_purpose {
         let purpose_display = truncate_label(purpose, 50);
         lines.push(Line::from(Span::styled(

@@ -584,6 +584,8 @@ mod tests {
             assistant_turns: None,
             tool_counts: None,
             context_trend: None,
+            git_branch: None,
+            git_commit_short: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -620,6 +622,8 @@ mod tests {
             assistant_turns: None,
             tool_counts: None,
             context_trend: None,
+            git_branch: None,
+            git_commit_short: None,
         };
 
         merge_hook_events(&mut summary, &events);

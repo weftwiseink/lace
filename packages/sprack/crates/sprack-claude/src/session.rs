@@ -92,6 +92,10 @@ pub struct SessionFileState {
     pub git_branch: Option<String>,
     /// Cached short commit hash (7 characters).
     pub git_commit_short: Option<String>,
+    /// Last observed mtime of the `worktrees/` directory for cache invalidation.
+    pub git_worktrees_mtime: Option<std::time::SystemTime>,
+    /// Cached worktree branch names (other branches, excluding current).
+    pub git_worktree_branches: Option<Vec<String>>,
 }
 
 /// Result of resolving a session file: the path and optional user-set session name.
@@ -365,6 +369,8 @@ mod tests {
             git_head_mtime: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktrees_mtime: None,
+            git_worktree_branches: None,
         };
 
         assert!(state.hook_transcript_path.is_none());
@@ -393,6 +399,8 @@ mod tests {
             git_head_mtime: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktrees_mtime: None,
+            git_worktree_branches: None,
         };
 
         // Simulate receiving a SessionStart hook event with a different transcript_path.

@@ -425,6 +425,8 @@ fn resolve_session_for_pane(
         git_head_mtime: None,
         git_branch: None,
         git_commit_short: None,
+        git_worktrees_mtime: None,
+        git_worktree_branches: None,
     })
 }
 
@@ -433,6 +435,8 @@ fn resolve_session_for_pane(
 /// Uses mtime-based caching: only re-reads `.git/HEAD` when its mtime changes.
 /// The git_dir is resolved once (on first call or when None) and cached on
 /// `SessionFileState` to avoid re-walking parent directories each cycle.
+///
+/// Worktree enumeration uses a separate mtime cache on the `worktrees/` directory.
 fn resolve_git_state(
     session_state: &mut SessionFileState,
     pane_cwd: &str,
@@ -471,9 +475,35 @@ fn resolve_git_state(
             .and_then(|branch| git::read_commit_short(&git_dir, branch));
     }
 
+    // Enumerate worktrees with mtime-based caching on the worktrees directory.
+    if let Some(ref branch) = session_state.git_branch {
+        let worktrees_dir = git::worktrees_dir_path(&git_dir);
+        let wt_mtime = worktrees_dir
+            .as_ref()
+            .and_then(|d| std::fs::metadata(d).and_then(|m| m.modified()).ok());
+
+        let wt_needs_refresh = match (&session_state.git_worktrees_mtime, &wt_mtime) {
+            (Some(cached), Some(current)) => cached != current,
+            (None, Some(_)) => true,
+            (Some(_), None) => true, // Directory disappeared: clear cache.
+            (None, None) => false,
+        };
+
+        if wt_needs_refresh {
+            session_state.git_worktrees_mtime = wt_mtime;
+            let branches = git::enumerate_worktrees(&git_dir, branch);
+            session_state.git_worktree_branches = if branches.is_empty() {
+                None
+            } else {
+                Some(branches)
+            };
+        }
+    }
+
     // Populate summary from cached git state.
     summary.git_branch = session_state.git_branch.clone();
     summary.git_commit_short = session_state.git_commit_short.clone();
+    summary.git_worktree_branches = session_state.git_worktree_branches.clone();
 }
 
 /// Writes an integration with a single retry on failure.
@@ -531,6 +561,7 @@ fn write_error_integration(
         context_trend: None,
         git_branch: None,
         git_commit_short: None,
+        git_worktree_branches: None,
     };
 
     let summary_json = match serde_json::to_string(&summary) {

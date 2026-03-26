@@ -640,6 +640,7 @@ mod tests {
             context_trend: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktree_branches: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -678,6 +679,7 @@ mod tests {
             context_trend: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktree_branches: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -746,6 +748,7 @@ mod tests {
             context_trend: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktree_branches: None,
         };
 
         merge_hook_events(&mut summary, &events);
@@ -803,6 +806,7 @@ mod tests {
             context_trend: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktree_branches: None,
         };
 
         merge_hook_events(&mut summary, &events);

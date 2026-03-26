@@ -70,6 +70,9 @@ pub struct ClaudeSummary {
     /// Short commit hash (e.g., "a1b2c3d").
     #[serde(default)]
     pub git_commit_short: Option<String>,
+    /// Other worktree branch names (excluding the current branch and detached HEADs).
+    #[serde(default)]
+    pub git_worktree_branches: Option<Vec<String>>,
 }
 
 /// A task entry from the Claude Code task list.
@@ -331,6 +334,7 @@ pub fn build_summary(entries: &[JsonlEntry], custom_title: Option<&str>) -> Clau
         context_trend: None,
         git_branch: None,
         git_commit_short: None,
+        git_worktree_branches: None,
     }
 }
 
@@ -548,6 +552,7 @@ mod tests {
             context_trend: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktree_branches: None,
         };
 
         let json_string = serde_json::to_string(&summary).unwrap();

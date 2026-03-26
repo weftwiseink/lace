@@ -122,6 +122,75 @@ pub fn read_commit_short(git_dir: &Path, branch: &str) -> Option<String> {
     None
 }
 
+/// Enumerates other worktree branches for a bare repo with linked worktrees.
+///
+/// For a worktree gitdir like `{bare_repo}/worktrees/{name}`, the bare repo root
+/// is `gitdir.parent().parent()`. For a normal `.git` directory, the worktrees
+/// dir is `git_dir.join("worktrees")`.
+///
+/// Reads each subdirectory in `worktrees/`, extracts the branch name from its
+/// `HEAD` file, and filters out the current branch and detached HEADs.
+/// Does not include the bare repo's own HEAD (it is not a linked worktree).
+pub fn enumerate_worktrees(git_dir: &Path, current_branch: &str) -> Vec<String> {
+    let worktrees_dir = find_worktrees_dir(git_dir);
+    let worktrees_dir = match worktrees_dir {
+        Some(dir) if dir.is_dir() => dir,
+        _ => return Vec::new(),
+    };
+
+    let read_dir = match std::fs::read_dir(&worktrees_dir) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut branches: Vec<String> = read_dir
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let head_path = entry.path().join("HEAD");
+            let content = std::fs::read_to_string(&head_path).ok()?;
+            let trimmed = content.trim();
+            // Only include symbolic refs (branches), skip detached HEADs.
+            let branch = trimmed.strip_prefix("ref: refs/heads/")?;
+            Some(branch.to_string())
+        })
+        .filter(|branch| branch != current_branch)
+        .collect();
+
+    branches.sort();
+    branches
+}
+
+/// Returns the path to the `worktrees/` directory for a given git dir, if it exists.
+///
+/// Public wrapper for `find_worktrees_dir` used by `main.rs` for mtime caching.
+pub fn worktrees_dir_path(git_dir: &Path) -> Option<PathBuf> {
+    find_worktrees_dir(git_dir)
+}
+
+/// Locates the `worktrees/` directory for a given git dir.
+///
+/// For a worktree gitdir (e.g., `{bare_repo}/worktrees/{name}`), the worktrees
+/// directory is the parent: `{bare_repo}/worktrees/`.
+/// For a normal `.git` directory, it is `{git_dir}/worktrees/`.
+fn find_worktrees_dir(git_dir: &Path) -> Option<PathBuf> {
+    // Check if this git_dir is itself inside a worktrees directory.
+    // Pattern: {bare_repo}/worktrees/{name} -> parent is {bare_repo}/worktrees.
+    if let Some(parent) = git_dir.parent() {
+        if parent.file_name().and_then(|n| n.to_str()) == Some("worktrees") {
+            return Some(parent.to_path_buf());
+        }
+    }
+
+    // Normal .git directory: worktrees are at git_dir/worktrees.
+    let worktrees = git_dir.join("worktrees");
+    if worktrees.is_dir() {
+        Some(worktrees)
+    } else {
+        None
+    }
+}
+
 /// Attempts to find a working directory from a git dir for subprocess fallback.
 ///
 /// For a normal `.git` directory, the working dir is the parent.
@@ -392,5 +461,138 @@ mod tests {
         // In test env, git subprocess may or may not work. Either None or a valid short hash.
         // We primarily test that it doesn't panic.
         assert!(commit.is_none() || commit.as_ref().unwrap().len() >= 7);
+    }
+
+    #[test]
+    fn enumerate_worktrees_normal_repo_no_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("project");
+        create_mock_repo(&repo_dir, "main", "abcdef1234567890abcdef1234567890abcdef12");
+
+        let git_dir = repo_dir.join(".git");
+        let result = enumerate_worktrees(&git_dir, "main");
+        assert!(result.is_empty(), "normal repo without worktrees should return empty");
+    }
+
+    #[test]
+    fn enumerate_worktrees_bare_repo_with_linked_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare_dir = tmp.path().join("bare.git");
+        std::fs::create_dir_all(&bare_dir).unwrap();
+
+        // Create three linked worktrees in the bare repo.
+        let wt_main = tmp.path().join("wt-main");
+        let wt_feat = tmp.path().join("wt-feat");
+        let wt_fix = tmp.path().join("wt-fix");
+
+        create_mock_worktree(
+            &bare_dir, &wt_main, "main", "main",
+            "aaaaaaa234567890abcdef1234567890abcdef12",
+        );
+        create_mock_worktree(
+            &bare_dir, &wt_feat, "feat", "feat/inline-summaries",
+            "bbbbbbb234567890abcdef1234567890abcdef12",
+        );
+        create_mock_worktree(
+            &bare_dir, &wt_fix, "fix", "fix/hotfix",
+            "ccccccc234567890abcdef1234567890abcdef12",
+        );
+
+        // Resolve from the "main" worktree's gitdir.
+        let main_gitdir = bare_dir.join("worktrees").join("main");
+        let result = enumerate_worktrees(&main_gitdir, "main");
+
+        assert_eq!(result.len(), 2, "should return 2 other branches");
+        assert!(result.contains(&"feat/inline-summaries".to_string()));
+        assert!(result.contains(&"fix/hotfix".to_string()));
+        assert!(!result.contains(&"main".to_string()), "current branch excluded");
+    }
+
+    #[test]
+    fn enumerate_worktrees_excludes_detached_head() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare_dir = tmp.path().join("bare.git");
+        std::fs::create_dir_all(&bare_dir).unwrap();
+
+        // Create a worktree on a branch and one with detached HEAD.
+        let wt_main = tmp.path().join("wt-main");
+        let wt_detached = tmp.path().join("wt-detached");
+
+        create_mock_worktree(
+            &bare_dir, &wt_main, "main", "main",
+            "aaaaaaa234567890abcdef1234567890abcdef12",
+        );
+
+        // Create detached worktree manually (raw SHA in HEAD instead of ref).
+        let detached_gitdir = bare_dir.join("worktrees").join("detached");
+        std::fs::create_dir_all(&detached_gitdir).unwrap();
+        std::fs::write(
+            detached_gitdir.join("HEAD"),
+            "ddddddd234567890abcdef1234567890abcdef12\n",
+        ).unwrap();
+        std::fs::write(
+            detached_gitdir.join("gitdir"),
+            wt_detached.join(".git").to_str().unwrap(),
+        ).unwrap();
+        std::fs::create_dir_all(&wt_detached).unwrap();
+        std::fs::write(
+            wt_detached.join(".git"),
+            format!("gitdir: {}", detached_gitdir.to_str().unwrap()),
+        ).unwrap();
+
+        let main_gitdir = bare_dir.join("worktrees").join("main");
+        let result = enumerate_worktrees(&main_gitdir, "main");
+
+        assert!(result.is_empty(), "detached HEAD worktree should be excluded");
+    }
+
+    #[test]
+    fn enumerate_worktrees_from_normal_git_dir_with_worktrees() {
+        // Test the case where a normal .git directory has a worktrees/ subdirectory.
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("project");
+        create_mock_repo(&repo_dir, "main", "abcdef1234567890abcdef1234567890abcdef12");
+
+        let git_dir = repo_dir.join(".git");
+
+        // Manually create a worktrees directory inside .git.
+        let wt_dir = git_dir.join("worktrees").join("feature");
+        std::fs::create_dir_all(&wt_dir).unwrap();
+        std::fs::write(
+            wt_dir.join("HEAD"),
+            "ref: refs/heads/feat/branch\n",
+        ).unwrap();
+
+        let result = enumerate_worktrees(&git_dir, "main");
+        assert_eq!(result, vec!["feat/branch".to_string()]);
+    }
+
+    #[test]
+    fn worktrees_dir_path_returns_none_for_normal_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_dir = tmp.path().join("project");
+        create_mock_repo(&repo_dir, "main", "abcdef1234567890abcdef1234567890abcdef12");
+
+        let git_dir = repo_dir.join(".git");
+        let result = worktrees_dir_path(&git_dir);
+        assert!(result.is_none(), "no worktrees dir in normal repo");
+    }
+
+    #[test]
+    fn worktrees_dir_path_returns_some_for_bare_repo_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare_dir = tmp.path().join("bare.git");
+        let wt_main = tmp.path().join("wt-main");
+
+        std::fs::create_dir_all(&bare_dir).unwrap();
+        create_mock_worktree(
+            &bare_dir, &wt_main, "main", "main",
+            "aaaaaaa234567890abcdef1234567890abcdef12",
+        );
+
+        let main_gitdir = bare_dir.join("worktrees").join("main");
+        let result = worktrees_dir_path(&main_gitdir);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("worktrees"));
     }
 }

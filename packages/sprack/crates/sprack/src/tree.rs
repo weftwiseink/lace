@@ -58,6 +58,8 @@ pub(crate) struct ClaudeSummary {
     pub(crate) git_branch: Option<String>,
     #[serde(default)]
     pub(crate) git_commit_short: Option<String>,
+    #[serde(default)]
+    pub(crate) git_worktree_branches: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -750,11 +752,17 @@ fn format_rich_widget(
     }
 
     // Git context line: "on {branch}@{commit}" at Wide/Full tiers.
+    // Full tier appends worktree branches: "on {branch}@{commit} (wt {b1}, {b2})".
     if let (Some(branch), Some(commit)) = (&summary.git_branch, &summary.git_commit_short) {
-        lines.push(Line::from(Span::styled(
-            format!("  on {branch}@{commit}"),
-            theme.subtext0,
-        )));
+        let mut git_line = format!("  on {branch}@{commit}");
+        if matches!(tier, LayoutTier::Full) {
+            if let Some(ref wt_branches) = summary.git_worktree_branches {
+                if !wt_branches.is_empty() {
+                    git_line.push_str(&format!(" (wt {})", wt_branches.join(", ")));
+                }
+            }
+        }
+        lines.push(Line::from(Span::styled(git_line, theme.subtext0)));
     }
 
     // Session purpose line.

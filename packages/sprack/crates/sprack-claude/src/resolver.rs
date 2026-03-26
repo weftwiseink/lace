@@ -115,6 +115,8 @@ impl PaneResolver for LocalResolver {
             git_head_mtime: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktrees_mtime: None,
+            git_worktree_branches: None,
         })
     }
 }
@@ -155,6 +157,8 @@ impl<'a> PaneResolver for LaceContainerResolver<'a> {
             git_head_mtime: None,
             git_branch: None,
             git_commit_short: None,
+            git_worktrees_mtime: None,
+            git_worktree_branches: None,
         })
     }
 }
@@ -188,6 +192,8 @@ pub fn resolve_container_pane(
         git_head_mtime: None,
         git_branch: None,
         git_commit_short: None,
+        git_worktrees_mtime: None,
+        git_worktree_branches: None,
     })
 }
 

@@ -85,6 +85,10 @@ Container identity is the container name (derived from `lace.project_name` label
 `cdocs/reports/2026-03-26-podman-exec-migration-viability.md` analyzes the full SSH footprint (~1,200 lines across 12+ files), the `podman exec` replacement for each use case, and the cost/benefit tradeoffs.
 This proposal focuses on design and implementation; the viability report provides the analytical backing.
 
+> NOTE(opus/lace/podman-migration): This proposal has a transitive dependency on `cdocs/proposals/2026-03-26-podman-first-core-runtime.md`, which makes the core TypeScript package podman-aware.
+> On podman-only systems (no `podman-docker`), `lace up` must work with podman before the bin scripts can connect to containers via `podman exec`.
+> The core runtime proposal should be implemented first.
+
 ## Proposed Solution
 
 ### 1. Container runtime abstraction
@@ -93,12 +97,26 @@ Introduce a `resolve_runtime()` function in a shared location (`bin/lace-lib.sh`
 
 ```bash
 resolve_runtime() {
+  # Respect CONTAINER_RUNTIME env var override (consistent with TypeScript resolveContainerRuntime())
+  if [ -n "${CONTAINER_RUNTIME:-}" ]; then
+    case "$CONTAINER_RUNTIME" in
+      podman|docker)
+        echo "$CONTAINER_RUNTIME"
+        return
+        ;;
+      *)
+        echo "WARNING: CONTAINER_RUNTIME='$CONTAINER_RUNTIME' is not valid (expected podman or docker). Auto-detecting." >&2
+        ;;
+    esac
+  fi
+
   if command -v podman &>/dev/null; then
     echo "podman"
   elif command -v docker &>/dev/null; then
     echo "docker"
   else
-    echo ""
+    echo "ERROR: No container runtime found. Install podman or docker." >&2
+    return 1
   fi
 }
 ```
@@ -122,7 +140,10 @@ Output format changes:
 **JSON mode (new)**: `{"name", "container_name", "container_id", "user", "path", "workspace"}`
 
 The `port` field is removed from the primary output.
-The `container_name` field is added (the Docker/podman container name, which `lace up` sets via `--name` from `sanitizeContainerName(projectName)`).
+The `container_name` field is added: the Docker/podman container name as returned by `$RUNTIME inspect --format '{{.Name}}'`.
+This is the sanitized name that `lace up` sets via `--name` from `sanitizeContainerName(projectName)` in TypeScript.
+`lace-discover` obtains it from `$RUNTIME inspect`, not from the `lace.project_name` label (which stores the raw, unsanitized project name).
+`@lace_container` must store this sanitized inspect-derived name, since `podman exec` requires the actual container name.
 
 User resolution is unchanged: `devcontainer.metadata` `remoteUser` -> `Config.User` -> default `node`.
 Workspace resolution is unchanged: `CONTAINER_WORKSPACE_FOLDER` env var from the container.
@@ -507,11 +528,15 @@ The rendering may need minor adjustment since the grouping key changes from a po
 
 **Goal:** Lay infrastructure for the migration without changing any user-facing behavior.
 
-1. **Introduce `resolve_runtime()` helper** in `bin/lace-into` and `bin/lace-split`.
+1. **Introduce `resolve_runtime()` helper** in `bin/lace-lib.sh` (or inline in each script).
    Returns `podman` or `docker` based on availability.
-   All existing `docker` calls in the bin scripts use `$RUNTIME` instead.
+   Respects `CONTAINER_RUNTIME` env var override, matching the TypeScript `resolveContainerRuntime()` in the prerequisite core runtime proposal.
+   All existing `docker` calls in all six bin scripts (`lace-into`, `lace-split`, `lace-discover`, `lace-disconnect-pane`, `lace-paste-image`, `lace-inspect`) use `$RUNTIME` instead.
 
-2. **Add `container_name` to `lace-discover` output** alongside the existing `port` field.
+2. **Apply `$RUNTIME` to `lace-discover`** as an explicit deliverable.
+   `lace-discover` currently hardcodes `docker` in six places (lines 44, 87, 97, 110, 116, 126).
+   Replace all with `$RUNTIME`.
+   Add `container_name` to output alongside the existing `port` field.
    JSON mode: add `"container_name"` field.
    Text mode: no change yet (consumers parse positionally).
    The container name is resolved from `lace.project_name` label -> `docker inspect --format '{{.Name}}'`.

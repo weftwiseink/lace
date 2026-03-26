@@ -213,6 +213,7 @@ A lightweight metadata script runs periodically or on-demand inside the containe
 ```json
 {
   "ts": "2026-03-26T22:00:00Z",
+  "container_name": "lace-dev",
   "workdir": "/workspaces/lace/main",
   "git_branch": "feat/sprack-mount",
   "git_commit_short": "a1b2c3d",
@@ -221,6 +222,8 @@ A lightweight metadata script runs periodically or on-demand inside the containe
 ```
 
 `state.json` is container-scoped, not session-scoped: it reflects whichever shell prompt ran most recently, regardless of which Claude session (if any) is active.
+The `container_name` field is the Docker/podman container name (from `hostname` or `$HOSTNAME` inside the container).
+This field is required for the sprack codebase decoupling proposal to match metadata files to containers, since the mount directory name (`lace.projectName`) may not match the container name (`sanitizeContainerName()`).
 This is appropriate because it captures the container's current state, which is the information sprack needs for display.
 
 This metadata script could be:

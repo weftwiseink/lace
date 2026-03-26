@@ -261,6 +261,10 @@ pub fn merge_hook_events(
     let mut tasks: Vec<TaskEntry> = Vec::new();
     let mut session_summary: Option<String> = None;
     let mut session_purpose: Option<String> = None;
+    // Track batch boundaries: each entry is the starting task index for a batch.
+    // A new batch starts each time a TaskCreated event follows a non-TaskCreated event.
+    let mut batch_starts: Vec<usize> = Vec::new();
+    let mut last_was_create = false;
 
     for event in events {
         match event {
@@ -269,18 +273,23 @@ pub fn merge_hook_events(
                 if session_purpose.is_none() {
                     session_purpose = Some(cwd.clone());
                 }
+                last_was_create = false;
             }
             HookEvent::TaskCreated {
                 task_id,
                 subject,
                 description,
             } => {
+                if !last_was_create {
+                    batch_starts.push(tasks.len());
+                }
                 tasks.push(TaskEntry {
                     task_id: task_id.clone().unwrap_or_default(),
                     subject: subject.clone(),
                     description: description.clone(),
                     status: TaskStatus::Created,
                 });
+                last_was_create = true;
             }
             HookEvent::TaskUpdated { task_id, status } => {
                 if let Some(tid) = task_id {
@@ -292,6 +301,7 @@ pub fn merge_hook_events(
                         };
                     }
                 }
+                last_was_create = false;
             }
             HookEvent::TaskCompleted {
                 task_id, subject, ..
@@ -310,6 +320,7 @@ pub fn merge_hook_events(
                         });
                     }
                 }
+                last_was_create = false;
             }
             HookEvent::PostCompact { compact_summary } => {
                 // PostCompact provides a semantic summary of the session's work.
@@ -317,12 +328,24 @@ pub fn merge_hook_events(
                 // session_purpose is derived: PostCompact > cwd fallback.
                 session_summary = Some(compact_summary.clone());
                 session_purpose = Some(compact_summary.clone());
+                last_was_create = false;
             }
-            _ => {}
+            _ => {
+                last_was_create = false;
+            }
         }
     }
 
     if !tasks.is_empty() {
+        // Prune stale completed task batches. A "batch" is a consecutive group
+        // of TaskCreated events (tasks created in the same Claude turn). If ALL
+        // tasks in a batch are Completed, and there are newer batches after it,
+        // remove the completed batch from the display. This prevents old
+        // completed tasks from prior Claude turns from persisting forever.
+        let prune_boundary = find_batch_prune_boundary(&tasks, &batch_starts);
+        if prune_boundary > 0 {
+            tasks.drain(..prune_boundary);
+        }
         summary.tasks = Some(tasks);
     }
     if session_summary.is_some() {
@@ -331,6 +354,37 @@ pub fn merge_hook_events(
     if session_purpose.is_some() {
         summary.session_purpose = session_purpose;
     }
+}
+
+/// Finds the prune boundary based on batch structure.
+///
+/// A batch is a consecutive group of TaskCreated events (identified by
+/// `batch_starts`). If all tasks in a batch are Completed AND there is at
+/// least one subsequent batch, the completed batch can be pruned.
+///
+/// Returns the task index to prune up to (0 if no pruning needed).
+fn find_batch_prune_boundary(tasks: &[TaskEntry], batch_starts: &[usize]) -> usize {
+    if batch_starts.len() <= 1 {
+        // Single batch or no batches: nothing to prune.
+        return 0;
+    }
+
+    let mut prune_up_to = 0;
+    for window in batch_starts.windows(2) {
+        let batch_start = window[0];
+        let batch_end = window[1]; // start of next batch = end of this batch
+        let batch_tasks = &tasks[batch_start..batch_end];
+
+        if batch_tasks.iter().all(|t| t.status == TaskStatus::Completed) {
+            // This batch is fully completed and there are later batches.
+            prune_up_to = batch_end;
+        } else {
+            // Found a non-fully-completed batch: stop pruning.
+            break;
+        }
+    }
+
+    prune_up_to
 }
 
 /// Returns the default event directory path.
@@ -636,5 +690,198 @@ mod tests {
             summary.session_purpose.as_deref(),
             Some("Implementing sprack features.")
         );
+    }
+
+    #[test]
+    fn merge_hook_events_prunes_completed_batch_prefix() {
+        // Simulate two batches: batch 1 is fully completed, batch 2 is in progress.
+        // After merging, only batch 2 tasks should remain.
+        let events = vec![
+            // Batch 1: fully completed.
+            HookEvent::TaskCreated {
+                task_id: Some("t1".to_string()),
+                subject: "Old task A".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCreated {
+                task_id: Some("t2".to_string()),
+                subject: "Old task B".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCompleted {
+                task_id: Some("t1".to_string()),
+                subject: "Old task A".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCompleted {
+                task_id: Some("t2".to_string()),
+                subject: "Old task B".to_string(),
+                description: None,
+            },
+            // Batch 2: still in progress.
+            HookEvent::TaskCreated {
+                task_id: Some("t3".to_string()),
+                subject: "Current task".to_string(),
+                description: None,
+            },
+        ];
+
+        let mut summary = crate::status::ClaudeSummary {
+            state: "thinking".to_string(),
+            model: None,
+            subagent_count: 0,
+            context_percent: 0,
+            last_tool: None,
+            error_message: None,
+            last_activity: None,
+            tasks: None,
+            session_summary: None,
+            session_purpose: None,
+            tokens_used: None,
+            tokens_max: None,
+            session_name: None,
+            user_turns: None,
+            assistant_turns: None,
+            tool_counts: None,
+            context_trend: None,
+            git_branch: None,
+            git_commit_short: None,
+        };
+
+        merge_hook_events(&mut summary, &events);
+
+        let tasks = summary.tasks.unwrap();
+        assert_eq!(tasks.len(), 1, "only current batch tasks should remain");
+        assert_eq!(tasks[0].subject, "Current task");
+        assert_eq!(tasks[0].status, TaskStatus::Created);
+    }
+
+    #[test]
+    fn merge_hook_events_keeps_all_when_all_completed() {
+        // When all tasks are completed (single batch), show them all rather
+        // than pruning everything.
+        let events = vec![
+            HookEvent::TaskCreated {
+                task_id: Some("t1".to_string()),
+                subject: "Task A".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCreated {
+                task_id: Some("t2".to_string()),
+                subject: "Task B".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCompleted {
+                task_id: Some("t1".to_string()),
+                subject: "Task A".to_string(),
+                description: None,
+            },
+            HookEvent::TaskCompleted {
+                task_id: Some("t2".to_string()),
+                subject: "Task B".to_string(),
+                description: None,
+            },
+        ];
+
+        let mut summary = crate::status::ClaudeSummary {
+            state: "idle".to_string(),
+            model: None,
+            subagent_count: 0,
+            context_percent: 0,
+            last_tool: None,
+            error_message: None,
+            last_activity: None,
+            tasks: None,
+            session_summary: None,
+            session_purpose: None,
+            tokens_used: None,
+            tokens_max: None,
+            session_name: None,
+            user_turns: None,
+            assistant_turns: None,
+            tool_counts: None,
+            context_trend: None,
+            git_branch: None,
+            git_commit_short: None,
+        };
+
+        merge_hook_events(&mut summary, &events);
+
+        let tasks = summary.tasks.unwrap();
+        assert_eq!(tasks.len(), 2, "all tasks shown when entire list is completed");
+        assert!(tasks.iter().all(|t| t.status == TaskStatus::Completed));
+    }
+
+    #[test]
+    fn find_batch_prune_boundary_single_batch_no_prune() {
+        let tasks = vec![
+            TaskEntry {
+                task_id: "t1".to_string(),
+                subject: "A".to_string(),
+                description: None,
+                status: TaskStatus::InProgress,
+            },
+            TaskEntry {
+                task_id: "t2".to_string(),
+                subject: "B".to_string(),
+                description: None,
+                status: TaskStatus::Created,
+            },
+        ];
+        // Single batch: no pruning regardless of status.
+        assert_eq!(find_batch_prune_boundary(&tasks, &[0]), 0);
+    }
+
+    #[test]
+    fn find_batch_prune_boundary_completed_batch_then_active() {
+        let tasks = vec![
+            TaskEntry {
+                task_id: "t1".to_string(),
+                subject: "A".to_string(),
+                description: None,
+                status: TaskStatus::Completed,
+            },
+            TaskEntry {
+                task_id: "t2".to_string(),
+                subject: "B".to_string(),
+                description: None,
+                status: TaskStatus::Completed,
+            },
+            TaskEntry {
+                task_id: "t3".to_string(),
+                subject: "C".to_string(),
+                description: None,
+                status: TaskStatus::InProgress,
+            },
+        ];
+        // Batch 1 (t1, t2) at index 0, Batch 2 (t3) at index 2.
+        // Batch 1 is fully completed: prune up to index 2.
+        assert_eq!(find_batch_prune_boundary(&tasks, &[0, 2]), 2);
+    }
+
+    #[test]
+    fn find_batch_prune_boundary_mixed_batch_no_prune() {
+        let tasks = vec![
+            TaskEntry {
+                task_id: "t1".to_string(),
+                subject: "A".to_string(),
+                description: None,
+                status: TaskStatus::Completed,
+            },
+            TaskEntry {
+                task_id: "t2".to_string(),
+                subject: "B".to_string(),
+                description: None,
+                status: TaskStatus::Created,
+            },
+            TaskEntry {
+                task_id: "t3".to_string(),
+                subject: "C".to_string(),
+                description: None,
+                status: TaskStatus::InProgress,
+            },
+        ];
+        // Batch 1 (t1, t2) has t2 not completed: no pruning.
+        assert_eq!(find_batch_prune_boundary(&tasks, &[0, 2]), 0);
     }
 }

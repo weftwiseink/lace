@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-26T20:00:00-07:00
 task_list: lace/podman-migration
 type: devlog
-state: live
+state: archived
 status: done
 tags: [architecture, podman, migration]
 ---

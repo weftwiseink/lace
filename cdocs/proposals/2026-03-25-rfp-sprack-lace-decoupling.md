@@ -5,7 +5,7 @@ first_authored:
 task_list: sprack/lace-decoupling
 type: proposal
 state: live
-status: request_for_proposal
+status: evolved
 tags: [architecture, sprack, future_work]
 ---
 

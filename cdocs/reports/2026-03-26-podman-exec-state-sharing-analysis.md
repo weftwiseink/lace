@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-26T12:00:00-07:00
 task_list: sprack/podman-state-sharing
 type: report
-state: live
-status: wip
+state: archived
+status: done
 tags: [sprack, podman, container, architecture, analysis]
 ---
 

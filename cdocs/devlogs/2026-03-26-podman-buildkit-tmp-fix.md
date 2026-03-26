@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-26T13:00:00-07:00
 task_list: lace/podman-buildkit-fix
 type: devlog
-state: live
+state: archived
 status: done
 tags: [podman, rootless, buildkit, devcontainer]
 ---

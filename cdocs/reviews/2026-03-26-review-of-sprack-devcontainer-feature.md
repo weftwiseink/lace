@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-26T16:00:00-07:00
 task_list: sprack/devcontainer-feature
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, architecture, devcontainer, mount_system, sprack]
 ---

@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-26T12:00:00-07:00
 task_list: lace/podman-migration
 type: report
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [architecture, ssh, podman, migration, analysis]
 ---
 

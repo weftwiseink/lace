@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-26T13:48:49-07:00
 task_list: lace/test-health
 type: devlog
-state: live
+state: archived
 status: done
 tags: [test-health, test-isolation, acceptance-tests]
 ---

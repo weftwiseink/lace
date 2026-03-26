@@ -5,7 +5,7 @@ first_authored:
   at: 2026-03-26T19:45:00-07:00
 task_list: lace/podman-migration
 type: review
-state: live
+state: archived
 status: done
 tags: [fresh_agent, cross_review, architecture, podman, prerequisite_coverage, contract_consistency, companion_proposals]
 ---

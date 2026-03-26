@@ -4,14 +4,14 @@ first_authored:
   at: 2026-03-26T18:30:00-07:00
 task_list: lace/podman-migration
 type: proposal
-state: live
-status: wip
+state: archived
+status: implementation_accepted
 tags: [architecture, podman, migration]
 last_reviewed:
-  status: revision_requested
-  by: "@claude-opus-4-6-20250725"
-  at: 2026-03-26T19:45:00-07:00
-  round: 2
+  status: accepted
+  by: "@mjr"
+  at: 2026-03-26T20:30:00-07:00
+  round: 3
 ---
 
 # Podman-First Container Runtime for lace Core TypeScript Package

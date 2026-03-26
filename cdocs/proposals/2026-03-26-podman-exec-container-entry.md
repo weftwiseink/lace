@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-26T10:07:00-07:00
 task_list: lace/podman-migration
 type: proposal
-state: live
-status: implementation_ready
+state: archived
+status: implementation_accepted
 tags: [architecture, podman, ssh, migration, lace_into]
 last_reviewed:
   status: accepted

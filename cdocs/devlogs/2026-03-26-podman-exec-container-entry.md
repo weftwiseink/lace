@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-26T14:28:00-07:00
 task_list: lace/podman-migration
 type: devlog
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [podman, ssh, migration, lace_into]
 ---
 

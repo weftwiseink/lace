@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-25T16:05:00-07:00
 task_list: lace/session-management
 type: proposal
-state: live
-status: request_for_proposal
+state: archived
+status: evolved
 tags: [tmux, sprack, session_management, lace_into]
 ---
 

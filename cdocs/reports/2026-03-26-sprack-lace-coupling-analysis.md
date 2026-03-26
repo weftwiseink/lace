@@ -4,8 +4,8 @@ first_authored:
   at: 2026-03-26T10:00:00-07:00
 task_list: sprack/lace-decoupling
 type: report
-state: live
-status: review_ready
+state: archived
+status: done
 tags: [architecture, sprack, analysis]
 ---
 

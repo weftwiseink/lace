@@ -9,40 +9,64 @@
 # Only pane-level metadata is checked (not session-level), so local panes
 # in a lace session correctly get local splits.
 #
-# Usage: lace-split [-h|-v] [-U]
-#   -h   Horizontal split (split-window -h, default)
-#   -v   Vertical split (split-window -v)
-#   -U   Swap pane up after split (for left/up splits)
+# Usage: lace-split [-h|-v] [-U] [-t pane_id]
+#   -h          Horizontal split (split-window -h, default)
+#   -v          Vertical split (split-window -v)
+#   -U          Swap pane up after split (for left/up splits)
+#   -t pane_id  Target pane for metadata lookup and split (default: current pane)
 #
 # Called from tmux keybindings. Not intended for direct user invocation.
+# Keybindings should pass #{pane_id} via -t for reliable pane targeting:
+#   run-shell 'lace-split -h -t "#{pane_id}"'
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so SCRIPT_DIR points to the real script directory,
+# not the symlink directory (e.g. ~/.local/bin). This ensures lace-lib.sh
+# is found when lace-split is invoked via symlink from tmux run-shell.
+_source="${BASH_SOURCE[0]}"
+while [ -L "$_source" ]; do
+  _dir="$(cd "$(dirname "$_source")" && pwd)"
+  _source="$(readlink "$_source")"
+  [[ "$_source" != /* ]] && _source="$_dir/$_source"
+done
+SCRIPT_DIR="$(cd "$(dirname "$_source")" && pwd)"
+unset _source _dir
 # shellcheck source=lace-lib.sh
 . "$SCRIPT_DIR/lace-lib.sh"
 
 DIRECTION="-h"
 SWAP=""
+TARGET=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h) DIRECTION="-h"; shift ;;
     -v) DIRECTION="-v"; shift ;;
     -U) SWAP="yes"; shift ;;
+    -t) TARGET="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+
+# Build target args for tmux commands. When -t is provided, all tmux queries
+# and split-window target that specific pane. Without -t, tmux uses the
+# "current" pane from the run-shell context (correct in keybinding context,
+# unreliable when called externally).
+TARGET_ARGS=()
+if [ -n "$TARGET" ]; then
+  TARGET_ARGS=(-t "$TARGET")
+fi
 
 # Check pane-level lace metadata.
 # Only pane-level: session-level @lace_container exists but applies to all panes
 # in the session, including local ones. Pane-level is set by lace-into on
 # the initial pane and propagated by lace-split to each new container split.
-container=$(tmux show-option -pqv @lace_container 2>/dev/null)
+container=$(tmux show-option -pqv "${TARGET_ARGS[@]}" @lace_container 2>/dev/null)
 
 if [ -z "$container" ]; then
   # Local pane: local split preserving current directory
-  tmux split-window "$DIRECTION" -c "#{pane_current_path}"
+  tmux split-window "$DIRECTION" "${TARGET_ARGS[@]}" -c "#{pane_current_path}"
   if [ -n "$SWAP" ]; then
     tmux swap-pane -U
   fi
@@ -50,8 +74,8 @@ if [ -z "$container" ]; then
 fi
 
 # Container pane: read remaining lace connection details
-user=$(tmux show-option -pqv @lace_user 2>/dev/null)
-ws=$(tmux show-option -pqv @lace_workspace 2>/dev/null)
+user=$(tmux show-option -pqv "${TARGET_ARGS[@]}" @lace_user 2>/dev/null)
+ws=$(tmux show-option -pqv "${TARGET_ARGS[@]}" @lace_workspace 2>/dev/null)
 
 # Build exec command for the new pane
 exec_args=("$RUNTIME" exec -it --user "${user:-node}")
@@ -60,7 +84,7 @@ if [ -n "$ws" ]; then
 fi
 exec_args+=("$container" /bin/bash -l)
 
-new_pane=$(tmux split-window "$DIRECTION" -PF '#{pane_id}' "${exec_args[@]}")
+new_pane=$(tmux split-window "$DIRECTION" "${TARGET_ARGS[@]}" -PF '#{pane_id}' "${exec_args[@]}")
 
 # Propagate lace options to the new pane for future splits
 tmux set-option -p -t "$new_pane" @lace_container "$container"

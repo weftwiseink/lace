@@ -121,6 +121,9 @@ fn run_dump_rendered_tree(cli: &CliArgs) -> Result<()> {
     let own_pane_id = std::env::var("TMUX_PANE").ok();
 
     let mut app = app::App::new(db, own_pane_id);
+    // Set the tier based on the requested columns so tree items are built
+    // with the correct formatting (not the default Standard).
+    app.last_tier = layout::layout_tier(cli.cols);
     app.refresh_from_db()?;
 
     // Expand all tree nodes so the full hierarchy is visible.

@@ -305,12 +305,12 @@ fn build_pane_item(
     let primary_integration = pane_integrations.first();
     let claude_summary = primary_integration.and_then(|i| parse_claude_summary(i));
 
-    // At Wide/Full tiers, if hook data is available, render multi-line widget.
-    let has_hook_data = claude_summary
-        .as_ref()
-        .is_some_and(|s| s.tasks.is_some() || s.session_summary.is_some());
+    // At Wide/Full tiers, render multi-line widget for any Claude integration.
+    // The rich widget gracefully handles missing hook data (tasks, session_summary)
+    // by omitting those lines and showing core JSONL-derived data (model, tokens, subagents).
+    let is_claude = claude_summary.is_some();
 
-    let text = if has_hook_data && matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
+    let text = if is_claude && matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
         format_rich_widget(pane, &pane_integrations, claude_summary.as_ref().unwrap(), tier, theme)
     } else {
         let line = format_pane_label(pane, &pane_integrations, tier, theme);

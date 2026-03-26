@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/test-health
 type: report
 state: live
-status: wip
+status: done
 tags: [test-health, investigation, test-isolation]
 ---
 

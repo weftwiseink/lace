@@ -135,7 +135,14 @@ impl App {
         // Use the last known tier for label formatting. This is updated by
         // render_frame() when the terminal width changes, so tree items are
         // always built at the correct tier.
+        let was_empty = self.tree_items.is_empty();
         self.tree_items = tree::build_tree(&snapshot, self.own_pane_id.as_deref(), self.last_tier);
+
+        // Auto-expand all nodes on initial load so the full hierarchy is visible.
+        // On subsequent refreshes, tree_state preserves user-collapsed nodes.
+        if was_empty {
+            expand_all_recursive(&self.tree_items, &mut self.tree_state, vec![]);
+        }
 
         // Ensure something is selected for keyboard navigation.
         if self.tree_state.selected().is_empty() && !self.tree_items.is_empty() {
@@ -161,6 +168,20 @@ impl App {
                 self.poller_healthy = false;
             }
         }
+    }
+}
+
+/// Recursively opens all tree nodes so the full hierarchy is rendered.
+fn expand_all_recursive(
+    items: &[tui_tree_widget::TreeItem<'static, tree::NodeId>],
+    state: &mut TreeState<tree::NodeId>,
+    path: Vec<tree::NodeId>,
+) {
+    for item in items {
+        let mut item_path = path.clone();
+        item_path.push(item.identifier().clone());
+        state.open(item_path.clone());
+        expand_all_recursive(item.children(), state, item_path);
     }
 }
 

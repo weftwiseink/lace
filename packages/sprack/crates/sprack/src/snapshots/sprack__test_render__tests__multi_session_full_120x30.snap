@@ -5,7 +5,7 @@ expression: output
 â¼ REMOTE-APP
   â¼ remote-app (1w) :22427
     â¼ code (1 panes) *
-        bash/sprack-trouble [thinking]
+        claude/sprack-trouble [thinking]
           opus-4-6 | 450K/1M | 2 subagents
           sprack TUI development
           Tasks: 1/2 done  >Fix renderiâ¦ âAdd tests

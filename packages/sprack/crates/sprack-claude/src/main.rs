@@ -195,6 +195,9 @@ fn process_claude_pane(
     // Merge with previously cached entries if we got new ones.
     if !entries.is_empty() {
         // Ingest new entries into the session cache DB for aggregated metrics.
+        // Pass the current file_position as the byte offset for deduplication:
+        // on restart, tail_read re-reads entries already ingested, so the cache
+        // checks the stored offset and skips entries that were already counted.
         if let Some(cache_conn) = cache_connection {
             let file_path_str = session_state
                 .session_file
@@ -206,11 +209,12 @@ fn process_claude_pane(
                 .parent()
                 .and_then(|p| p.to_str())
                 .unwrap_or("unknown");
-            if let Err(error) = cache::ingest_new_entries(
+            if let Err(error) = cache::ingest_new_entries_at(
                 cache_conn,
                 file_path_str,
                 project_path_str,
                 &entries,
+                Some(session_state.file_position),
             ) {
                 eprintln!("sprack-claude: cache ingestion failed: {error}");
             }

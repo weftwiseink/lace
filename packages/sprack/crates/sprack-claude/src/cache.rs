@@ -108,13 +108,47 @@ CREATE TABLE IF NOT EXISTS subagent_tracking (
 ///
 /// Updates session_metadata counters, tool_usage, context_history, and subagent_tracking.
 /// Entries with `is_compact_summary = true` are skipped to avoid double-counting.
+///
+/// Uses the `ingestion_state` table to track the last-ingested byte offset per file,
+/// preventing double-counting when sprack-claude restarts and re-tails the same file.
+#[cfg(test)]
 pub fn ingest_new_entries(
     conn: &Connection,
     file_path: &str,
     project_path: &str,
     entries: &[JsonlEntry],
 ) -> anyhow::Result<()> {
+    ingest_new_entries_at(conn, file_path, project_path, entries, None)
+}
+
+/// Ingests entries with an explicit byte offset for deduplication.
+///
+/// When `byte_offset` is provided, checks the `ingestion_state` table: if the
+/// stored offset is >= the provided offset, the entries are already ingested.
+pub fn ingest_new_entries_at(
+    conn: &Connection,
+    file_path: &str,
+    project_path: &str,
+    entries: &[JsonlEntry],
+    byte_offset: Option<u64>,
+) -> anyhow::Result<()> {
     let timestamp = now_utc();
+
+    // Check ingestion_state to prevent re-ingesting already-processed entries.
+    if let Some(offset) = byte_offset {
+        let stored_offset: Option<i64> = conn.query_row(
+            "SELECT byte_offset FROM ingestion_state WHERE file_path = ?1",
+            [file_path],
+            |row| row.get(0),
+        ).ok();
+
+        if let Some(stored) = stored_offset {
+            if stored as u64 >= offset {
+                // Already ingested up to or past this offset.
+                return Ok(());
+            }
+        }
+    }
 
     // Filter out compact summary entries (re-stated messages that would double-count).
     let real_entries: Vec<&JsonlEntry> = entries
@@ -124,6 +158,15 @@ pub fn ingest_new_entries(
         .collect();
 
     if real_entries.is_empty() {
+        // Still update ingestion_state even if no real entries, to track progress.
+        if let Some(offset) = byte_offset {
+            conn.execute(
+                "INSERT INTO ingestion_state (file_path, byte_offset, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(file_path) DO UPDATE SET byte_offset = ?2, updated_at = ?3",
+                rusqlite::params![file_path, offset as i64, timestamp],
+            )?;
+        }
         return Ok(());
     }
 
@@ -317,6 +360,17 @@ pub fn ingest_new_entries(
         "UPDATE session_metadata SET active_subagents = ?1 WHERE session_id = ?2",
         rusqlite::params![active_count, session_id],
     )?;
+
+    // Record ingestion progress to prevent re-ingesting on restart.
+    if let Some(offset) = byte_offset {
+        conn.execute(
+            "INSERT INTO ingestion_state (file_path, byte_offset, session_id, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(file_path) DO UPDATE SET
+                byte_offset = ?2, session_id = ?3, updated_at = ?4",
+            rusqlite::params![file_path, offset as i64, session_id, timestamp],
+        )?;
+    }
 
     Ok(())
 }

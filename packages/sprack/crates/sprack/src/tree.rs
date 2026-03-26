@@ -407,14 +407,16 @@ fn format_pane_label(
     let summary = primary_integration.and_then(|i| parse_claude_summary(i));
     let is_claude = primary_integration.is_some_and(|i| i.kind == "claude_code");
 
-    // Scoped display name: "claude/{claude_session_name}" for claude panes (except compact).
-    // Prefers the Claude Code session name (customTitle or slug) over the tmux session name.
+    // Scoped display name: "claude/{session_name}" for claude panes (except compact).
+    // Uses "claude" prefix (not the raw process name like "ssh") since this is a Claude
+    // integration. The session part prefers the Claude Code session name (customTitle or
+    // slug) over the tmux session name, falling back to "unnamed" if neither is available.
     let scoped_name = if is_claude && !matches!(tier, LayoutTier::Compact) {
         let claude_session = summary
             .as_ref()
             .and_then(|s| s.session_name.as_deref())
-            .unwrap_or(&pane.session_name);
-        format!("{}/{}", process_name, claude_session)
+            .unwrap_or("unnamed");
+        format!("claude/{}", claude_session)
     } else {
         process_name.clone()
     };
@@ -665,24 +667,17 @@ fn format_host_group_label(group: &HostGroup, tier: LayoutTier, theme: &Theme) -
 /// Line 3: session_purpose (git context comes in Phase 2)
 /// Line 4: Tasks: done/total done task_markers
 fn format_rich_widget(
-    pane: &Pane,
+    _pane: &Pane,
     integrations: &[&Integration],
     summary: &ClaudeSummary,
     tier: LayoutTier,
     theme: &Theme,
 ) -> Text<'static> {
-    let process_name = pane
-        .current_command
-        .rsplit('/')
-        .next()
-        .unwrap_or("?")
-        .to_string();
-
     let claude_session = summary
         .session_name
         .as_deref()
-        .unwrap_or(&pane.session_name);
-    let scoped_name = format!("{}/{}", process_name, claude_session);
+        .unwrap_or("unnamed");
+    let scoped_name = format!("claude/{}", claude_session);
     let primary_integration = integrations.first();
 
     // Line 1: process/session [status].
@@ -702,14 +697,13 @@ fn format_rich_widget(
         .map(|m| m.strip_prefix("claude-").unwrap_or(m))
         .unwrap_or("unknown");
     let mut context_display = format_context_display(summary);
-    // Append context trend arrow indicator.
+    // Append context trend arrow indicator (only when actively changing).
     if let Some(ref trend) = summary.context_trend {
-        let arrow = match trend.as_str() {
-            "rising" => "^",
-            "falling" => "v",
-            _ => "=",
-        };
-        context_display.push_str(arrow);
+        match trend.as_str() {
+            "rising" => context_display.push('^'),
+            "falling" => context_display.push('v'),
+            _ => {} // "stable" gets no indicator
+        }
     }
     let subagent_label = if matches!(tier, LayoutTier::Wide | LayoutTier::Full) {
         format!("{} subagents", summary.subagent_count)
@@ -727,10 +721,18 @@ fn format_rich_widget(
         theme.subtext0,
     )));
 
-    // Tool usage line: show top 3 tools in compact format (e.g., "Read:47 Edit:12 Bash:8").
+    // Task-related tool names that get separate treatment in the task progress line.
+    const TASK_TOOL_NAMES: &[&str] = &["TaskCreate", "TaskUpdate", "TaskList", "TodoWrite", "TodoRead"];
+
+    // Tool usage line: show top 3 non-task tools in compact format (e.g., "Read:47 Edit:12 Bash:8").
+    // Task-related tools are filtered out since they're displayed in the task progress line.
     if let Some(ref tool_counts) = summary.tool_counts {
-        if !tool_counts.is_empty() {
-            let tool_display: Vec<String> = tool_counts
+        let non_task_tools: Vec<&(String, u32)> = tool_counts
+            .iter()
+            .filter(|(name, _)| !TASK_TOOL_NAMES.contains(&name.as_str()))
+            .collect();
+        if !non_task_tools.is_empty() {
+            let tool_display: Vec<String> = non_task_tools
                 .iter()
                 .take(3)
                 .map(|(name, count)| format!("{name}:{count}"))
@@ -751,7 +753,7 @@ fn format_rich_widget(
         )));
     }
 
-    // Line 4: task progress.
+    // Line 4: task progress from hook events.
     if let Some(tasks) = &summary.tasks {
         if !tasks.is_empty() {
             let done = tasks.iter().filter(|t| t.status == "Completed").count();
@@ -779,6 +781,25 @@ fn format_rich_widget(
             }
 
             lines.push(Line::from(task_spans));
+        }
+    } else if let Some(ref tool_counts) = summary.tool_counts {
+        // Synthesize a task summary from tool_counts when hook-derived tasks are unavailable.
+        // TaskCreate count approximates total tasks created; TaskUpdate indicates activity.
+        let created = tool_counts.iter()
+            .find(|(name, _)| name == "TaskCreate")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        let updated = tool_counts.iter()
+            .find(|(name, _)| name == "TaskUpdate")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        if created > 0 {
+            let label = if updated > 0 {
+                format!("  {created} tasks ({updated} updates)")
+            } else {
+                format!("  {created} tasks")
+            };
+            lines.push(Line::from(Span::styled(label, theme.subtext0)));
         }
     }
 

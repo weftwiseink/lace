@@ -5,12 +5,12 @@ first_authored:
 task_list: terminal-management/sprack-git-context
 type: proposal
 state: live
-status: review_ready
+status: implementation_ready
 last_reviewed:
-  status: revision_requested
-  by: "@claude-sonnet-4-6"
-  at: 2026-03-25T14:00:00-07:00
-  round: 1
+  status: accepted
+  by: "@claude-opus-4-6"
+  at: 2026-03-25T21:00:00-07:00
+  round: 2
 tags: [sprack, git, ux_design, data_collection]
 ---
 
@@ -103,13 +103,14 @@ Read `.git/HEAD`:
 
 #### Commit Hash
 
-Two strategies, tried in order:
+Three strategies, tried in order:
 1. If `.git/HEAD` points to a ref, read `.git/refs/heads/{branch}` for the full SHA, then truncate to 7 characters.
-2. If the ref file does not exist (packed refs), fall back to `git rev-parse --short HEAD` subprocess.
+2. If the loose ref file does not exist (packed refs after `git gc`), parse `.git/packed-refs` directly.
+   The format is one `{sha} {ref}` per line, with `#` comment lines and `^{sha}` peeled tag lines to skip.
+3. Final fallback: `git rev-parse --short HEAD` subprocess, for any edge case the first two strategies miss.
 
-> NOTE(opus/sprack-git-context): Packed refs are common in large repositories after `git gc`.
-> The subprocess fallback is acceptable because it only triggers when the loose ref file is absent, which is a minority case.
-> An alternative is to parse `.git/packed-refs` directly, but the format is simple enough that either approach works.
+> NOTE(opus/sprack-git-context): Parsing `packed-refs` directly makes Phase 1 subprocess-free in the common case.
+> The subprocess fallback is retained as a safety net but should rarely trigger.
 
 #### Worktree Enumeration
 
@@ -131,10 +132,14 @@ In a bare repo layout:
 - Worktree enumeration starts from the bare repo root, not from `.git/`.
 
 The resolver handles this by:
-1. Reading `.git` in the working directory.
-2. If it's a file, parsing the `gitdir:` line to find the actual git directory.
-3. Walking up from the gitdir to find the parent bare repo (the directory containing `worktrees/`).
-4. Enumerating worktrees from there.
+1. Walking up from the working directory, checking each ancestor for a `.git` entry (file or directory).
+   This matches git's own behavior: the cwd is rarely the git root, so an upward walk is required.
+2. If `.git` is a file, parsing the `gitdir:` line to find the actual git directory (e.g., `{bare_repo}/worktrees/{name}`).
+3. For worktree enumeration: resolving the bare repo root via `gitdir.parent().parent()`.
+   This is a direct path computation, not an iterative walk: since the gitdir is `{bare_repo}/worktrees/{name}`, two `parent()` calls yield the bare repo root.
+   An iterative walk scanning for `worktrees/` would be incorrect if the repo is nested under a directory named `worktrees/`.
+4. Enumerating worktrees from the bare repo root's `worktrees/` directory.
+   The bare repo's own `HEAD` is excluded from the worktree list: it is not a linked worktree entry and typically points to a stale default branch.
 
 ### Working Directory Source
 
@@ -164,6 +169,17 @@ For worktree enumeration, check `.git/worktrees/` directory mtime.
 Worktree topology changes even less frequently than branches.
 
 The `stat()` approach is preferable to a cycle counter because it adapts to actual change frequency rather than imposing an arbitrary interval.
+
+#### Cache State Location
+
+The mtime guard and cached git state are stored as fields on `SessionFileState` in `session.rs`:
+- `git_head_mtime: Option<SystemTime>`: last observed mtime of `.git/HEAD`.
+- `git_branch: Option<String>`: cached branch name.
+- `git_commit_short: Option<String>`: cached short commit hash.
+- `git_dir: Option<PathBuf>`: resolved `.git` directory path (avoids re-walking parents each cycle).
+
+This couples git state to session state in a single struct, which is acceptable because git context is a per-pane attribute that lives and dies with the session.
+The alternative (a parallel `HashMap<CacheKey, GitState>`) would require synchronized eviction with the session cache, adding complexity without benefit.
 
 ## ClaudeSummary Schema Changes
 
@@ -198,12 +214,13 @@ When the working directory is not a git repository, all fields are `None` and th
 Scope: local panes only.
 
 1. Add a `git` module to `sprack-claude` with functions:
-   - `read_git_head(cwd: &Path) -> Option<GitHead>` where `GitHead` is `Branch(String)` or `Detached(String)`.
-   - `read_commit_short(cwd: &Path, branch: &str) -> Option<String>`: reads loose ref, falls back to `git rev-parse`.
-   - `resolve_git_dir(cwd: &Path) -> Option<PathBuf>`: follows `.git` file indirection for worktrees/bare repos.
+   - `resolve_git_dir(cwd: &Path) -> Option<PathBuf>`: walks up from cwd, follows `.git` file indirection for worktrees/bare repos.
+   - `read_git_branch(git_dir: &Path) -> Option<String>`: reads `.git/HEAD`, returns branch name or `"HEAD"` for detached.
+   - `read_commit_short(git_dir: &Path, branch: &str) -> Option<String>`: reads loose ref, parses packed-refs, falls back to subprocess.
 2. Add `git_branch` and `git_commit_short` to `ClaudeSummary` in `sprack-claude/src/status.rs`.
-3. Call git resolution in `process_claude_pane()` after session file resolution, using the same `process_cwd` from `/proc`.
-4. Add mtime caching: store `(mtime, GitState)` in the session cache, skip re-read when mtime is unchanged.
+3. Add `git_head_mtime`, `git_branch`, `git_commit_short`, `git_dir` fields to `SessionFileState` in `session.rs`.
+4. Call git resolution in `process_claude_pane()` after session file resolution, using `process_cwd` from `/proc`.
+   Check `git_head_mtime` against current mtime; skip re-read when unchanged.
 5. Add the git context line to `format_rich_widget()` in `sprack/src/tree.rs`, between the model/tokens line and the session purpose line.
 6. Add corresponding fields to the TUI's `ClaudeSummary` deserializer.
 

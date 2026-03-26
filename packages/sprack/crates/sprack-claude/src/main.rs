@@ -229,13 +229,10 @@ fn process_claude_pane(
         return;
     }
 
-    let mut summary = status::build_summary(&session_state.last_entries);
-
-    // Override session_name with customTitle from sessions-index.json if available.
-    // customTitle is the user-set name via `/rename`, preferred over the auto-generated slug.
-    if let Some(ref custom_title) = session_state.session_name {
-        summary.session_name = Some(custom_title.clone());
-    }
+    let mut summary = status::build_summary(
+        &session_state.last_entries,
+        session_state.session_name.as_deref(),
+    );
 
     // Read hook events and merge into summary (graceful: no-op if no event files exist).
     if let Some(event_dir) = events::default_event_dir() {
@@ -296,10 +293,10 @@ fn process_claude_pane(
                             }
 
                             // Rebuild summary from the correct file's entries.
-                            summary = status::build_summary(&session_state.last_entries);
-                            if let Some(ref custom_title) = session_state.session_name {
-                                summary.session_name = Some(custom_title.clone());
-                            }
+                            summary = status::build_summary(
+                                &session_state.last_entries,
+                                session_state.session_name.as_deref(),
+                            );
                         }
                     }
 

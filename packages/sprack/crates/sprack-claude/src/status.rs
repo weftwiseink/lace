@@ -270,8 +270,24 @@ pub fn extract_slug(entries: &[JsonlEntry]) -> Option<String> {
         .find_map(|entry| entry.slug.clone())
 }
 
+/// Resolves the best available session name from available sources.
+///
+/// Priority: customTitle (user-set via `/rename`) > slug (auto-generated from JSONL) > None.
+/// Returns None when no name source is available; callers display a fallback (e.g., "unnamed").
+pub fn resolve_session_name(
+    custom_title: Option<&str>,
+    slug: Option<&str>,
+) -> Option<String> {
+    custom_title
+        .map(|s| s.to_string())
+        .or_else(|| slug.map(|s| s.to_string()))
+}
+
 /// Builds a complete ClaudeSummary from parsed entries.
-pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
+///
+/// `custom_title` is the user-set session name from `sessions-index.json` (`customTitle` field).
+/// When provided, it takes precedence over the auto-generated slug from JSONL entries.
+pub fn build_summary(entries: &[JsonlEntry], custom_title: Option<&str>) -> ClaudeSummary {
     let state = extract_activity_state(entries);
     let last_assistant = find_last_assistant_message(entries);
 
@@ -292,7 +308,8 @@ pub fn build_summary(entries: &[JsonlEntry]) -> ClaudeSummary {
 
     let state_string = state.to_string();
 
-    let session_name = extract_slug(entries);
+    let slug = extract_slug(entries);
+    let session_name = resolve_session_name(custom_title, slug.as_deref());
 
     ClaudeSummary {
         state: state_string,
@@ -537,6 +554,50 @@ mod tests {
         let deserialized: ClaudeSummary = serde_json::from_str(&json_string).unwrap();
 
         assert_eq!(summary, deserialized);
+    }
+
+    #[test]
+    fn test_resolve_session_name_prefers_custom_title() {
+        let result = resolve_session_name(Some("My Session"), Some("auto-slug"));
+        assert_eq!(result.as_deref(), Some("My Session"));
+    }
+
+    #[test]
+    fn test_resolve_session_name_falls_back_to_slug() {
+        let result = resolve_session_name(None, Some("auto-slug"));
+        assert_eq!(result.as_deref(), Some("auto-slug"));
+    }
+
+    #[test]
+    fn test_resolve_session_name_returns_none_when_both_absent() {
+        let result = resolve_session_name(None, None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_build_summary_uses_custom_title_over_slug() {
+        // Entry with a slug.
+        let mut entry = make_assistant_entry(Some("end_turn"), "claude-opus-4-6");
+        entry.slug = Some("auto-slug".to_string());
+
+        let summary = build_summary(&[entry], Some("My Custom Title"));
+        assert_eq!(summary.session_name.as_deref(), Some("My Custom Title"));
+    }
+
+    #[test]
+    fn test_build_summary_uses_slug_when_no_custom_title() {
+        let mut entry = make_assistant_entry(Some("end_turn"), "claude-opus-4-6");
+        entry.slug = Some("auto-slug".to_string());
+
+        let summary = build_summary(&[entry], None);
+        assert_eq!(summary.session_name.as_deref(), Some("auto-slug"));
+    }
+
+    #[test]
+    fn test_build_summary_session_name_none_when_no_sources() {
+        let entry = make_assistant_entry(Some("end_turn"), "claude-opus-4-6");
+        let summary = build_summary(&[entry], None);
+        assert_eq!(summary.session_name, None);
     }
 
     #[test]

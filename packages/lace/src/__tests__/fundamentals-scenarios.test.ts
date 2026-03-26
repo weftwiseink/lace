@@ -4,7 +4,7 @@
  * Integration tests for the lace-fundamentals devcontainer feature:
  * - F1: Fundamentals with user.json (git identity, defaultShell, postCreateCommand)
  * - F2: Fundamentals without user.json (graceful degradation)
- * - F3: Feature metadata validation (dependsOn, ports, mounts)
+ * - F3: Feature metadata validation (dependsOn, mounts)
  * - F4: postCreateCommand auto-injection
  */
 
@@ -20,7 +20,6 @@ import {
   symlinkLocalFeature,
   readGeneratedConfig,
   setupScenarioSettings,
-  createTempSshKey,
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
 
@@ -65,7 +64,6 @@ function setupUserConfig(
  * Helper: create sources for all lace-fundamentals mounts and configure settings.
  */
 function setupFundamentalsMounts(ctx: ScenarioWorkspace): void {
-  const keyPath = createTempSshKey(ctx);
   const dotfilesDir = join(ctx.workspaceRoot, "dotfiles-repo");
   mkdirSync(dotfilesDir, { recursive: true });
   const screenshotsDir = join(ctx.workspaceRoot, "screenshots");
@@ -73,7 +71,6 @@ function setupFundamentalsMounts(ctx: ScenarioWorkspace): void {
 
   setupScenarioSettings(ctx, {
     mounts: {
-      "lace-fundamentals/authorized-keys": { source: keyPath },
       "lace-fundamentals/dotfiles": { source: dotfilesDir },
       "lace-fundamentals/screenshots": { source: screenshotsDir },
     },
@@ -123,17 +120,13 @@ describe("Scenario F1: fundamentals with user.json", () => {
     expect(features[featurePath]).toBeDefined();
     expect(features[featurePath].defaultShell).toBe("/usr/bin/nu");
 
-    // Verify SSH port allocation
-    const port = result.phases.portAssignment?.port;
-    expect(port).toBeDefined();
-    expect(port!).toBeGreaterThanOrEqual(22425);
   });
 });
 
 // ── F2: Fundamentals without user.json ──
 
 describe("Scenario F2: fundamentals without user.json", () => {
-  it("works without user.json: no git env vars, SSH port still allocated", async () => {
+  it("works without user.json: no git env vars, feature still present", async () => {
     const featurePath = symlinkLocalFeature(ctx, "lace-fundamentals");
     setupFundamentalsMounts(ctx);
 
@@ -165,11 +158,6 @@ describe("Scenario F2: fundamentals without user.json", () => {
     expect(containerEnv.LACE_GIT_NAME).toBeUndefined();
     expect(containerEnv.LACE_GIT_EMAIL).toBeUndefined();
 
-    // SSH port still allocated
-    const port = result.phases.portAssignment?.port;
-    expect(port).toBeDefined();
-    expect(port!).toBeGreaterThanOrEqual(22425);
-
     // Feature is present
     const features = extended.features as Record<string, Record<string, unknown>>;
     expect(features[featurePath]).toBeDefined();
@@ -179,7 +167,7 @@ describe("Scenario F2: fundamentals without user.json", () => {
 // ── F3: Feature metadata validation ──
 
 describe("Scenario F3: feature metadata validation", () => {
-  it("feature metadata declares correct ports, mounts, and dependsOn", () => {
+  it("feature metadata declares correct mounts and dependsOn", () => {
     // Read the actual feature metadata directly
     const currentDir = dirname(fileURLToPath(import.meta.url));
     const featureSourceDir = join(
@@ -199,28 +187,24 @@ describe("Scenario F3: feature metadata validation", () => {
 
     // Verify identity
     expect(metadata.id).toBe("lace-fundamentals");
-    expect(metadata.version).toBe("1.0.2");
+    expect(metadata.version).toBe("2.0.0");
 
-    // Verify dependsOn
+    // Verify dependsOn: git only (sshd removed in v2.0.0)
     expect(metadata.dependsOn).toBeDefined();
-    expect(metadata.dependsOn["ghcr.io/devcontainers/features/sshd:1"]).toBeDefined();
     expect(metadata.dependsOn["ghcr.io/devcontainers/features/git:1"]).toBeDefined();
+    expect(metadata.dependsOn["ghcr.io/devcontainers/features/sshd:1"]).toBeUndefined();
 
-    // Verify options
-    expect(metadata.options.sshPort).toBeDefined();
+    // Verify options: defaultShell only (sshPort, enableSshHardening removed in v2.0.0)
     expect(metadata.options.defaultShell).toBeDefined();
-    expect(metadata.options.enableSshHardening).toBeDefined();
+    expect(metadata.options.sshPort).toBeUndefined();
+    expect(metadata.options.enableSshHardening).toBeUndefined();
 
-    // Verify lace port declaration
-    const lacePorts = metadata.customizations.lace.ports;
-    expect(lacePorts.sshPort).toBeDefined();
-    expect(lacePorts.sshPort.label).toBe("sshd");
-    expect(lacePorts.sshPort.requireLocalPort).toBe(true);
+    // Verify no lace port declarations (removed in v2.0.0)
+    expect(metadata.customizations.lace.ports).toBeUndefined();
 
-    // Verify lace mount declarations
+    // Verify lace mount declarations: dotfiles and screenshots only (authorized-keys removed)
     const laceMounts = metadata.customizations.lace.mounts;
-    expect(laceMounts["authorized-keys"]).toBeDefined();
-    expect(laceMounts["authorized-keys"].sourceMustBe).toBe("file");
+    expect(laceMounts["authorized-keys"]).toBeUndefined();
     expect(laceMounts.dotfiles).toBeDefined();
     expect(laceMounts.dotfiles.target).toBe("/mnt/lace/repos/dotfiles");
     expect(laceMounts.screenshots).toBeDefined();

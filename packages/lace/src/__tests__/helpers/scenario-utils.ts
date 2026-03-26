@@ -99,16 +99,6 @@ export function setupScenarioSettings(
 }
 
 /**
- * Create a temporary SSH key file in the workspace for validated mount tests.
- * Returns the absolute path to the created file.
- */
-export function createTempSshKey(ctx: ScenarioWorkspace): string {
-  const keyPath = join(ctx.workspaceRoot, "test-ssh-key.pub");
-  writeFileSync(keyPath, "ssh-ed25519 AAAA test-scenario@test\n", "utf-8");
-  return keyPath;
-}
-
-/**
  * Write a devcontainer.json file into the workspace's .devcontainer/ directory.
  */
 export function writeDevcontainerJson(

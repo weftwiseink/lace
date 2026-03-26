@@ -1,5 +1,5 @@
 // IMPLEMENTATION_VALIDATION
-import { readFileSync, writeFileSync, mkdirSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isLocalPath } from "@/lib/feature-metadata";
 import {
@@ -293,7 +293,10 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     const sourcePath = resolve(config.configDir, featureRef);
     const targetPath = join(prebuildConfigDir, featureRef);
     mkdirSync(join(targetPath, ".."), { recursive: true });
-    cpSync(sourcePath, targetPath, { recursive: true });
+    // Remove stale target to avoid "src and dest cannot be the same" when a
+    // symlink in the source resolves to the same real path as a prior copy.
+    rmSync(targetPath, { recursive: true, force: true });
+    cpSync(sourcePath, targetPath, { recursive: true, dereference: true });
   }
 
   const lockFilePath = join(config.configDir, "devcontainer-lock.json");

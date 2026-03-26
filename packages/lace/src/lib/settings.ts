@@ -22,6 +22,8 @@ export interface LaceSettings {
   mounts?: {
     [label: string]: MountOverrideSettings;
   };
+  /** Override the container runtime command. Defaults to "podman". */
+  overridePodmanCommand?: string;
 }
 
 /**

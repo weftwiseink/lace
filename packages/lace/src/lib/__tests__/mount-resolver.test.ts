@@ -1023,7 +1023,7 @@ describe("MountPathResolver — ${lace.projectName} substitution", () => {
     const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
 
     // Without projectName, ${lace.projectName} is not substituted.
-    // The path won't exist, so it should throw a validation error.
+    // Unresolved variables prevent auto-creation, so it should throw.
     expect(() => resolver.resolveSource("sprack/data")).toThrow(/requires directory/);
   });
 
@@ -1067,5 +1067,23 @@ describe("MountPathResolver — ${lace.projectName} substitution", () => {
     const resolver = new MountPathResolver(workspaceFolder, {}, declarations, undefined, "test-project-abc");
     const result = resolver.resolveSource("sprack/data");
     expect(result).toBe(projectDir);
+  });
+
+  it("auto-creates recommended directory source when it does not exist", () => {
+    const autoDir = join(testDir, "auto-created-project");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: join(testDir, "${lace.projectName}"),
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, undefined, "auto-created-project");
+    expect(existsSync(autoDir)).toBe(false);
+
+    const result = resolver.resolveSource("sprack/data");
+    expect(result).toBe(autoDir);
+    expect(existsSync(autoDir)).toBe(true);
   });
 });

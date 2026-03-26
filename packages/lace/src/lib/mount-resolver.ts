@@ -336,6 +336,13 @@ export class MountPathResolver {
         source = source.replace(/\$\{lace\.projectName\}/g, this.projectName);
       }
       const expandedPath = expandPath(source);
+      // Auto-create recommended directory sources (not files, not overrides).
+      // Files must pre-exist (e.g., SSH keys), but directories can be created
+      // on demand (e.g., project-scoped data dirs like sprack event storage).
+      // Skip auto-creation if the path contains unresolved variables (${...}).
+      if (decl.sourceMustBe === "directory" && !existsSync(expandedPath) && !expandedPath.includes("${")) {
+        mkdirSync(expandedPath, { recursive: true });
+      }
       this.validateSourceType(
         expandedPath,
         decl.sourceMustBe!,

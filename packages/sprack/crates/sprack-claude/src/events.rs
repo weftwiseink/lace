@@ -387,13 +387,42 @@ fn find_batch_prune_boundary(tasks: &[TaskEntry], batch_starts: &[usize]) -> usi
     prune_up_to
 }
 
-/// Returns the default event directory path.
-pub fn default_event_dir() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    Some(
-        PathBuf::from(home)
-            .join(".local/share/sprack/claude-events"),
-    )
+/// Returns all event directories: per-project mounts first, then the legacy flat directory.
+///
+/// Per-project directories are at `~/.local/share/sprack/lace/*/claude-events/`.
+/// The legacy flat directory is at `~/.local/share/sprack/claude-events/`.
+/// Per-project directories are searched first (higher priority: more likely to be current).
+pub fn event_dirs() -> Vec<PathBuf> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => PathBuf::from(h),
+        Err(_) => return Vec::new(),
+    };
+    event_dirs_from_home(&home)
+}
+
+/// Discover event directories relative to a given home directory.
+/// Separated from `event_dirs()` for testability.
+pub fn event_dirs_from_home(home: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    // Per-project: lace container mounts at ~/.local/share/sprack/lace/*/claude-events/.
+    let lace_dir = home.join(".local/share/sprack/lace");
+    if let Ok(entries) = std::fs::read_dir(&lace_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let events_dir = entry.path().join("claude-events");
+            if events_dir.is_dir() {
+                dirs.push(events_dir);
+            }
+        }
+    }
+
+    // Legacy/local: flat event directory for host-side sessions.
+    let flat_dir = home.join(".local/share/sprack/claude-events");
+    if flat_dir.is_dir() {
+        dirs.push(flat_dir);
+    }
+
+    dirs
 }
 
 #[cfg(test)]
@@ -887,5 +916,101 @@ mod tests {
         ];
         // Batch 1 (t1, t2) has t2 not completed: no pruning.
         assert_eq!(find_batch_prune_boundary(&tasks, &[0, 2]), 0);
+    }
+
+    // ── event_dirs_from_home tests ──
+
+    #[test]
+    fn event_dirs_returns_empty_for_nonexistent_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake_home = dir.path().join("nonexistent");
+        let dirs = event_dirs_from_home(&fake_home);
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn event_dirs_returns_legacy_flat_dir_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let flat_dir = home.join(".local/share/sprack/claude-events");
+        std::fs::create_dir_all(&flat_dir).unwrap();
+
+        let dirs = event_dirs_from_home(home);
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], flat_dir);
+    }
+
+    #[test]
+    fn event_dirs_returns_per_project_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let proj_a = home.join(".local/share/sprack/lace/project-a/claude-events");
+        let proj_b = home.join(".local/share/sprack/lace/project-b/claude-events");
+        std::fs::create_dir_all(&proj_a).unwrap();
+        std::fs::create_dir_all(&proj_b).unwrap();
+
+        let dirs = event_dirs_from_home(home);
+        assert_eq!(dirs.len(), 2);
+        // Both project dirs should be present (order depends on fs enumeration).
+        assert!(dirs.contains(&proj_a));
+        assert!(dirs.contains(&proj_b));
+    }
+
+    #[test]
+    fn event_dirs_per_project_before_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let flat_dir = home.join(".local/share/sprack/claude-events");
+        let proj_dir = home.join(".local/share/sprack/lace/my-project/claude-events");
+        std::fs::create_dir_all(&flat_dir).unwrap();
+        std::fs::create_dir_all(&proj_dir).unwrap();
+
+        let dirs = event_dirs_from_home(home);
+        assert_eq!(dirs.len(), 2);
+        // Per-project directories come first, legacy flat dir last.
+        assert_eq!(dirs[dirs.len() - 1], flat_dir);
+        assert_eq!(dirs[0], proj_dir);
+    }
+
+    #[test]
+    fn event_dirs_skips_projects_without_claude_events_subdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        // Create a project dir without the claude-events subdirectory.
+        let proj_no_events = home.join(".local/share/sprack/lace/empty-project/metadata");
+        std::fs::create_dir_all(&proj_no_events).unwrap();
+        // Create a project dir WITH the claude-events subdirectory.
+        let proj_with_events = home.join(".local/share/sprack/lace/active-project/claude-events");
+        std::fs::create_dir_all(&proj_with_events).unwrap();
+
+        let dirs = event_dirs_from_home(home);
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], proj_with_events);
+    }
+
+    #[test]
+    fn find_event_file_across_multiple_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        // Simulate two event directories (per-project and legacy).
+        let proj_dir = dir.path().join("project-events");
+        let legacy_dir = dir.path().join("legacy-events");
+        std::fs::create_dir_all(&proj_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+
+        // Write an event in the project directory.
+        let proj_file = proj_dir.join("sess-proj.jsonl");
+        write_event_line(&proj_file, "SessionStart", "sess-proj", "/workspaces/lace", r#"{}"#);
+
+        // Write an event in the legacy directory.
+        let legacy_file = legacy_dir.join("sess-legacy.jsonl");
+        write_event_line(&legacy_file, "SessionStart", "sess-legacy", "/home/user/code", r#"{}"#);
+
+        // Search by session_id: should find in project dir.
+        let found = find_event_file_by_session_id(&proj_dir, "sess-proj");
+        assert_eq!(found, Some(proj_file));
+
+        // Search by cwd in legacy dir.
+        let found = find_event_file(&legacy_dir, "/home/user/code");
+        assert_eq!(found, Some(legacy_file));
     }
 }

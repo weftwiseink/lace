@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/test-health
 type: devlog
 state: live
-status: wip
+status: done
 tags: [test-health, test-isolation, acceptance-tests]
 ---
 

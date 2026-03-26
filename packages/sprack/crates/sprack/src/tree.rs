@@ -751,19 +751,11 @@ fn format_rich_widget(
         }
     }
 
-    // Git context line: "on {branch}@{commit}" at Wide/Full tiers.
-    // Full tier appends worktree branches: "on {branch}@{commit} (wt {b1}, {b2})".
-    if let (Some(branch), Some(commit)) = (&summary.git_branch, &summary.git_commit_short) {
-        let mut git_line = format!("  on {branch}@{commit}");
-        if matches!(tier, LayoutTier::Full) {
-            if let Some(ref wt_branches) = summary.git_worktree_branches {
-                if !wt_branches.is_empty() {
-                    git_line.push_str(&format!(" (wt {})", wt_branches.join(", ")));
-                }
-            }
-        }
-        lines.push(Line::from(Span::styled(git_line, theme.subtext0)));
-    }
+    // Git context line: disabled pending redesign.
+    // Data collection continues in sprack-claude but rendering is suppressed.
+    // See RFP: sprack-git-context-iteration for the redesign plan.
+    // TODO(opus/sprack-git-context): Re-enable after container support and
+    // worktree enumeration redesign (show sibling sessions, not all worktrees).
 
     // Session purpose line.
     if let Some(purpose) = &summary.session_purpose {

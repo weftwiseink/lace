@@ -35,7 +35,7 @@ def resolve-runtime []: nothing -> string {
 
   if (which podman | is-not-empty) { return "podman" }
   if (which docker | is-not-empty) { return "docker" }
-  error make { msg: "No container runtime found. Install podman or docker." }
+  "MISSING_RUNTIME"
 }
 
 def main [
@@ -239,13 +239,13 @@ def main [
       }
       print $"    git HEAD:             ($git_check)"
 
-      # Check ssh connectivity
-      let ssh_check = try {
-        ^$runtime exec $name bash -c "pgrep -x sshd > /dev/null && echo 'running' || echo 'not running'" | str trim
+      # Check exec connectivity
+      let exec_check = try {
+        ^$runtime exec $name echo ok | str trim
       } catch {
-        "unknown"
+        "unreachable"
       }
-      print $"    sshd:                 ($ssh_check)"
+      print $"    exec connectivity:    ($exec_check)"
     }
 
     # --- Raw output ---

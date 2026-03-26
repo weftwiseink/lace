@@ -2,7 +2,7 @@
 
 A tree-style tmux session browser built as cooperating Rust binaries sharing a SQLite database.
 sprack renders a persistent, responsive view of every tmux session, window, and pane as a collapsible tree.
-Sessions are grouped by lace devcontainer using `@lace_port` tmux options.
+Sessions are grouped by lace devcontainer using `@lace_container` tmux options.
 
 sprack is read-and-navigate only: it does not create, destroy, or rearrange tmux objects.
 

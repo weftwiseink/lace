@@ -15,8 +15,8 @@ pub struct Session {
     pub name: String,
     /// Whether a client is currently attached to this session.
     pub attached: bool,
-    /// SSH port from the @lace_port tmux option, if this is a lace session.
-    pub lace_port: Option<u16>,
+    /// Container name from the @lace_container tmux option, if this is a lace session.
+    pub lace_container: Option<String>,
     /// Username from the @lace_user tmux option, if this is a lace session.
     pub lace_user: Option<String>,
     /// Workspace path from the @lace_workspace tmux option, if this is a lace session.

@@ -15,7 +15,7 @@ if [ -z "$pane_id" ]; then
 fi
 
 # Clear pane-level lace options so lace-split treats this as a local pane
-tmux set-option -pu -t "$pane_id" @lace_port 2>/dev/null || true
+tmux set-option -pu -t "$pane_id" @lace_container 2>/dev/null || true
 tmux set-option -pu -t "$pane_id" @lace_user 2>/dev/null || true
 tmux set-option -pu -t "$pane_id" @lace_workspace 2>/dev/null || true
 

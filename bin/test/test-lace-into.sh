@@ -7,14 +7,13 @@ SOCKET="lace-test-harness"
 BINDIR=$(mktemp -d)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LACE_INTO="$SCRIPT_DIR/../lace-into"
-KNOWN_HOSTS=$(mktemp /tmp/lace-test-known-hosts-XXXXXX)
 PASS=0
 FAIL=0
 TESTS_RUN=0
 
 cleanup() {
   tmux -f /dev/null -L "$SOCKET" kill-server 2>/dev/null || true
-  rm -rf "$BINDIR" "$KNOWN_HOSTS"
+  rm -rf "$BINDIR"
 }
 trap cleanup EXIT
 
@@ -48,7 +47,7 @@ assert_contains() {
 # --- Mock setup ---
 setup_mocks() {
   local project="${1:-test-proj}"
-  local port="${2:-22426}"
+  local container_name="${2:-test-container}"
   local user="${3:-node}"
   local path="${4:-/home/test}"
   local workspace="${5:-/workspaces/test}"
@@ -62,31 +61,28 @@ SHIM
 
   cat > "$BINDIR/lace-discover" << MOCK
 #!/bin/bash
-echo "${project}:${port}:${user}:${path}:${workspace}"
+echo "${project}:${container_name}:${user}:${path}:${workspace}"
 MOCK
   chmod +x "$BINDIR/lace-discover"
 
-  # Mock ssh: run a local shell (simulates SSH connection)
-  cat > "$BINDIR/ssh" << 'MOCK'
+  # Mock podman/docker: run a local shell (simulates exec -it)
+  cat > "$BINDIR/podman" << 'MOCK'
 #!/bin/bash
-exec bash --norc --noprofile
+# Mock podman exec: just run bash
+if [[ "$1" == "exec" ]]; then
+  exec bash --norc --noprofile
+elif [[ "$1" == "inspect" ]]; then
+  echo "unknown"
+elif [[ "$1" == "info" ]]; then
+  exit 0
+elif [[ "$1" == "ps" ]]; then
+  echo ""
+fi
 MOCK
-  chmod +x "$BINDIR/ssh"
+  chmod +x "$BINDIR/podman"
 
-  # Mock ssh-keyscan: emit a fake host key line (must output a key for refresh_host_key)
-  cat > "$BINDIR/ssh-keyscan" << 'MOCK'
-#!/bin/bash
-# $3 is the port (ssh-keyscan -p PORT HOST)
-echo "[localhost]:${3:-22} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeTestKey"
-MOCK
-  chmod +x "$BINDIR/ssh-keyscan"
-
-  # Mock ssh-keygen: silently succeed
-  cat > "$BINDIR/ssh-keygen" << 'MOCK'
-#!/bin/bash
-exit 0
-MOCK
-  chmod +x "$BINDIR/ssh-keygen"
+  # Also provide docker as alias
+  cp "$BINDIR/podman" "$BINDIR/docker"
 }
 
 run_lace_into() {
@@ -164,19 +160,19 @@ get_pane_option() {
 # =============================================================================
 
 echo "=== Test 1: Fresh session creation ==="
-setup_mocks "test-proj" "22426"
+setup_mocks "test-proj" "test-container"
 kill_session "test-proj"
 OUTPUT=$(run_lace_into test-proj)
 sleep 0.3
 assert_eq "session exists" "0" "$(tmx has-session -t '=test-proj' 2>/dev/null; echo $?)"
-assert_eq "port option set" "22426" "$(get_option test-proj @lace_port)"
+assert_eq "container option set" "test-container" "$(get_option test-proj @lace_container)"
 assert_eq "user option set" "node" "$(get_option test-proj @lace_user)"
 assert_eq "workspace option set" "/workspaces/test" "$(get_option test-proj @lace_workspace)"
 assert_eq "pane alive" "1" "$(pane_alive_count test-proj)"
 
 # Pane-level options should also be set for lace-split context detection
 INITIAL_PANE=$(tmx list-panes -t "=test-proj" -F '#{pane_id}' | head -1)
-assert_eq "pane-level port set" "22426" "$(get_pane_option "$INITIAL_PANE" @lace_port)"
+assert_eq "pane-level container set" "test-container" "$(get_pane_option "$INITIAL_PANE" @lace_container)"
 assert_eq "pane-level user set" "node" "$(get_pane_option "$INITIAL_PANE" @lace_user)"
 assert_eq "pane-level workspace set" "/workspaces/test" "$(get_pane_option "$INITIAL_PANE" @lace_workspace)"
 
@@ -200,7 +196,7 @@ OUTPUT=$(run_lace_into test-proj)
 sleep 0.3
 assert_eq "session exists after reconnect" "0" "$(tmx has-session -t '=test-proj' 2>/dev/null; echo $?)"
 assert_eq "pane alive after reconnect" "1" "$(pane_alive_count test-proj)"
-assert_eq "port preserved" "22426" "$(get_option test-proj @lace_port)"
+assert_eq "container preserved" "test-container" "$(get_option test-proj @lace_container)"
 assert_contains "used respawn path" "respawning" "$OUTPUT"
 
 echo ""
@@ -259,9 +255,9 @@ OUTPUT=$(run_lace_into --pane test-proj)
 assert_contains "error message" "pane requires running inside tmux" "$OUTPUT"
 
 echo ""
-echo "=== Test 7: --pane inside tmux (respawn pane with SSH) ==="
+echo "=== Test 7: --pane inside tmux (respawn pane with exec) ==="
 # Create a fresh session to serve as the "current session" for --pane
-setup_mocks "pane-proj" "22427"
+setup_mocks "pane-proj" "pane-container"
 kill_session "pane-test-session"
 tmx new-session -d -s pane-test-session 'bash --norc --noprofile'
 sleep 0.3
@@ -273,7 +269,7 @@ INITIAL_PID=$(tmx list-panes -t "=pane-test-session" -F '#{pane_pid}' | head -1)
 OUTPUT=$(run_lace_into_pane "pane-test-session" --pane pane-proj)
 sleep 0.3
 
-# The pane should still be alive (respawned with mock ssh -> bash)
+# The pane should still be alive (respawned with mock podman exec -> bash)
 assert_eq "pane alive after --pane" "1" "$(pane_alive_count pane-test-session)"
 
 # The pane PID should have changed (respawn-pane -k kills and restarts)
@@ -290,13 +286,13 @@ fi
 echo ""
 echo "=== Test 8: --pane sets session and pane options ==="
 # Session options should be set by --pane since this is a fresh session
-assert_eq "session @lace_port set" "22427" "$(get_option pane-test-session @lace_port)"
+assert_eq "session @lace_container set" "pane-container" "$(get_option pane-test-session @lace_container)"
 assert_eq "session @lace_user set" "node" "$(get_option pane-test-session @lace_user)"
 assert_eq "session @lace_workspace set" "/workspaces/test" "$(get_option pane-test-session @lace_workspace)"
 
 # Pane-level options should be set on the connected pane
 CONNECTED_PANE=$(tmx list-panes -t "=pane-test-session" -F '#{pane_id}' | head -1)
-assert_eq "pane-level @lace_port set" "22427" "$(get_pane_option "$CONNECTED_PANE" @lace_port)"
+assert_eq "pane-level @lace_container set" "pane-container" "$(get_pane_option "$CONNECTED_PANE" @lace_container)"
 assert_eq "pane-level @lace_user set" "node" "$(get_pane_option "$CONNECTED_PANE" @lace_user)"
 assert_eq "pane-level @lace_workspace set" "/workspaces/test" "$(get_pane_option "$CONNECTED_PANE" @lace_workspace)"
 
@@ -308,7 +304,7 @@ echo ""
 echo "=== Test 9: --pane set-if-absent does not overwrite ==="
 # Connect a second project to a new pane in the same session.
 # Session options should NOT change (set-if-absent logic).
-setup_mocks "other-proj" "22428"
+setup_mocks "other-proj" "other-container"
 tmx split-window -t pane-test-session bash --norc --noprofile
 sleep 0.3
 
@@ -326,15 +322,15 @@ OUTPUT=$(TMUX="${socket_path},${server_pid},0" \
   timeout 5 "$LACE_INTO" --pane other-proj 2>&1 || true)
 sleep 0.3
 
-# Session-level @lace_port should still be the FIRST project's port
-assert_eq "session @lace_port unchanged" "22427" "$(get_option pane-test-session @lace_port)"
-# Warning should be emitted about port mismatch
-assert_contains "port mismatch warning" "differs from pane target" "$OUTPUT"
+# Session-level @lace_container should still be the FIRST project's container
+assert_eq "session @lace_container unchanged" "pane-container" "$(get_option pane-test-session @lace_container)"
+# Warning should be emitted about container mismatch
+assert_contains "container mismatch warning" "differs from pane target" "$OUTPUT"
 
 echo ""
 echo "=== Test 10: disconnect-pane (respawn-pane -k drops to shell) ==="
 # Create a clean session for disconnect testing (avoids pane state issues
-# from prior tests). The pane starts running bash (simulates an SSH pane).
+# from prior tests). The pane starts running bash (simulates a container exec pane).
 kill_session "disconnect-test"
 tmx new-session -d -s disconnect-test 'bash --norc --noprofile'
 sleep 0.3
@@ -365,12 +361,12 @@ fi
 
 echo ""
 echo "=== Test 11: lace-split local pane does local split ==="
-# Create a session with a local bash pane (no lace options, no SSH)
+# Create a session with a local bash pane (no lace options)
 kill_session "split-local-test"
 tmx new-session -d -s split-local-test 'bash --norc --noprofile'
 sleep 0.3
 
-# lace-split should detect pane_current_command != "ssh" and do a local split
+# lace-split should detect no @lace_container and do a local split
 LACE_SPLIT="$SCRIPT_DIR/../lace-split"
 BEFORE_COUNT=$(tmx list-panes -t "=split-local-test" | wc -l)
 # Run lace-split targeting the session (from inside the test tmux)
@@ -381,10 +377,10 @@ assert_eq "local split created pane" "2" "$AFTER_COUNT"
 
 # Neither new pane should have pane-level lace options
 for pane in $(tmx list-panes -t "=split-local-test" -F '#{pane_id}'); do
-  pane_port=$(get_pane_option "$pane" @lace_port)
-  if [ -n "$pane_port" ]; then
+  pane_container=$(get_pane_option "$pane" @lace_container)
+  if [ -n "$pane_container" ]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    echo "  FAIL: local pane $pane should not have @lace_port (got: $pane_port)"
+    echo "  FAIL: local pane $pane should not have @lace_container (got: $pane_container)"
     FAIL=$((FAIL + 1))
   fi
 done
@@ -404,12 +400,12 @@ PANE_ID=$(tmx list-panes -t "=disconnect-test2" -F '#{pane_id}' | head -1)
 BEFORE_PID=$(tmx list-panes -t "=disconnect-test2" -F '#{pane_pid}' | head -1)
 
 # Simulate lace-into --pane by setting pane-level options
-tmx set-option -p -t "$PANE_ID" @lace_port "22427"
+tmx set-option -p -t "$PANE_ID" @lace_container "test-container"
 tmx set-option -p -t "$PANE_ID" @lace_user "node"
 tmx set-option -p -t "$PANE_ID" @lace_workspace "/workspaces/test"
 
 # Verify options are set
-assert_eq "pre-disconnect port set" "22427" "$(get_pane_option "$PANE_ID" @lace_port)"
+assert_eq "pre-disconnect container set" "test-container" "$(get_pane_option "$PANE_ID" @lace_container)"
 
 # Run lace-disconnect-pane (uses test tmux via PATH shim)
 PATH="$BINDIR:/usr/bin:/bin" "$LACE_DISCONNECT" "$PANE_ID" 2>&1 || true
@@ -430,14 +426,14 @@ else
 fi
 
 # Pane-level lace options should be cleared
-assert_eq "post-disconnect port cleared" "" "$(get_pane_option "$PANE_ID" @lace_port)"
+assert_eq "post-disconnect container cleared" "" "$(get_pane_option "$PANE_ID" @lace_container)"
 assert_eq "post-disconnect user cleared" "" "$(get_pane_option "$PANE_ID" @lace_user)"
 assert_eq "post-disconnect workspace cleared" "" "$(get_pane_option "$PANE_ID" @lace_workspace)"
 
 echo ""
 echo "=== Test 13: respawned dead panes get pane-level options ==="
 # Create a session, kill a pane, reconnect, verify pane-level options on respawned pane
-setup_mocks "respawn-opts-proj" "22429"
+setup_mocks "respawn-opts-proj" "respawn-container"
 kill_session "respawn-opts-proj"
 OUTPUT=$(run_lace_into respawn-opts-proj)
 sleep 0.3
@@ -453,7 +449,7 @@ sleep 0.3
 
 # Respawned pane should have pane-level options
 RESPAWNED_PANE=$(tmx list-panes -t "=respawn-opts-proj" -F '#{pane_id}' | head -1)
-assert_eq "respawned pane has port" "22429" "$(get_pane_option "$RESPAWNED_PANE" @lace_port)"
+assert_eq "respawned pane has container" "respawn-container" "$(get_pane_option "$RESPAWNED_PANE" @lace_container)"
 assert_eq "respawned pane has workspace" "/workspaces/test" "$(get_pane_option "$RESPAWNED_PANE" @lace_workspace)"
 
 # =============================================================================

@@ -179,28 +179,27 @@ pub fn parse_tmux_output(raw: &str) -> TmuxSnapshot {
 /// Lace metadata for a single session, read from tmux user options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaceMeta {
-    pub port: Option<u16>,
+    pub container: Option<String>,
     pub user: Option<String>,
     pub workspace: Option<String>,
 }
 
 /// Reads lace-specific tmux user options for each session.
 ///
-/// Calls `tmux show-options -qvt $session @lace_port/user/workspace` per session.
+/// Calls `tmux show-options -qvt $session @lace_container/user/workspace` per session.
 /// When `socket` is `Some`, targets an isolated tmux server (for testing).
 /// Missing options produce `None` values, not errors.
 pub fn query_lace_options(session_names: &[String], socket: Option<&str>) -> HashMap<String, LaceMeta> {
     let mut result = HashMap::new();
     for session_name in session_names {
-        let port = read_lace_option(session_name, "@lace_port", socket)
-            .and_then(|value| value.parse::<u16>().ok());
+        let container = read_lace_option(session_name, "@lace_container", socket);
         let user = read_lace_option(session_name, "@lace_user", socket);
         let workspace = read_lace_option(session_name, "@lace_workspace", socket);
 
         result.insert(
             session_name.clone(),
             LaceMeta {
-                port,
+                container,
                 user,
                 workspace,
             },
@@ -252,7 +251,7 @@ pub fn to_db_types(
         sessions.push(sprack_db::types::Session {
             name: tmux_session.name.clone(),
             attached: tmux_session.attached,
-            lace_port: meta.and_then(|m| m.port),
+            lace_container: meta.and_then(|m| m.container.clone()),
             lace_user: meta.and_then(|m| m.user.clone()),
             lace_workspace: meta.and_then(|m| m.workspace.clone()),
             updated_at: timestamp.clone(),
@@ -721,7 +720,7 @@ mod tests {
         lace_meta.insert(
             "dev".to_string(),
             LaceMeta {
-                port: Some(2222),
+                container: Some("dev".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
@@ -732,7 +731,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].name, "dev");
         assert!(sessions[0].attached);
-        assert_eq!(sessions[0].lace_port, Some(2222));
+        assert_eq!(sessions[0].lace_container.as_deref(), Some("dev"));
         assert_eq!(sessions[0].lace_user.as_deref(), Some("node"));
         assert_eq!(sessions[0].lace_workspace.as_deref(), Some("/workspace"));
 
@@ -794,7 +793,7 @@ mod tests {
         let lace_meta = HashMap::new();
         let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
 
-        assert_eq!(sessions[0].lace_port, None);
+        assert_eq!(sessions[0].lace_container, None);
         assert_eq!(sessions[0].lace_user, None);
         assert_eq!(sessions[0].lace_workspace, None);
         // Window index u32 -> i32 conversion.

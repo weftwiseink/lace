@@ -18,7 +18,7 @@ use crate::session::{self, CacheKey, SessionFileState};
 /// Directories whose newest `.jsonl` mtime is older than this are ignored.
 const CONTAINER_RECENCY_THRESHOLD: Duration = Duration::from_secs(300);
 
-/// Session names for which the "lace_port without lace_workspace" warning
+/// Session names for which the "lace_container without lace_workspace" warning
 /// has already been emitted. Prevents per-cycle stderr spam.
 static WARNED_MISSING_WORKSPACE: std::sync::LazyLock<Mutex<HashSet<String>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -27,7 +27,7 @@ static WARNED_MISSING_WORKSPACE: std::sync::LazyLock<Mutex<HashSet<String>>> =
 ///
 /// A pane is a candidate if:
 /// - Its `current_command` contains "claude" (local Claude pane), OR
-/// - Its parent session has `lace_port` set (container pane).
+/// - Its parent session has `lace_container` set (container pane).
 pub fn find_candidate_panes(
     snapshot: &sprack_db::types::DbSnapshot,
 ) -> Vec<sprack_db::types::Pane> {
@@ -35,19 +35,19 @@ pub fn find_candidate_panes(
         .sessions
         .iter()
         .filter(|session| {
-            let has_port = session.lace_port.is_some();
+            let has_container = session.lace_container.is_some();
             let has_workspace = session.lace_workspace.is_some();
-            if has_port && !has_workspace {
+            if has_container && !has_workspace {
                 if let Ok(mut warned) = WARNED_MISSING_WORKSPACE.lock() {
                     if warned.insert(session.name.clone()) {
                         eprintln!(
-                            "sprack-claude: session '{}' has lace_port but no lace_workspace, skipping container resolution",
+                            "sprack-claude: session '{}' has lace_container but no lace_workspace, skipping container resolution",
                             session.name,
                         );
                     }
                 }
             }
-            has_port && has_workspace
+            has_container && has_workspace
         })
         .map(|session| session.name.as_str())
         .collect();
@@ -69,7 +69,7 @@ pub fn build_lace_session_map(
 ) -> HashMap<String, sprack_db::types::Session> {
     sessions
         .iter()
-        .filter(|session| session.lace_port.is_some())
+        .filter(|session| session.lace_container.is_some())
         .map(|session| (session.name.clone(), session.clone()))
         .collect()
 }
@@ -460,7 +460,7 @@ mod tests {
         let session = sprack_db::types::Session {
             name: "lace-dev".to_string(),
             attached: false,
-            lace_port: Some(2222),
+            lace_container: Some("dev-container".to_string()),
             lace_user: Some("node".to_string()),
             lace_workspace: Some("/workspaces/lace".to_string()),
             updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -491,7 +491,7 @@ mod tests {
         let session = sprack_db::types::Session {
             name: "lace-dev".to_string(),
             attached: false,
-            lace_port: Some(2222),
+            lace_container: Some("dev-container".to_string()),
             lace_user: Some("node".to_string()),
             lace_workspace: None, // No workspace set.
             updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn dispatch_selects_container_resolver_for_lace_session() {
-        // Verify the dispatch logic: pane with lace_port gets container resolution.
+        // Verify the dispatch logic: pane with lace_container gets container resolution.
         let temp = tempfile::tempdir().unwrap();
         let claude_home = temp.path();
 
@@ -533,7 +533,7 @@ mod tests {
         let session = sprack_db::types::Session {
             name: "lace-dev".to_string(),
             attached: false,
-            lace_port: Some(2222),
+            lace_container: Some("dev-container".to_string()),
             lace_user: Some("node".to_string()),
             lace_workspace: Some("/workspaces/lace".to_string()),
             updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn dispatch_selects_local_resolver_for_non_lace_pane() {
-        // Verify that a pane without lace_port uses the local resolver path.
+        // Verify that a pane without lace_container uses the local resolver path.
         // The local resolver will return None (no real /proc), but the dispatch
         // logic should not attempt container resolution.
 
@@ -560,7 +560,7 @@ mod tests {
                 sprack_db::types::Session {
                     name: "local-dev".to_string(),
                     attached: false,
-                    lace_port: None,
+                    lace_container: None,
                     lace_user: None,
                     lace_workspace: None,
                     updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -586,7 +586,7 @@ mod tests {
                 sprack_db::types::Session {
                     name: "lace-dev".to_string(),
                     attached: false,
-                    lace_port: Some(2222),
+                    lace_container: Some("dev-container".to_string()),
                     lace_user: Some("node".to_string()),
                     lace_workspace: Some("/workspaces/lace".to_string()),
                     updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -594,7 +594,7 @@ mod tests {
                 sprack_db::types::Session {
                     name: "local-dev".to_string(),
                     attached: false,
-                    lace_port: None,
+                    lace_container: None,
                     lace_user: None,
                     lace_workspace: None,
                     updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -622,8 +622,8 @@ mod tests {
     }
 
     #[test]
-    fn find_candidate_panes_excludes_lace_port_without_workspace() {
-        // A session with lace_port but no lace_workspace should NOT be treated
+    fn find_candidate_panes_excludes_lace_container_without_workspace() {
+        // A session with lace_container but no lace_workspace should NOT be treated
         // as a container candidate. This prevents repeated error integration
         // writes when container resolution inevitably fails.
         let snapshot = sprack_db::types::DbSnapshot {
@@ -631,7 +631,7 @@ mod tests {
                 sprack_db::types::Session {
                     name: "incomplete-lace".to_string(),
                     attached: false,
-                    lace_port: Some(2222),
+                    lace_container: Some("dev-container".to_string()),
                     lace_user: Some("node".to_string()),
                     lace_workspace: None, // Missing workspace.
                     updated_at: "2026-03-24T12:00:00Z".to_string(),
@@ -639,7 +639,7 @@ mod tests {
             ],
             windows: vec![],
             panes: vec![
-                // Non-claude pane in a session with lace_port but no workspace.
+                // Non-claude pane in a session with lace_container but no workspace.
                 make_test_pane("%0", "incomplete-lace", "ssh", Some(1234)),
             ],
             integrations: vec![],

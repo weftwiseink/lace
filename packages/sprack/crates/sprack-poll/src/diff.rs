@@ -37,7 +37,7 @@ pub fn compute_lace_meta_hash(lace_meta: &HashMap<String, LaceMeta>) -> u64 {
     for key in sorted_keys {
         key.hash(&mut hasher);
         let meta = &lace_meta[key];
-        meta.port.hash(&mut hasher);
+        meta.container.hash(&mut hasher);
         meta.user.hash(&mut hasher);
         meta.workspace.hash(&mut hasher);
     }

@@ -2,7 +2,7 @@
 //!
 //! Converts a `DbSnapshot` into a `Vec<TreeItem<NodeId>>` hierarchy:
 //! HostGroup > Session > Window > Pane.
-//! Sessions are grouped by `@lace_port` (same port = same host group).
+//! Sessions are grouped by `@lace_container` (same container = same host group).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -78,7 +78,7 @@ pub(crate) fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSu
 /// Identifier for tree nodes, distinguishing node types for tmux navigation.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NodeId {
-    /// Container host group keyed by lace_port or "local".
+    /// Container host group keyed by lace_container or "local".
     HostGroup(String),
     /// Tmux session keyed by session name.
     Session(String),
@@ -105,16 +105,16 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// A host group: sessions sharing the same `@lace_port`.
+/// A host group: sessions sharing the same `@lace_container`.
 struct HostGroup {
     name: String,
-    port: Option<u16>,
+    container: Option<String>,
     sessions: Vec<Session>,
 }
 
 /// Builds the full tree from a DB snapshot.
 ///
-/// Groups sessions by `@lace_port`, filters out the TUI's own pane,
+/// Groups sessions by `@lace_container`, filters out the TUI's own pane,
 /// and formats labels according to the current layout tier.
 pub fn build_tree(
     snapshot: &DbSnapshot,
@@ -184,32 +184,32 @@ fn build_pane_items(
         .collect()
 }
 
-/// Groups sessions by `@lace_port`. Sessions without a port go under "local".
+/// Groups sessions by `@lace_container`. Sessions without a container go under "local".
 fn group_sessions_by_host(sessions: &[Session]) -> Vec<HostGroup> {
-    let mut port_map: HashMap<Option<u16>, Vec<Session>> = HashMap::new();
+    let mut container_map: HashMap<Option<String>, Vec<Session>> = HashMap::new();
     for session in sessions {
-        port_map
-            .entry(session.lace_port)
+        container_map
+            .entry(session.lace_container.clone())
             .or_default()
             .push(session.clone());
     }
 
-    let mut groups: Vec<HostGroup> = port_map
+    let mut groups: Vec<HostGroup> = container_map
         .into_iter()
-        .map(|(port, mut sessions)| {
+        .map(|(container, mut sessions)| {
             sessions.sort_by(|a, b| a.name.cmp(&b.name));
-            let name = derive_group_name(port, &sessions);
+            let name = derive_group_name(container.as_deref(), &sessions);
             HostGroup {
                 name,
-                port,
+                container,
                 sessions,
             }
         })
         .collect();
 
-    // Sort groups: "local" (port=None) last, otherwise by port.
-    groups.sort_by(|a, b| match (&a.port, &b.port) {
-        (Some(pa), Some(pb)) => pa.cmp(pb),
+    // Sort groups: "local" (container=None) last, otherwise by container name.
+    groups.sort_by(|a, b| match (&a.container, &b.container) {
+        (Some(ca), Some(cb)) => ca.cmp(cb),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => a.name.cmp(&b.name),
@@ -219,15 +219,15 @@ fn group_sessions_by_host(sessions: &[Session]) -> Vec<HostGroup> {
 }
 
 /// Derives a display name for a host group.
-fn derive_group_name(port: Option<u16>, sessions: &[Session]) -> String {
-    match port {
+fn derive_group_name(container: Option<&str>, sessions: &[Session]) -> String {
+    match container {
         None => "local".to_string(),
-        Some(p) => {
+        Some(c) => {
             if sessions.len() == 1 {
                 sessions[0].name.clone()
             } else {
                 let names: Vec<&str> = sessions.iter().map(|s| s.name.as_str()).collect();
-                shared_prefix(&names).unwrap_or_else(|| format!("port-{p}"))
+                shared_prefix(&names).unwrap_or_else(|| c.to_string())
             }
         }
     }
@@ -637,8 +637,8 @@ fn format_session_label(
             if window_count > 0 {
                 spans.push(Span::styled(format!(" ({window_count}w)"), theme.subtext0));
             }
-            if let Some(port) = session.lace_port {
-                spans.push(Span::styled(format!(" :{port}"), theme.surface2_fg));
+            if let Some(ref container) = session.lace_container {
+                spans.push(Span::styled(format!(" [{container}]"), theme.surface2_fg));
             }
             let status = if session.attached {
                 " attached"
@@ -960,7 +960,7 @@ mod tests {
             Session {
                 name: "dev".to_string(),
                 attached: true,
-                lace_port: Some(2222),
+                lace_container: Some("dev-container".to_string()),
                 lace_user: None,
                 lace_workspace: None,
                 updated_at: String::new(),
@@ -968,7 +968,7 @@ mod tests {
             Session {
                 name: "logs".to_string(),
                 attached: false,
-                lace_port: Some(2222),
+                lace_container: Some("dev-container".to_string()),
                 lace_user: None,
                 lace_workspace: None,
                 updated_at: String::new(),
@@ -976,7 +976,7 @@ mod tests {
             Session {
                 name: "scratch".to_string(),
                 attached: false,
-                lace_port: None,
+                lace_container: None,
                 lace_user: None,
                 lace_workspace: None,
                 updated_at: String::new(),
@@ -1076,7 +1076,7 @@ mod tests {
             sessions: vec![sprack_db::types::Session {
                 name: "s".to_string(),
                 attached: true,
-                lace_port: None,
+                lace_container: None,
                 lace_user: None,
                 lace_workspace: None,
                 updated_at: String::new(),

@@ -1,12 +1,11 @@
 #!/bin/bash
 # lace-split: Context-aware tmux split helper.
-# If the active pane has lace metadata (set by lace-into --pane) or is running SSH,
-# the new split also SSH's into the same container at the same workspace path.
+# If the active pane has lace metadata (@lace_container), the new split also
+# exec's into the same container at the same workspace path.
 # If the active pane is local, creates a local split preserving the current path.
 #
-# Detection priority:
-#   1. Pane-level @lace_port option (set by lace-into and propagated by prior splits)
-#   2. pane_current_command == "ssh" (fallback for ad-hoc SSH panes)
+# Detection:
+#   Pane-level @lace_container option (set by lace-into and propagated by prior splits).
 # Only pane-level metadata is checked (not session-level), so local panes
 # in a lace session correctly get local splits.
 #
@@ -18,6 +17,10 @@
 # Called from tmux keybindings. Not intended for direct user invocation.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lace-lib.sh
+. "$SCRIPT_DIR/lace-lib.sh"
 
 DIRECTION="-h"
 SWAP=""
@@ -31,57 +34,38 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Check pane-level lace metadata (more reliable than process detection).
-# Only pane-level: session-level @lace_port exists but applies to all panes
+# Check pane-level lace metadata.
+# Only pane-level: session-level @lace_container exists but applies to all panes
 # in the session, including local ones. Pane-level is set by lace-into on
 # the initial pane and propagated by lace-split to each new container split.
-port=$(tmux show-option -pqv @lace_port 2>/dev/null)
+container=$(tmux show-option -pqv @lace_container 2>/dev/null)
 
-# If no metadata, check if the pane is running SSH as a fallback
-if [ -z "$port" ]; then
-  current_cmd=$(tmux display-message -p '#{pane_current_command}')
-  if [ "$current_cmd" != "ssh" ]; then
-    # Local pane: local split preserving current directory
-    tmux split-window "$DIRECTION" -c "#{pane_current_path}"
-    if [ -n "$SWAP" ]; then
-      tmux swap-pane -U
-    fi
-    exit 0
+if [ -z "$container" ]; then
+  # Local pane: local split preserving current directory
+  tmux split-window "$DIRECTION" -c "#{pane_current_path}"
+  if [ -n "$SWAP" ]; then
+    tmux swap-pane -U
   fi
+  exit 0
 fi
 
 # Container pane: read remaining lace connection details
 user=$(tmux show-option -pqv @lace_user 2>/dev/null)
 ws=$(tmux show-option -pqv @lace_workspace 2>/dev/null)
 
-if [ -n "$port" ]; then
-  # SSH split into the same container
-  ssh_base="exec ssh \
-    -o IdentityFile=$HOME/.config/lace/ssh/id_ed25519 \
-    -o IdentitiesOnly=yes \
-    -o UserKnownHostsFile=$HOME/.ssh/lace_known_hosts \
-    -o StrictHostKeyChecking=no \
-    -o ControlMaster=auto \
-    -o ControlPath=$HOME/.ssh/lace-ctrl-%C \
-    -o ControlPersist=600 \
-    -t -p $port ${user:-node}@localhost"
-
-  if [ -n "$ws" ]; then
-    full_cmd="$ssh_base \"cd $ws && exec \$SHELL -l\""
-  else
-    full_cmd="$ssh_base"
-  fi
-
-  new_pane=$(tmux split-window "$DIRECTION" -PF '#{pane_id}' "$full_cmd")
-
-  # Propagate lace options to the new pane for future splits
-  tmux set-option -p -t "$new_pane" @lace_port "$port"
-  [ -n "$user" ] && tmux set-option -p -t "$new_pane" @lace_user "$user"
-  [ -n "$ws" ] && tmux set-option -p -t "$new_pane" @lace_workspace "$ws"
-else
-  # SSH but no lace metadata: local split
-  tmux split-window "$DIRECTION" -c "#{pane_current_path}"
+# Build exec command for the new pane
+exec_args=("$RUNTIME" exec -it --user "${user:-node}")
+if [ -n "$ws" ]; then
+  exec_args+=(--workdir "$ws")
 fi
+exec_args+=("$container" /bin/bash -l)
+
+new_pane=$(tmux split-window "$DIRECTION" -PF '#{pane_id}' "${exec_args[@]}")
+
+# Propagate lace options to the new pane for future splits
+tmux set-option -p -t "$new_pane" @lace_container "$container"
+[ -n "$user" ] && tmux set-option -p -t "$new_pane" @lace_user "$user"
+[ -n "$ws" ] && tmux set-option -p -t "$new_pane" @lace_workspace "$ws"
 
 if [ -n "$SWAP" ]; then
   tmux swap-pane -U

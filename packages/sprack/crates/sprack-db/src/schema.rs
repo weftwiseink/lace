@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use crate::error::SprackDbError;
 
 /// Current schema version. Increment when the schema changes.
-pub const CURRENT_SCHEMA_VERSION: i32 = 1;
+pub const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 /// Creates or migrates the database schema.
 ///
@@ -20,8 +20,10 @@ pub fn init_schema(conn: &Connection) -> Result<(), SprackDbError> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
     match version {
-        0 => {
-            // Fresh DB or pre-versioning schema. Drop and recreate.
+        0 | 1 => {
+            // Fresh DB, pre-versioning, or v1 (lace_port INTEGER).
+            // Drop and recreate at current version. Breakage is acceptable
+            // per the podman-exec migration proposal: no backwards-compatible shim.
             conn.execute_batch(
                 "DROP TABLE IF EXISTS process_integrations;
                  DROP TABLE IF EXISTS panes;
@@ -44,12 +46,12 @@ pub fn init_schema(conn: &Connection) -> Result<(), SprackDbError> {
 }
 
 const SCHEMA_SQL: &str = "
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 CREATE TABLE IF NOT EXISTS sessions (
     name           TEXT PRIMARY KEY,
     attached       INTEGER NOT NULL DEFAULT 0,
-    lace_port      INTEGER,
+    lace_container TEXT,
     lace_user      TEXT,
     lace_workspace TEXT,
     updated_at     TEXT NOT NULL

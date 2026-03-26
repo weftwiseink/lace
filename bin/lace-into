@@ -13,18 +13,15 @@
 #   lace-into --dry-run <proj>   Print the tmux commands without executing
 #   lace-into --help             Show this help
 #
-# Prerequisites: tmux, docker, lace-discover on PATH or at known location
+# Prerequisites: tmux, podman/docker, lace-discover on PATH or at known location
 
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Dedicated known_hosts file for lace devcontainers.
-LACE_KNOWN_HOSTS="$HOME/.ssh/lace_known_hosts"
-
-# SSH private key for lace devcontainers.
-LACE_SSH_KEY="$HOME/.config/lace/ssh/id_ed25519"
+# shellcheck source=lace-lib.sh
+. "$SCRIPT_DIR/lace-lib.sh"
 
 err() { echo "${SCRIPT_NAME}: error: $*" >&2; }
 info() { echo "${SCRIPT_NAME}: $*" >&2; }
@@ -116,10 +113,10 @@ discover() {
 }
 
 # --- Stopped container discovery ---
-# Query Docker for stopped devcontainers with the devcontainer.local_folder label.
+# Query container runtime for stopped devcontainers with the devcontainer.local_folder label.
 # Output format: name\tworkspace_path per line
 discover_stopped() {
-  docker ps -a \
+  "$RUNTIME" ps -a \
     --filter "label=devcontainer.local_folder" \
     --filter "status=exited" \
     --format '{{.Label "devcontainer.local_folder"}}\t{{.Label "lace.project_name"}}' 2>/dev/null \
@@ -162,8 +159,8 @@ start_and_connect() {
       dry_args+=" --rebuild"
     fi
     echo "$dry_args"
-    echo "# then: tmux new-session -d -s $project ssh -p <port> ... node@localhost"
-    echo "# then: tmux set-option -t $project @lace_port <port>"
+    echo "# then: tmux new-session -d -s $project $RUNTIME exec -it --user <user> --workdir <ws> <container> /bin/bash -l"
+    echo "# then: tmux set-option -t $project @lace_container <container_name>"
     exit 0
   fi
 
@@ -280,29 +277,29 @@ start_and_connect() {
     info "container started successfully"
   fi
 
-  # Re-discover to get the current port (may have shifted after restart)
-  local port=""
+  # Re-discover to get the container name
+  local container_name=""
   local container_workspace=""
   local attempts=0
   local max_attempts=5
 
   while [[ $attempts -lt $max_attempts ]]; do
-    while IFS=: read -r name p user path ws; do
+    while IFS=: read -r name cname user path ws; do
       if [[ "$name" == "$project" ]]; then
-        port="$p"
+        container_name="$cname"
         container_workspace="$ws"
         break
       fi
     done < <(discover)
 
-    if [[ -n "$port" ]]; then
+    if [[ -n "$container_name" ]]; then
       break
     fi
 
     # Check if a container is even running for this workspace.
     # No running container means retries are futile.
     local container_id
-    container_id=$(docker ps \
+    container_id=$("$RUNTIME" ps \
       --filter "label=devcontainer.local_folder=$workspace_path" \
       --format '{{.ID}}' 2>/dev/null || true)
     if [[ -z "$container_id" ]]; then
@@ -317,7 +314,7 @@ start_and_connect() {
     fi
   done
 
-  if [[ -z "$port" ]]; then
+  if [[ -z "$container_name" ]]; then
     if [[ $up_exit -ne 0 ]]; then
       err "lace up failed (exit $up_exit) and container is not discoverable"
       err ""
@@ -328,16 +325,15 @@ start_and_connect() {
       err "  lace up --workspace-folder \"$workspace_path\""
       err ""
       err "common causes:"
-      err "  - Docker daemon not running          (check: docker info)"
+      err "  - Container runtime not running       (check: $RUNTIME info)"
       err "  - Missing host-side files             (check validation errors above)"
-      err "  - Image build failure                 (check Docker build output above)"
-      err "  - Lifecycle hook failure, no container (check: docker ps -a --filter label=devcontainer.local_folder=\"$workspace_path\")"
+      err "  - Image build failure                 (check build output above)"
+      err "  - Lifecycle hook failure, no container (check: $RUNTIME ps -a --filter label=devcontainer.local_folder=\"$workspace_path\")"
     else
       err "container started but not discoverable after $max_attempts attempts"
-      err "the container may need more time to start SSH"
       err ""
       err "check container status:"
-      err "  docker ps --filter label=devcontainer.local_folder=\"$workspace_path\""
+      err "  $RUNTIME ps --filter label=devcontainer.local_folder=\"$workspace_path\""
       err ""
       err "to retry connection:"
       err "  lace-into $project"
@@ -352,9 +348,9 @@ start_and_connect() {
   fi
 
   if [[ "$PANE_MODE" == "true" ]]; then
-    do_connect_pane "$project" "$port" "$container_workspace"
+    do_connect_pane "$project" "$container_name" "$container_workspace"
   else
-    do_connect "$project" "$port" "$container_workspace"
+    do_connect "$project" "$container_name" "$container_workspace"
   fi
 }
 
@@ -419,44 +415,13 @@ if [[ "$PANE_MODE" == "true" && -z "${TMUX:-}" ]]; then
   exit 1
 fi
 
-# --- Host key management ---
-# Refresh the host key for a port in the lace known_hosts file.
-# Removes any stale entry (from container recreation) and pre-populates
-# the current key via ssh-keyscan. This prevents SSH host key prompts
-# entirely -- the key is already known when the SSH connection runs.
-refresh_host_key() {
-  local port="$1"
-
-  # Ensure the file exists (ssh-keygen -R fails on missing file)
-  mkdir -p "$(dirname "$LACE_KNOWN_HOSTS")"
-  touch "$LACE_KNOWN_HOSTS"
-
-  # Remove stale entry for this port (ignores errors if no entry exists).
-  # ssh-keygen -R writes informational messages to stdout (not stderr),
-  # so we must suppress both streams.
-  ssh-keygen -f "$LACE_KNOWN_HOSTS" -R "[localhost]:$port" &>/dev/null || true
-
-  # Pre-populate with the container's current host key.
-  # ssh-keyscan is lightweight and fast for localhost connections.
-  # Filter to key lines only (skip comments starting with #) to prevent
-  # accumulating dead comment lines across repeated invocations.
-  local keys
-  keys=$(ssh-keyscan -p "$port" localhost 2>/dev/null | grep -v '^#') || true
-  if [[ -n "$keys" ]]; then
-    echo "$keys" >> "$LACE_KNOWN_HOSTS"
-  else
-    # ssh-keyscan failed (container not ready?). SSH will prompt once.
-    info "warning: could not scan host key for port $port (container may still be starting)"
-  fi
-}
-
-# --- Resolve SSH user for a port ---
-# Queries lace-discover for the user associated with a port.
+# --- Resolve user for a container ---
+# Queries lace-discover for the user associated with a container name.
 # Falls back to "node" if not found.
-resolve_user_for_port() {
-  local port="$1"
-  while IFS=: read -r _name p user _path _ws; do
-    if [[ "$p" == "$port" ]]; then
+resolve_user_for_container() {
+  local container_name="$1"
+  while IFS=: read -r _name cname user _path _ws; do
+    if [[ "$cname" == "$container_name" ]]; then
       echo "$user"
       return 0
     fi
@@ -464,66 +429,60 @@ resolve_user_for_port() {
   echo "node"
 }
 
+# --- Build the exec command array for container entry ---
+build_exec_cmd() {
+  local container_name="$1"
+  local user="$2"
+  local workspace="${3:-}"
+
+  # Build the podman/docker exec command
+  local -n _cmd=$4
+  _cmd=(
+    "$RUNTIME" exec -it
+    --user "$user"
+  )
+  if [[ -n "$workspace" ]]; then
+    _cmd+=(--workdir "$workspace")
+  fi
+  _cmd+=("$container_name" /bin/bash -l)
+}
+
 # --- Connect to a project via tmux ---
 do_connect() {
   local project="$1"
-  local port="$2"
+  local container_name="$2"
   local workspace="${3:-}"
   local user
-  user=$(resolve_user_for_port "$port")
+  user=$(resolve_user_for_container "$container_name")
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "# SSH connection args:"
-    echo "ssh -o IdentityFile=$LACE_SSH_KEY -o IdentitiesOnly=yes \\"
-    echo "    -o UserKnownHostsFile=$LACE_KNOWN_HOSTS -o StrictHostKeyChecking=no \\"
-    echo "    -o ControlMaster=auto -o ControlPath=\$HOME/.ssh/lace-ctrl-%C \\"
-    echo "    -o ControlPersist=600 -t -p $port ${user}@localhost"
-    if [[ -n "$workspace" ]]; then
-      echo "    \"cd $workspace && exec \\\$SHELL -l\"  # land in workspace"
-    fi
+    echo "# Container exec command:"
+    echo "$RUNTIME exec -it --user $user --workdir ${workspace:-(default)} $container_name /bin/bash -l"
     echo ""
     echo "# tmux session commands:"
-    echo "tmux new-session -d -s \"$project\" -e LACE_PORT=$port <ssh_command>"
+    echo "tmux new-session -d -s \"$project\" -e LACE_CONTAINER=$container_name <exec_command>"
     echo "tmux set-option -t \"$project\" remain-on-exit failed"
     echo "tmux select-pane -t \"$project\" -T \"shell\""
-    echo "tmux set-option -t \"$project\" @lace_port \"$port\""
+    echo "tmux set-option -t \"$project\" @lace_container \"$container_name\""
     echo "tmux set-option -t \"$project\" @lace_user \"$user\""
     echo "tmux set-option -t \"$project\" @lace_workspace \"$workspace\""
     echo "tmux attach-session -t \"=$project\"  # or switch-client if inside tmux"
     exit 0
   fi
 
-  # SSH connection args (reused across panes)
-  local ssh_base=(
-    ssh
-    -o "IdentityFile=$LACE_SSH_KEY"
-    -o "IdentitiesOnly=yes"
-    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
-    -o "StrictHostKeyChecking=no"
-    -o "ControlMaster=auto"
-    -o "ControlPath=$HOME/.ssh/lace-ctrl-%C"
-    -o "ControlPersist=600"
-    -t
-    -p "$port"
-    "${user}@localhost"
-  )
-
-  # If workspace path is known, append a remote command to land there.
-  # The cd + exec $SHELL pattern starts a fresh login shell in the workspace
-  # directory. This works with any remote shell (bash, nushell, zsh).
-  if [[ -n "$workspace" ]]; then
-    ssh_base+=("cd $workspace && exec \$SHELL -l")
-  fi
+  # Build exec command (reused across panes)
+  local exec_cmd=()
+  build_exec_cmd "$container_name" "$user" "$workspace" exec_cmd
 
   # Check for existing session.
-  # Verify the session's @lace_port matches to avoid name collisions.
+  # Verify the session's @lace_container matches to avoid name collisions.
   # Then check pane health: reattach if all alive, respawn dead panes in place.
   # Never kill lace sessions: respawn-in-place avoids tmux-continuum/resurrect
-  # conflicts and preserves session-level options (@lace_port etc.).
+  # conflicts and preserves session-level options (@lace_container etc.).
   if tmux has-session -t "=$project" 2>/dev/null; then
-    local existing_port
-    existing_port=$(tmux show-option -t "$project" -qv @lace_port 2>/dev/null)
-    if [ "$existing_port" = "$port" ] || [ -z "$existing_port" ]; then
+    local existing_container
+    existing_container=$(tmux show-option -t "$project" -qv @lace_container 2>/dev/null)
+    if [ "$existing_container" = "$container_name" ] || [ -z "$existing_container" ]; then
       local total_panes alive_panes
       total_panes=$(tmux list-panes -t "=$project" -F '#{pane_dead}' | wc -l)
       alive_panes=$(tmux list-panes -t "=$project" -F '#{pane_dead}' | grep -c '^0$' || true)
@@ -542,23 +501,22 @@ do_connect() {
       # Some or all panes are dead: respawn them in place.
       local dead_count=$((total_panes - alive_panes))
       info "respawning $dead_count dead pane(s) in session $project"
-      refresh_host_key "$port"
 
-      # Update session options in case port or user changed
-      tmux set-option -t "$project" @lace_port "$port"
+      # Update session options in case container or user changed
+      tmux set-option -t "$project" @lace_container "$container_name"
       tmux set-option -t "$project" @lace_user "$user"
       if [[ -n "$workspace" ]]; then
         tmux set-option -t "$project" @lace_workspace "$workspace"
       fi
 
-      # Respawn each dead pane with the current SSH command
+      # Respawn each dead pane with the current exec command
       local dead_panes
       dead_panes=$(tmux list-panes -t "=$project" -F '#{pane_id} #{pane_dead}' \
                    | awk '$2 == 1 {print $1}')
       for pane_id in $dead_panes; do
-          tmux respawn-pane -t "$pane_id" "${ssh_base[@]}"
+          tmux respawn-pane -t "$pane_id" "${exec_cmd[@]}"
           # Set pane-level options for lace-split context detection
-          tmux set-option -p -t "$pane_id" @lace_port "$port"
+          tmux set-option -p -t "$pane_id" @lace_container "$container_name"
           tmux set-option -p -t "$pane_id" @lace_user "$user"
           if [[ -n "$workspace" ]]; then
             tmux set-option -p -t "$pane_id" @lace_workspace "$workspace"
@@ -572,21 +530,21 @@ do_connect() {
       fi
       return 0
     else
-      # Port mismatch: disambiguate session name
-      project="${project}-${port}"
+      # Container name mismatch: disambiguate session name with container ID prefix
+      local short_id
+      short_id=$("$RUNTIME" inspect "$container_name" --format '{{.Id}}' 2>/dev/null | head -c 8 || echo "unknown")
+      project="${project}-${short_id}"
       info "session name conflict, using: $project"
     fi
   fi
 
-  # Create new session with SSH pane
-  refresh_host_key "$port"
-
-  tmux new-session -d -s "$project" -e "LACE_PORT=$port" "${ssh_base[@]}"
+  # Create new session with exec pane
+  tmux new-session -d -s "$project" -e "LACE_CONTAINER=$container_name" "${exec_cmd[@]}"
   tmux set-option -t "$project" remain-on-exit failed
   tmux select-pane -t "$project" -T "shell"
 
   # Store container connection details as session-level user options for split automation.
-  tmux set-option -t "$project" @lace_port "$port"
+  tmux set-option -t "$project" @lace_container "$container_name"
   tmux set-option -t "$project" @lace_user "$user"
   if [[ -n "$workspace" ]]; then
     tmux set-option -t "$project" @lace_workspace "$workspace"
@@ -595,7 +553,7 @@ do_connect() {
   # Also set pane-level options on the initial pane for lace-split context detection.
   local initial_pane
   initial_pane=$(tmux list-panes -t "=$project" -F '#{pane_id}' | head -1)
-  tmux set-option -p -t "$initial_pane" @lace_port "$port"
+  tmux set-option -p -t "$initial_pane" @lace_container "$container_name"
   tmux set-option -p -t "$initial_pane" @lace_user "$user"
   if [[ -n "$workspace" ]]; then
     tmux set-option -p -t "$initial_pane" @lace_workspace "$workspace"
@@ -611,36 +569,21 @@ do_connect() {
 # --- Connect current pane to a project (--pane mode) ---
 do_connect_pane() {
   local project="$1"
-  local port="$2"
+  local container_name="$2"
   local workspace="${3:-}"
   local user
-  user=$(resolve_user_for_port "$port")
+  user=$(resolve_user_for_container "$container_name")
 
-  # SSH connection args (same construction as do_connect)
-  local ssh_base=(
-    ssh
-    -o "IdentityFile=$LACE_SSH_KEY"
-    -o "IdentitiesOnly=yes"
-    -o "UserKnownHostsFile=$LACE_KNOWN_HOSTS"
-    -o "StrictHostKeyChecking=no"
-    -o "ControlMaster=auto"
-    -o "ControlPath=$HOME/.ssh/lace-ctrl-%C"
-    -o "ControlPersist=600"
-    -t
-    -p "$port"
-    "${user}@localhost"
-  )
-
-  if [[ -n "$workspace" ]]; then
-    ssh_base+=("cd $workspace && exec \$SHELL -l")
-  fi
+  # Build exec command (same construction as do_connect)
+  local exec_cmd=()
+  build_exec_cmd "$container_name" "$user" "$workspace" exec_cmd
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "# --pane mode: respawn current pane with SSH"
-    echo "tmux respawn-pane -k -t \"$TMUX_PANE\" ${ssh_base[*]}"
+    echo "# --pane mode: respawn current pane with container exec"
+    echo "tmux respawn-pane -k -t \"$TMUX_PANE\" ${exec_cmd[*]}"
     echo ""
     echo "# Session-level options (set-if-absent):"
-    echo "tmux set-option @lace_port \"$port\""
+    echo "tmux set-option @lace_container \"$container_name\""
     echo "tmux set-option @lace_user \"$user\""
     if [[ -n "$workspace" ]]; then
       echo "tmux set-option @lace_workspace \"$workspace\""
@@ -651,31 +594,29 @@ do_connect_pane() {
     exit 0
   fi
 
-  refresh_host_key "$port"
-
-  # Respawn the current pane with the SSH command
-  tmux respawn-pane -k -t "$TMUX_PANE" "${ssh_base[@]}"
+  # Respawn the current pane with the exec command
+  tmux respawn-pane -k -t "$TMUX_PANE" "${exec_cmd[@]}"
 
   # Set pane-level options for lace-split context detection.
-  # lace-split checks pane_current_command == "ssh" AND pane-level @lace_port
-  # to decide whether to SSH-split or local-split.
-  tmux set-option -p -t "$TMUX_PANE" @lace_port "$port"
+  # lace-split checks pane-level @lace_container to decide
+  # whether to container-split or local-split.
+  tmux set-option -p -t "$TMUX_PANE" @lace_container "$container_name"
   tmux set-option -p -t "$TMUX_PANE" @lace_user "$user"
   if [[ -n "$workspace" ]]; then
     tmux set-option -p -t "$TMUX_PANE" @lace_workspace "$workspace"
   fi
 
-  # Set session-level options if not already set (backward compat / status queries)
-  local existing_port
-  existing_port=$(tmux show-option -qv @lace_port 2>/dev/null)
-  if [[ -z "$existing_port" ]]; then
-    tmux set-option @lace_port "$port"
+  # Set session-level options if not already set (status queries)
+  local existing_container
+  existing_container=$(tmux show-option -qv @lace_container 2>/dev/null)
+  if [[ -z "$existing_container" ]]; then
+    tmux set-option @lace_container "$container_name"
     tmux set-option @lace_user "$user"
     if [[ -n "$workspace" ]]; then
       tmux set-option @lace_workspace "$workspace"
     fi
-  elif [[ "$existing_port" != "$port" ]]; then
-    info "warning: session @lace_port ($existing_port) differs from pane target ($port)"
+  elif [[ "$existing_container" != "$container_name" ]]; then
+    info "warning: session @lace_container ($existing_container) differs from pane target ($container_name)"
   fi
 
   # Update pane title
@@ -694,10 +635,10 @@ case "$ACTION" in
       info "no running devcontainers found"
       exit 0
     fi
-    printf "%-20s %-8s %-10s %-30s %s\n" "PROJECT" "PORT" "USER" "PATH" "WORKSPACE"
-    printf "%-20s %-8s %-10s %-30s %s\n" "-------" "----" "----" "----" "---------"
-    echo "$projects_output" | while IFS=: read -r name port user path ws; do
-      printf "%-20s %-8s %-10s %-30s %s\n" "$name" "$port" "$user" "$path" "$ws"
+    printf "%-20s %-20s %-10s %-30s %s\n" "PROJECT" "CONTAINER" "USER" "PATH" "WORKSPACE"
+    printf "%-20s %-20s %-10s %-30s %s\n" "-------" "---------" "----" "----" "---------"
+    echo "$projects_output" | while IFS=: read -r name cname user path ws; do
+      printf "%-20s %-20s %-10s %-30s %s\n" "$name" "$cname" "$user" "$path" "$ws"
     done
     exit 0
     ;;
@@ -714,28 +655,27 @@ Usage:
   lace-into --start            Pick from stopped containers to start
   lace-into --start --rebuild <project>  Start with full rebuild (recreate container)
   lace-into --list             List running project names
-  lace-into --status           Show running projects with ports and paths
+  lace-into --status           Show running projects with containers and paths
   lace-into --dry-run <proj>   Print the connect command without executing
   lace-into --help             Show this help
 
-Projects are discovered via Docker (containers with devcontainer.local_folder
-label and SSH ports in the 22425-22499 range). Discovery is performed by
-lace-discover.
+Projects are discovered via the container runtime (containers with
+devcontainer.local_folder label). Discovery is performed by lace-discover.
 
-Connection creates a tmux session with an SSH pane to the container:
-  tmux new-session -d -s <project> ssh -p <port> ... <user>@localhost
-  tmux set-option -t <project> @lace_port <port>
+Connection creates a tmux session with a container exec pane:
+  tmux new-session -d -s <project> podman exec -it --user <user> --workdir <ws> <container> /bin/bash -l
+  tmux set-option -t <project> @lace_container <container_name>
   tmux attach-session -t =<project>
 
 The --pane flag connects the current tmux pane to a container instead of
 creating a dedicated session. Uses `tmux respawn-pane -k` to replace the
-current pane's process with an SSH connection. Must be run from inside tmux.
-Session-level @lace_port options are set if not already present, enabling
-Alt+HJKL container-aware splits in the current session.
+current pane's process with a container exec. Must be run from inside tmux.
+Session-level @lace_container options are set if not already present,
+enabling container-aware splits in the current session.
 
-Session-level options @lace_port, @lace_user, and @lace_workspace enable
-the lace-split keybinding (Alt-S in tmux.conf) to auto-SSH new splits
-into the same container, landing in the workspace directory.
+Session-level options @lace_container, @lace_user, and @lace_workspace
+enable lace-split to open new splits into the same container, landing
+in the workspace directory.
 
 If a tmux session for the project already exists, lace-into attaches to
 it (or switches to it, if already inside tmux).
@@ -777,26 +717,26 @@ esac
 # --- Connect to a specific project ---
 if [[ -n "$PROJECT" ]]; then
   # Step 1: Check if already running
-  port=""
+  container_name=""
   workspace=""
 
-  while IFS=: read -r name p user path ws; do
+  while IFS=: read -r name cname user path ws; do
     if [[ "$name" == "$PROJECT" ]]; then
-      port="$p"
+      container_name="$cname"
       workspace="$ws"
       break
     fi
   done < <(discover)
 
-  if [[ -n "$port" ]]; then
+  if [[ -n "$container_name" ]]; then
     # Project is running -- connect directly (even if --start was given)
     if [[ "$START" == "true" ]]; then
       info "$PROJECT is already running"
     fi
     if [[ "$PANE_MODE" == "true" ]]; then
-      do_connect_pane "$PROJECT" "$port" "$workspace"
+      do_connect_pane "$PROJECT" "$container_name" "$workspace"
     else
-      do_connect "$PROJECT" "$port" "$workspace"
+      do_connect "$PROJECT" "$container_name" "$workspace"
     fi
     exit 0  # reached only if exec in do_connect fails (e.g. dry-run already exits)
   fi
@@ -874,12 +814,12 @@ if [[ "$START" == "true" ]]; then
 
   # Build combined list: running projects marked as [running], stopped as [stopped]
   PICKER_ITEMS=()
-  PICKER_DATA=()  # parallel array: "running\tname\tport\tworkspace" or "stopped\tname\tpath"
+  PICKER_DATA=()  # parallel array: "running\tname\tcontainer_name\tworkspace" or "stopped\tname\tpath"
 
   for proj in "${RUNNING[@]}"; do
-    IFS=: read -r name port user path ws <<< "$proj"
-    PICKER_ITEMS+=("$name  [running]  :$port  $path")
-    PICKER_DATA+=("running"$'\t'"$name"$'\t'"$port"$'\t'"$ws")
+    IFS=: read -r name cname user path ws <<< "$proj"
+    PICKER_ITEMS+=("$name  [running]  $cname  $path")
+    PICKER_DATA+=("running"$'\t'"$name"$'\t'"$cname"$'\t'"$ws")
   done
 
   for line in "${STOPPED[@]}"; do
@@ -977,12 +917,12 @@ if [[ ${#PROJECTS[@]} -eq 0 ]]; then
 fi
 
 if [[ ${#PROJECTS[@]} -eq 1 ]]; then
-  IFS=: read -r name port user path ws <<< "${PROJECTS[0]}"
+  IFS=: read -r name cname user path ws <<< "${PROJECTS[0]}"
   info "one project found: $name"
   if [[ "$PANE_MODE" == "true" ]]; then
-    do_connect_pane "$name" "$port" "$ws"
+    do_connect_pane "$name" "$cname" "$ws"
   else
-    do_connect "$name" "$port" "$ws"
+    do_connect "$name" "$cname" "$ws"
   fi
   exit 0
 fi
@@ -990,7 +930,7 @@ fi
 # Multiple projects -- show picker
 if command -v fzf &>/dev/null; then
   SELECTED=$(printf '%s\n' "${PROJECTS[@]}" | \
-    awk -F: '{printf "%-20s :%s  %s\n", $1, $2, $4}' | \
+    awk -F: '{printf "%-20s %s  %s\n", $1, $2, $4}' | \
     fzf --prompt="lace-into> " --height=10 --reverse)
   [[ -z "$SELECTED" ]] && exit 0
   PROJECT=$(echo "$SELECTED" | awk '{print $1}')
@@ -1002,14 +942,14 @@ else
   done
 fi
 
-# Find port and workspace for selected project
+# Find container_name and workspace for selected project
 for proj in "${PROJECTS[@]}"; do
   if [[ "${proj%%:*}" == "$PROJECT" ]]; then
-    IFS=: read -r _ port _ _ ws <<< "$proj"
+    IFS=: read -r _ cname _ _ ws <<< "$proj"
     if [[ "$PANE_MODE" == "true" ]]; then
-      do_connect_pane "$PROJECT" "$port" "$ws"
+      do_connect_pane "$PROJECT" "$cname" "$ws"
     else
-      do_connect "$PROJECT" "$port" "$ws"
+      do_connect "$PROJECT" "$cname" "$ws"
     fi
     exit 0
   fi

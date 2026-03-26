@@ -111,7 +111,7 @@ mod tests {
         Session {
             name: name.to_string(),
             attached: false,
-            lace_port: None,
+            lace_container: None,
             lace_user: None,
             lace_workspace: None,
             updated_at: "2026-03-21T12:00:00Z".to_string(),
@@ -201,7 +201,7 @@ mod tests {
             Session {
                 name: "dev".to_string(),
                 attached: true,
-                lace_port: Some(2222),
+                lace_container: Some("dev".to_string()),
                 lace_user: Some("node".to_string()),
                 lace_workspace: Some("/workspace".to_string()),
                 updated_at: "2026-03-21T12:00:00Z".to_string(),

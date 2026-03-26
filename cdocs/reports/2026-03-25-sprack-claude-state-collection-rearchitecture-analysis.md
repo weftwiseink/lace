@@ -5,7 +5,7 @@ first_authored:
 task_list: sprack/claude-state-rearchitecture
 type: report
 state: live
-status: review_ready
+status: done
 tags: [sprack, claude_code, architecture, investigation]
 ---
 

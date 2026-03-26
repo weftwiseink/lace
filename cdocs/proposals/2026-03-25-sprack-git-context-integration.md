@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-git-context
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"

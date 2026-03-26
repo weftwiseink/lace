@@ -5,7 +5,7 @@ first_authored:
 task_list: terminal-management/sprack-robustness-assessment
 type: report
 state: live
-status: review_ready
+status: done
 tags: [sprack, architecture, status, robustness]
 ---
 

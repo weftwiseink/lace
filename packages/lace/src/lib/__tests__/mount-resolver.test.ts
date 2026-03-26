@@ -992,3 +992,80 @@ describe("MountPathResolver — container variable resolution", () => {
     expect(original.target).toBe("/home/${_REMOTE_USER}/.claude");
   });
 });
+
+// ── Project name substitution in recommendedSource ──
+
+describe("MountPathResolver — ${lace.projectName} substitution", () => {
+  it("resolves ${lace.projectName} in recommendedSource when projectName is provided", () => {
+    const sprackDir = join(testDir, "sprack-data");
+    mkdirSync(sprackDir, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: join(testDir, "${lace.projectName}"),
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, undefined, "sprack-data");
+    const result = resolver.resolveSource("sprack/data");
+    expect(result).toBe(sprackDir);
+  });
+
+  it("leaves ${lace.projectName} unsubstituted when projectName is not provided", () => {
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: join(testDir, "${lace.projectName}"),
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+
+    // Without projectName, ${lace.projectName} is not substituted.
+    // The path won't exist, so it should throw a validation error.
+    expect(() => resolver.resolveSource("sprack/data")).toThrow(/requires directory/);
+  });
+
+  it("settings override takes precedence over ${lace.projectName} in recommendedSource", () => {
+    const overrideDir = join(testDir, "custom-sprack");
+    mkdirSync(overrideDir, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: join(testDir, "${lace.projectName}"),
+        sourceMustBe: "directory",
+      },
+    };
+    const settings: LaceSettings = {
+      mounts: {
+        "sprack/data": { source: overrideDir },
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, settings, declarations, undefined, "my-project");
+    const result = resolver.resolveSource("sprack/data");
+    expect(result).toBe(overrideDir);
+
+    const assignments = resolver.getAssignments();
+    expect(assignments[0].isOverride).toBe(true);
+  });
+
+  it("resolves ${lace.projectName} with tilde expansion in recommendedSource", () => {
+    // Use a path under homedir to test tilde expansion combined with project name substitution.
+    const projectDir = join(homedir(), ".local", "share", "sprack", "lace", "test-project-abc");
+    mkdirSync(projectDir, { recursive: true });
+    createdMountDirs.push(projectDir);
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: "~/.local/share/sprack/lace/${lace.projectName}",
+        sourceMustBe: "directory",
+      },
+    };
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations, undefined, "test-project-abc");
+    const result = resolver.resolveSource("sprack/data");
+    expect(result).toBe(projectDir);
+  });
+});

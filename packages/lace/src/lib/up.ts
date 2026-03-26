@@ -566,7 +566,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
-  const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations, containerVars);
+  const mountResolver = new MountPathResolver(workspaceFolder, settings, mountDeclarations, containerVars, projectName);
 
   // Step 7.5: Validate sourceMustBe declarations before template resolution
   if (Object.keys(mountDeclarations).length > 0) {

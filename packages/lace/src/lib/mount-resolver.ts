@@ -84,14 +84,17 @@ export class MountPathResolver {
   private persistPath: string;
   private projectId: string;
   private containerVars?: ContainerVariables;
+  private projectName?: string;
 
   constructor(
     private workspaceFolder: string,
     private settings: LaceSettings,
     declarations: Record<string, LaceMountDeclaration> = {},
     containerVars?: ContainerVariables,
+    projectName?: string,
   ) {
     this.containerVars = containerVars;
+    this.projectName = projectName;
     // Deep-copy declarations and resolve variables in targets
     this.declarations = {};
     for (const [label, decl] of Object.entries(declarations)) {
@@ -326,9 +329,13 @@ export class MountPathResolver {
       return overridePath;
     }
 
-    // 2. Use recommendedSource (expanded)
+    // 2. Use recommendedSource (expanded, with variable substitution)
     if (decl.recommendedSource) {
-      const expandedPath = expandPath(decl.recommendedSource);
+      let source = decl.recommendedSource;
+      if (this.projectName) {
+        source = source.replace(/\$\{lace\.projectName\}/g, this.projectName);
+      }
+      const expandedPath = expandPath(source);
       this.validateSourceType(
         expandedPath,
         decl.sourceMustBe!,

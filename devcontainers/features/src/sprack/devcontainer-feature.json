@@ -1,0 +1,23 @@
+{
+    "id": "sprack",
+    "version": "1.0.0",
+    "name": "Sprack Integration",
+    "description": "Provides a shared mount for sprack hook events and container metadata, enabling host-side tmux status bar integration with container Claude Code sessions.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/sprack",
+    "options": {},
+    "containerEnv": {
+        "SPRACK_EVENT_DIR": "/mnt/sprack/claude-events"
+    },
+    "customizations": {
+        "lace": {
+            "mounts": {
+                "data": {
+                    "target": "/mnt/sprack",
+                    "recommendedSource": "~/.local/share/sprack/lace/${lace.projectName}",
+                    "description": "Shared directory for sprack hook events and container metadata. The hook bridge writes per-session JSONL event files here.",
+                    "sourceMustBe": "directory"
+                }
+            }
+        }
+    }
+}

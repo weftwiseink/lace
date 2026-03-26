@@ -311,6 +311,17 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     `Features: ${Object.keys(prebuildFeatures).join(", ")}`,
   );
 
+  // Disable BuildKit for podman compatibility. BuildKit's RUN --mount=type=bind
+  // corrupts /tmp permissions (1777 -> 755) in rootless podman/buildah, breaking
+  // apt-get GPG verification in subsequent feature installs.
+  //
+  // Also disable buildah layer caching via BUILDAH_LAYERS=false. Without BuildKit,
+  // the devcontainer CLI builds a scratch-based content image. Podman caches
+  // FROM scratch + COPY layers even when the build context changes, so we must
+  // disable layer caching to ensure fresh feature content on each build.
+  const prevBuildahLayers = process.env.BUILDAH_LAYERS;
+  process.env.BUILDAH_LAYERS = "false";
+
   const buildArgs = [
     "build",
     "--workspace-folder",
@@ -321,6 +332,7 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     prebuildTag,
     "--docker-path",
     getPodmanCommand(),
+    "--buildkit", "never",
   ];
 
   if (options.force) {
@@ -328,6 +340,13 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
   }
 
   const buildResult = run("devcontainer", buildArgs, { cwd: workspaceRoot });
+
+  // Restore BUILDAH_LAYERS
+  if (prevBuildahLayers !== undefined) {
+    process.env.BUILDAH_LAYERS = prevBuildahLayers;
+  } else {
+    delete process.env.BUILDAH_LAYERS;
+  }
 
   if (buildResult.exitCode !== 0) {
     // Atomicity: don't modify the Dockerfile on failure

@@ -12,6 +12,12 @@ ENV TZ="$TZ"
 
 ENV DEVCONTAINER=true
 
+# Restore /tmp permissions after prebuild feature installation.
+# Devcontainer features (installed via --mount=type=bind) can leave /tmp at 755
+# instead of the standard 1777. Without the sticky bit and world-write, apt's
+# _apt user cannot create temp files for GPG verification during apt-get update.
+RUN chmod 1777 /tmp
+
 # Install essential system tools
 # NOTE: git is NOT installed here; it is provided by the devcontainer feature
 #   ghcr.io/devcontainers/features/git:1 (see .lace/prebuild/devcontainer.json)

@@ -1208,6 +1208,15 @@ function runDevcontainerUp(
   }
 
   args.push("--docker-path", getPodmanCommand());
+  // Disable BuildKit for podman compatibility. BuildKit's RUN --mount=type=bind
+  // corrupts /tmp permissions (1777 -> 755) in rootless podman/buildah, breaking
+  // apt-get GPG verification in subsequent build steps.
+  args.push("--buildkit", "never");
+  // Remove stale dev_container_feature_content_temp image and containers.
+  // Without BuildKit, podman caches FROM scratch + COPY layers even when the
+  // build context changes, causing COPY --from to reference stale feature content.
+  subprocess(getPodmanCommand(), ["rm", "-f", "-a", "--filter", "ancestor=dev_container_feature_content_temp"]);
+  subprocess(getPodmanCommand(), ["rmi", "-f", "dev_container_feature_content_temp"]);
   args.push("--workspace-folder", workspaceFolder);
   args.push(...devcontainerArgs);
 

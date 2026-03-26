@@ -16,19 +16,43 @@ def parse-env [env_str: string]: string -> record<name: string, value: string> {
   }
 }
 
+# Resolve container runtime: CONTAINER_RUNTIME env, then settings.json override, then auto-detect.
+def resolve-runtime []: nothing -> string {
+  let env_rt = ($env | get -o CONTAINER_RUNTIME | default "")
+  if $env_rt in ["podman", "docker"] {
+    return $env_rt
+  }
+
+  let settings_file = ($env.HOME | path join ".config/lace/settings.json")
+  if ($settings_file | path exists) {
+    let override_cmd = try {
+      open $settings_file | get -o overridePodmanCommand | default ""
+    } catch { "" }
+    if ($override_cmd | is-not-empty) {
+      return $override_cmd
+    }
+  }
+
+  if (which podman | is-not-empty) { return "podman" }
+  if (which docker | is-not-empty) { return "docker" }
+  error make { msg: "No container runtime found. Install podman or docker." }
+}
+
 def main [
   container?: string  # Optional container name or ID to inspect
   --raw               # Output raw JSON instead of formatted tables
 ] {
+  let runtime = (resolve-runtime)
+
   let containers = if $container != null {
-    docker inspect $container | from json
+    ^$runtime inspect $container | from json
   } else {
-    let ids = (docker ps --filter "label=lace.project_name" --format "{{.ID}}" | lines | where { $in != "" })
+    let ids = (^$runtime ps --filter "label=lace.project_name" --format "{{.ID}}" | lines | where { $in != "" })
     if ($ids | is-empty) {
       print $"(ansi red)No running lace containers found.(ansi reset)"
       return
     }
-    $ids | each { |id| docker inspect $id | from json | get 0 }
+    $ids | each { |id| ^$runtime inspect $id | from json | get 0 }
   }
 
   for $c in $containers {
@@ -151,17 +175,17 @@ def main [
       let claude_dir = ($env_all | where { $in.name == "CLAUDE_CONFIG_DIR" } | get -o 0.value | default "/home/node/.claude")
 
       let has_creds = try {
-        docker exec $name bash -c $"test -f ($claude_dir)/.credentials.json && echo 'yes' || echo 'no'" | str trim
+        ^$runtime exec $name bash -c $"test -f ($claude_dir)/.credentials.json && echo 'yes' || echo 'no'" | str trim
       } catch {
         "unknown"
       }
       let has_config = try {
-        docker exec $name bash -c $"test -f ($claude_dir)/.claude.json && echo 'yes' || echo 'no'" | str trim
+        ^$runtime exec $name bash -c $"test -f ($claude_dir)/.claude.json && echo 'yes' || echo 'no'" | str trim
       } catch {
         "unknown"
       }
       let claude_version = try {
-        docker exec $name bash -c "claude --version 2>&1" | str trim
+        ^$runtime exec $name bash -c "claude --version 2>&1" | str trim
       } catch {
         "not installed"
       }
@@ -169,14 +193,14 @@ def main [
       # Check oauth details from credentials file
       let creds_script = 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")),o=d.claudeAiOauth||{};console.log(JSON.stringify({authType:Object.keys(d).join(","),hasAccessToken:!!o.accessToken,hasRefreshToken:!!o.refreshToken,expired:o.expiresAt?Date.now()>o.expiresAt:"n/a",subscriptionType:o.subscriptionType||"unknown"}))'
       let oauth_info = try {
-        docker exec $name node -e $creds_script $"($claude_dir)/.credentials.json" | from json
+        ^$runtime exec $name node -e $creds_script $"($claude_dir)/.credentials.json" | from json
       } catch {
         { authType: "error", hasAccessToken: false, hasRefreshToken: false, expired: "unknown", subscriptionType: "unknown" }
       }
       # Check account info from config
       let acct_script = 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(d.oauthAccount?.displayName||"none","|",d.oauthAccount?.emailAddress||"none")'
       let account_info = try {
-        docker exec $name node -e $acct_script $"($claude_dir)/.claude.json" | str trim
+        ^$runtime exec $name node -e $acct_script $"($claude_dir)/.claude.json" | str trim
       } catch {
         "unknown"
       }
@@ -196,7 +220,7 @@ def main [
       let ws_folder = ($env_all | where { $in.name == "CONTAINER_WORKSPACE_FOLDER" } | get -o 0.value | default "")
       if $ws_folder != "" {
         let ws_check = try {
-          docker exec $name bash -c $"test -d '($ws_folder)' && ls '($ws_folder)' | head -5 || echo 'MISSING'" | str trim
+          ^$runtime exec $name bash -c $"test -d '($ws_folder)' && ls '($ws_folder)' | head -5 || echo 'MISSING'" | str trim
         } catch {
           "unknown"
         }
@@ -206,7 +230,7 @@ def main [
       # Check git inside container
       let git_check = if $ws_folder != "" {
         try {
-          docker exec -w $ws_folder $name git rev-parse --short HEAD | str trim
+          ^$runtime exec -w $ws_folder $name git rev-parse --short HEAD | str trim
         } catch {
           "not a git repo"
         }
@@ -217,7 +241,7 @@ def main [
 
       # Check ssh connectivity
       let ssh_check = try {
-        docker exec $name bash -c "pgrep -x sshd > /dev/null && echo 'running' || echo 'not running'" | str trim
+        ^$runtime exec $name bash -c "pgrep -x sshd > /dev/null && echo 'running' || echo 'not running'" | str trim
       } catch {
         "unknown"
       }

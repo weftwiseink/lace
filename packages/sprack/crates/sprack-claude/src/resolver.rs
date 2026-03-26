@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use crate::proc_walk;
@@ -16,6 +17,11 @@ use crate::session::{self, CacheKey, SessionFileState};
 /// Maximum age for a container session file candidate to be considered active.
 /// Directories whose newest `.jsonl` mtime is older than this are ignored.
 const CONTAINER_RECENCY_THRESHOLD: Duration = Duration::from_secs(300);
+
+/// Session names for which the "lace_port without lace_workspace" warning
+/// has already been emitted. Prevents per-cycle stderr spam.
+static WARNED_MISSING_WORKSPACE: std::sync::LazyLock<Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Finds candidate panes: those running Claude locally OR belonging to a lace session.
 ///
@@ -28,7 +34,21 @@ pub fn find_candidate_panes(
     let lace_session_names: HashSet<&str> = snapshot
         .sessions
         .iter()
-        .filter(|session| session.lace_port.is_some())
+        .filter(|session| {
+            let has_port = session.lace_port.is_some();
+            let has_workspace = session.lace_workspace.is_some();
+            if has_port && !has_workspace {
+                if let Ok(mut warned) = WARNED_MISSING_WORKSPACE.lock() {
+                    if warned.insert(session.name.clone()) {
+                        eprintln!(
+                            "sprack-claude: session '{}' has lace_port but no lace_workspace, skipping container resolution",
+                            session.name,
+                        );
+                    }
+                }
+            }
+            has_port && has_workspace
+        })
         .map(|session| session.name.as_str())
         .collect();
 
@@ -593,5 +613,36 @@ mod tests {
         assert!(candidate_ids.contains(&"%0"), "lace session pane should be included");
         assert!(candidate_ids.contains(&"%1"), "local claude pane should be included");
         assert!(!candidate_ids.contains(&"%2"), "vim pane should not be included");
+    }
+
+    #[test]
+    fn find_candidate_panes_excludes_lace_port_without_workspace() {
+        // A session with lace_port but no lace_workspace should NOT be treated
+        // as a container candidate. This prevents repeated error integration
+        // writes when container resolution inevitably fails.
+        let snapshot = sprack_db::types::DbSnapshot {
+            sessions: vec![
+                sprack_db::types::Session {
+                    name: "incomplete-lace".to_string(),
+                    attached: false,
+                    lace_port: Some(2222),
+                    lace_user: Some("node".to_string()),
+                    lace_workspace: None, // Missing workspace.
+                    updated_at: "2026-03-24T12:00:00Z".to_string(),
+                },
+            ],
+            windows: vec![],
+            panes: vec![
+                // Non-claude pane in a session with lace_port but no workspace.
+                make_test_pane("%0", "incomplete-lace", "ssh", Some(1234)),
+            ],
+            integrations: vec![],
+        };
+
+        let candidates = super::find_candidate_panes(&snapshot);
+        assert!(
+            candidates.is_empty(),
+            "pane should not be a candidate when lace_workspace is missing"
+        );
     }
 }

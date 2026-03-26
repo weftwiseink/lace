@@ -3,7 +3,10 @@ source: crates/sprack/src/test_render.rs
 expression: output
 ---
   â¼ LOCAL
-    â¼ dev (1w)
-      â¼ editor (1 panes)
->         * bash/sprack-trouble [thinking] 2ag 450K/1M
+    â¼ dev (1w) attached
+      â¼ editor (1 panes) *
+>         bash/sprack-trouble [thinking]
+            opus-4-6 | 450K/1M | 2 subagents
+            sprack TUI development
+            Tasks: 1/2 done  >Fix renderiâ¦ âAdd tests
  [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

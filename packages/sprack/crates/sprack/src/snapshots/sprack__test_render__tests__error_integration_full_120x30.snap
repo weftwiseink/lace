@@ -4,6 +4,8 @@ expression: output
 ---
 â¼ LOCAL
   â¼ dev (1w)
-    â¼ editor (1 panes)
-        * bash/dev [error] 156K/200K
+    â¼ editor (1 panes) *
+        bash/dev [error]
+          opus-4-6 | 156K/200K | 0 subagents
+          Tasks: 0/1 done  >Fix renderiâ¦
  [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

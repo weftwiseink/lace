@@ -23,6 +23,14 @@ pub fn render_frame(frame: &mut Frame, app: &mut App) {
     let tier = layout_tier(area.width);
     let theme = Theme::mocha();
 
+    // Rebuild tree items when the layout tier changes so labels match the viewport width.
+    if tier != app.last_tier {
+        app.last_tier = tier;
+        if let Some(snapshot) = &app.last_snapshot {
+            app.tree_items = tree::build_tree(snapshot, app.own_pane_id.as_deref(), tier);
+        }
+    }
+
     let (body_area, status_area) = frame_layout(area);
     let (tree_area, detail_area) = body_layout(body_area, tier);
 

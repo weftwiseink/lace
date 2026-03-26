@@ -40,6 +40,8 @@ pub struct App {
     pub last_heartbeat: Option<String>,
     /// Cached DB snapshot for tmux navigation and detail panel.
     pub last_snapshot: Option<DbSnapshot>,
+    /// Last layout tier used for tree construction.
+    pub last_tier: LayoutTier,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             poller_healthy: false,
             last_heartbeat: None,
             last_snapshot: None,
+            last_tier: LayoutTier::Standard,
         }
     }
 
@@ -129,13 +132,10 @@ impl App {
         // Update heartbeat status.
         self.update_heartbeat_status();
 
-        // Determine the layout tier for label formatting.
-        // Use a default of Standard since we don't know the terminal width here.
-        // The actual tier is determined at render time for layout, but for label
-        // construction we use Standard as a reasonable default.
-        let tier = LayoutTier::Standard;
-
-        self.tree_items = tree::build_tree(&snapshot, self.own_pane_id.as_deref(), tier);
+        // Use the last known tier for label formatting. This is updated by
+        // render_frame() when the terminal width changes, so tree items are
+        // always built at the correct tier.
+        self.tree_items = tree::build_tree(&snapshot, self.own_pane_id.as_deref(), self.last_tier);
 
         // Ensure something is selected for keyboard navigation.
         if self.tree_state.selected().is_empty() && !self.tree_items.is_empty() {

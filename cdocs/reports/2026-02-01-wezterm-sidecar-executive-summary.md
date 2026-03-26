@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-sidecar
 type: report
 subtype: executive_summary
-state: live
+state: archived
 status: done
 tags: [wezterm, sidecar, executive-summary, plugin, workspace-management]
 ---

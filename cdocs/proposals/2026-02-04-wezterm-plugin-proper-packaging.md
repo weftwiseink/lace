@@ -8,7 +8,7 @@ last_reviewed:
   at: 2026-02-04T18:45:00-05:00
   round: 2
 type: proposal
-state: live
+state: archived
 status: deferred
 tags: [wezterm, plugin, packaging, distribution, github, migration]
 ---

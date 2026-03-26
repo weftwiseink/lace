@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-22T12:00:00-05:00
 task_list: lace/wez-into
 type: report
-state: live
+state: archived
 status: wip
 tags: [status, error-handling, ux, wez-into, lace-up, messaging]
 ---

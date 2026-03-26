@@ -4,7 +4,7 @@ first_authored:
   at: "2026-02-01T16:40:00-05:00"
 task_list: lace/wezterm-sidecar
 type: proposal
-state: live
+state: archived
 status: evolved
 tags: [wezterm, plugin, workspace, pane-management, tree-view, monitoring]
 last_reviewed:

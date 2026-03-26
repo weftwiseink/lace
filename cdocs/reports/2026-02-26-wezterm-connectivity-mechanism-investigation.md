@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-26T17:00:00-06:00
 task_list: lace/investigation
 type: report
-state: live
+state: archived
 status: wip
 tags: [investigation, wezterm-server, unix-socket, ssh, port-mapping, connectivity, architecture]
 related_to:

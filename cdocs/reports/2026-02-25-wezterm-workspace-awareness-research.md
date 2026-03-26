@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-25T18:00:00-06:00
 task_list: lace/wezterm-server
 type: report
-state: live
+state: archived
 status: done
 tags: [wezterm-server, devcontainer-cli, entrypoint, containerEnv, research]
 last_reviewed:

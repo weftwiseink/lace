@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-20T19:00:00-07:00
 task_list: wezterm/split-pane-regression
 type: proposal
-state: deferred
+state: archived
 status: request_for_proposal
 tags: [wezterm, lace.wezterm, future_work]
 ---

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T23:45:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
+state: archived
 status: final
 tags: [executive-summary, wezterm, dotfiles, lace-plugins, port-scanning, workstream-audit]
 ---

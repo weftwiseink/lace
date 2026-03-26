@@ -4,7 +4,7 @@ first_authored:
   at: 2026-02-04T23:45:00-08:00
 task_list: lace/dotfiles-migration
 type: report
-state: live
+state: archived
 status: done
 tags: [status, wezterm, dotfiles, lace-plugins, workstream-audit, migration]
 ---

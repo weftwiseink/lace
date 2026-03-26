@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/wezterm-plugin
 type: report
 subtype: status
-state: live
+state: archived
 status: done
 tags: [status, wezterm, devcontainer, lace, wez-into, discovery, ports, snapshot]
 related_to:

@@ -4,7 +4,7 @@ first_authored:
   at: 2026-03-02T07:35:00-06:00
 task_list: wezterm/window-fixes
 type: proposal
-state: live
+state: archived
 status: request_for_proposal
 tags: [wezterm, dotfiles, rendering, wayland, window-sizing, resize]
 ---

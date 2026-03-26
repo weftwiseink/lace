@@ -3,7 +3,7 @@ first_authored:
   by: "@claude-opus-4-5-20251101"
   at: 2026-02-04T16:30:00-08:00
 type: proposal
-state: live
+state: archived
 status: implementation_ready
 tags: [wezterm, port-scanning, discovery, multi-project, devcontainer, decoupled, docker-cli]
 related_to:

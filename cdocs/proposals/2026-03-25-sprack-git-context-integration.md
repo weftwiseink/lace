@@ -6,6 +6,11 @@ task_list: terminal-management/sprack-git-context
 type: proposal
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-sonnet-4-6"
+  at: 2026-03-25T14:00:00-07:00
+  round: 1
 tags: [sprack, git, ux_design, data_collection]
 ---
 

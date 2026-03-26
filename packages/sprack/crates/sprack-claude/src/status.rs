@@ -87,12 +87,17 @@ pub enum TaskStatus {
 }
 
 /// Entry types that are skipped when determining the "last meaningful entry".
+/// Only "user" and "assistant" entries represent conversational state.
+/// Everything else is metadata, progress, or infrastructure.
 const SKIPPED_ENTRY_TYPES: &[&str] = &[
     "system",
     "last-prompt",
     "agent-name",
     "file-history-snapshot",
     "hook_progress",
+    "progress",
+    "custom-title",
+    "queue-operation",
 ];
 
 /// Extracts the activity state from parsed JSONL entries.

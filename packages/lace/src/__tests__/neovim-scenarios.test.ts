@@ -221,9 +221,11 @@ describe("Scenario N5: missing mount source produces actionable error", () => {
   });
 });
 
-// ── N6: Docker smoke test -- neovim installed correctly ──
+// ── N6: Docker smoke test -- neovim installed correctly (acceptance-gated) ──
 
-describe.skipIf(!isDockerAvailable())(
+const runAcceptance = process.env.LACE_RUN_ACCEPTANCE_TESTS === "1";
+
+describe.skipIf(!isDockerAvailable() || !runAcceptance)(
   "Scenario N6: Docker smoke test -- neovim installed correctly",
   { timeout: 180_000 },
   () => {
@@ -300,9 +302,9 @@ describe.skipIf(!isDockerAvailable())(
   },
 );
 
-// ── N8: Docker smoke test -- missing curl fails gracefully ──
+// ── N8: Docker smoke test -- missing curl fails gracefully (acceptance-gated) ──
 
-describe.skipIf(!isDockerAvailable())(
+describe.skipIf(!isDockerAvailable() || !runAcceptance)(
   "Scenario N8: Docker -- missing curl fails gracefully",
   { timeout: 120_000 },
   () => {

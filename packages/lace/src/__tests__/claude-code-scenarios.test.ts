@@ -183,9 +183,11 @@ describe("Scenario C3: sourceMustBe validation rejects missing source", () => {
   });
 });
 
-// ── C4: Docker smoke test ──
+// ── C4: Docker smoke test (acceptance-gated) ──
 
-describe.skipIf(!isDockerAvailable())(
+const runAcceptance = process.env.LACE_RUN_ACCEPTANCE_TESTS === "1";
+
+describe.skipIf(!isDockerAvailable() || !runAcceptance)(
   "Scenario C4: Docker smoke test -- claude installed and config dir exists",
   { timeout: 180_000 },
   () => {

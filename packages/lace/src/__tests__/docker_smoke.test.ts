@@ -104,10 +104,14 @@ afterAll(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests
+// Acceptance gate: these tests pull images from Docker Hub and require a
+// running container runtime. Skipped by default; opt in with:
+//   LACE_RUN_ACCEPTANCE_TESTS=1 pnpm test
 // ---------------------------------------------------------------------------
 
-describe("docker smoke tests", { timeout: 120_000 }, () => {
+const runAcceptance = process.env.LACE_RUN_ACCEPTANCE_TESTS === "1";
+
+describe.skipIf(!runAcceptance)("docker smoke tests", { timeout: 120_000 }, () => {
   it("full prebuild lifecycle: builds image, rewrites Dockerfile, writes metadata, status reports up to date", () => {
     setupWorkspace();
 

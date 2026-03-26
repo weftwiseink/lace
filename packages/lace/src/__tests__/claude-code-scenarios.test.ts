@@ -37,6 +37,7 @@ import {
 } from "./helpers/scenario-utils";
 import type { RunSubprocess } from "@/lib/subprocess";
 import { execSync } from "node:child_process";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 let ctx: ScenarioWorkspace;
 
@@ -259,7 +260,7 @@ describe.skipIf(!isDockerAvailable())(
 
       // Verify claude is installed
       const claudeVersion = execSync(
-        `docker exec ${containerId} claude --version`,
+        `${getPodmanCommand()} exec ${containerId} claude --version`,
         { stdio: "pipe", timeout: 10_000 },
       )
         .toString()

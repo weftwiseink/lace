@@ -69,9 +69,9 @@ export interface LaceMountDeclaration {
   description?: string;
   /** Whether the mount should be read-only (default: false) */
   readonly?: boolean;
-  /** Docker mount type (default: "bind") */
+  /** Mount type (default: "bind") */
   type?: string;
-  /** Docker mount consistency hint (e.g., "delegated", "cached") */
+  /** Mount consistency hint (e.g., "delegated", "cached") */
   consistency?: string;
   /**
    * When set, the resolved source must already exist as the specified type.

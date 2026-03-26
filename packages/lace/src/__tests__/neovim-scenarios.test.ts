@@ -36,6 +36,7 @@ import {
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
 import { execSync } from "node:child_process";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 let ctx: ScenarioWorkspace;
 
@@ -327,14 +328,14 @@ describe.skipIf(!isDockerAvailable())(
 
       // Verify nvim binary exists and reports correct version
       const versionOutput = execSync(
-        `docker exec ${containerId} nvim --version`,
+        `${getPodmanCommand()} exec ${containerId} nvim --version`,
         { stdio: "pipe" },
       ).toString();
       expect(versionOutput).toContain("NVIM v0.11.6");
 
       // Verify nvim is at /usr/local/bin/nvim
       const whichOutput = execSync(
-        `docker exec ${containerId} which nvim`,
+        `${getPodmanCommand()} exec ${containerId} which nvim`,
         { stdio: "pipe" },
       )
         .toString()
@@ -355,7 +356,7 @@ describe.skipIf(!isDockerAvailable())(
       // Run install.sh in a minimal alpine container without curl
       // Alpine does not have curl by default, so the script should fail
       const result = execSync(
-        `docker run --rm -e VERSION=v0.11.6 -e _REMOTE_USER=root -v "${installScript}:/install.sh:ro" alpine:latest sh /install.sh 2>&1 || true`,
+        `${getPodmanCommand()} run --rm -e VERSION=v0.11.6 -e _REMOTE_USER=root -v "${installScript}:/install.sh:ro,Z" alpine:latest sh /install.sh 2>&1 || true`,
         { stdio: "pipe", timeout: 30_000 },
       ).toString();
       expect(result).toContain("curl is required");

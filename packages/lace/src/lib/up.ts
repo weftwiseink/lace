@@ -583,7 +583,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
           if (skipValidation) {
             console.warn(
               `Warning: ${message}\n` +
-                `  Docker will create a directory at this path, which will silently break the mount.`,
+                `  The container runtime will create a directory at this path, which will silently break the mount.`,
             );
           } else {
             validationErrors.push(message);
@@ -670,7 +670,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   // ── Phase 3+: Inferred mount validation ──
   // After template resolution, scan resolved mounts for missing bind-mount sources.
-  // These are warnings only — Docker auto-creates missing directory sources.
+  // These are warnings only — the container runtime auto-creates missing directory sources.
   {
     const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
     const resolvedMounts = (resolvedConfig.mounts ?? []) as string[];
@@ -685,7 +685,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         const target = targetMatch?.[1] ?? 'unknown';
         console.warn(
           `Warning: Bind mount source does not exist: ${source} (target: ${target})\n` +
-          `  → Docker will auto-create this as a root-owned directory, which may cause permission issues.`,
+          `  → The container runtime will auto-create this as a root-owned directory, which may cause permission issues.`,
         );
       }
     }
@@ -1139,7 +1139,7 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
     }
   }
 
-  // Inject project name as Docker label and container name
+  // Inject project name as container label and container name
   if (options.projectName) {
     const runArgs = (extended.runArgs ?? []) as string[];
     runArgs.push("--label", `lace.project_name=${options.projectName}`);

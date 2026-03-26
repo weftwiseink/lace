@@ -28,9 +28,9 @@ export function deriveProjectName(
 }
 
 /**
- * Sanitize a project name for use as a Docker container name.
+ * Sanitize a project name for use as a container name.
  *
- * Docker container names must match [a-zA-Z0-9][a-zA-Z0-9_.-].
+ * Container names must match [a-zA-Z0-9][a-zA-Z0-9_.-].
  * Replaces invalid characters with hyphens, strips leading/trailing
  * non-alphanumeric characters. Falls back to "lace-project" if the
  * result is empty.
@@ -43,7 +43,7 @@ export function sanitizeContainerName(name: string): string {
 }
 
 /**
- * Check if a Docker runArgs array contains a specific flag.
+ * Check if a runArgs array contains a specific flag.
  * Handles both "--flag value" and "--flag=value" forms.
  */
 export function hasRunArgsFlag(runArgs: string[], flag: string): boolean {
@@ -53,7 +53,7 @@ export function hasRunArgsFlag(runArgs: string[], flag: string): boolean {
 }
 
 /**
- * Resolve the actual Docker container name that lace will use.
+ * Resolve the actual container name that lace will use.
  * Mirrors the logic in generateExtendedConfig (up.ts:764-769):
  * if the user has --name in runArgs, use their value;
  * otherwise, use sanitizeContainerName(projectName).

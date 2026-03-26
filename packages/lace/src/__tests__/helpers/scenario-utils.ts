@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import * as net from "node:net";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 // ── Path resolution ──
 
@@ -226,15 +227,15 @@ export function readPortAssignments(
   return data.assignments;
 }
 
-// ── Docker utilities ──
+// ── Container runtime utilities ──
 
 /**
- * Check if Docker daemon is available and running.
- * Used to gate Docker-dependent tests with describe.skipIf(!isDockerAvailable()).
+ * Check if the container runtime is available and running.
+ * Used to gate container-dependent tests with describe.skipIf(!isDockerAvailable()).
  */
 export function isDockerAvailable(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 5000 });
+    execSync(`${getPodmanCommand()} info`, { stdio: "pipe", timeout: 5000 });
     return true;
   } catch {
     return false;
@@ -326,24 +327,24 @@ export function getSshBanner(port: number, timeoutMs = 5000): Promise<string> {
 }
 
 /**
- * Stop and remove a Docker container by ID.
+ * Stop and remove a container by ID.
  */
 export function stopContainer(containerId: string): void {
   try {
-    execSync(`docker rm -f "${containerId}"`, { stdio: "pipe" });
+    execSync(`${getPodmanCommand()} rm -f "${containerId}"`, { stdio: "pipe" });
   } catch {
     // Ignore errors -- container may already be stopped
   }
 }
 
 /**
- * Clean up any Docker containers associated with a workspace folder.
+ * Clean up any containers associated with a workspace folder.
  * Uses the devcontainer.local_folder label set by the devcontainer CLI.
  */
 export function cleanupWorkspaceContainers(workspaceFolder: string): void {
   try {
     const result = execSync(
-      `docker ps -aq --filter "label=devcontainer.local_folder=${workspaceFolder}"`,
+      `${getPodmanCommand()} ps -aq --filter "label=devcontainer.local_folder=${workspaceFolder}"`,
       { stdio: "pipe" },
     )
       .toString()

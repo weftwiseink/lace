@@ -78,6 +78,11 @@ export const DEFAULT_MOUNT_POLICY = `# Lace default mount policy
 # Docker socket
 /var/run/docker.sock
 /run/docker.sock
+
+# Podman storage
+~/.local/share/containers
+
+${process.env.XDG_RUNTIME_DIR ? `# Podman socket\n${process.env.XDG_RUNTIME_DIR}/podman` : "# Podman socket (skipped: XDG_RUNTIME_DIR not set)"}
 `;
 
 // ── File discovery ──

@@ -397,6 +397,36 @@ describe("evaluateMountPolicy", () => {
     expect(evaluateMountPolicy(join(home, "work/credentials/aws/key"), rules)).toBe("deny");
     expect(evaluateMountPolicy(join(home, "work/credentials/deep/nested/secret"), rules)).toBe("deny");
   });
+
+  // Podman entries
+
+  it("blocks ~/.local/share/containers", () => {
+    const rules = parseMountPolicy(DEFAULT_MOUNT_POLICY);
+    const result = evaluateMountPolicy(join(home, ".local/share/containers"), rules);
+    expect(result).toBe("deny");
+  });
+
+  it("blocks ~/.local/share/containers/storage (path-aware prefix)", () => {
+    const rules = parseMountPolicy(DEFAULT_MOUNT_POLICY);
+    const result = evaluateMountPolicy(join(home, ".local/share/containers/storage"), rules);
+    expect(result).toBe("deny");
+  });
+
+  it("blocks podman socket directory when XDG_RUNTIME_DIR is set", () => {
+    const xdgRuntime = process.env.XDG_RUNTIME_DIR;
+    if (!xdgRuntime) return; // Skip if not set (CI environments)
+    const rules = parseMountPolicy(DEFAULT_MOUNT_POLICY);
+    const result = evaluateMountPolicy(`${xdgRuntime}/podman`, rules);
+    expect(result).toBe("deny");
+  });
+
+  it("blocks podman socket path when XDG_RUNTIME_DIR is set", () => {
+    const xdgRuntime = process.env.XDG_RUNTIME_DIR;
+    if (!xdgRuntime) return; // Skip if not set (CI environments)
+    const rules = parseMountPolicy(DEFAULT_MOUNT_POLICY);
+    const result = evaluateMountPolicy(`${xdgRuntime}/podman/podman.sock`, rules);
+    expect(result).toBe("deny");
+  });
 });
 
 // ── Symlink traversal ──

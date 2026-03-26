@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { runPrebuild } from "@/lib/prebuild";
 import { runRestore } from "@/lib/restore";
 import { runStatus } from "@/lib/status";
+import { getPodmanCommand } from "@/lib/container-runtime";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -22,7 +23,7 @@ const PREBUILD_TAG = "lace.local/node:24-bookworm";
 
 function dockerImageExists(tag: string): boolean {
   try {
-    execSync(`docker image inspect ${tag}`, { stdio: "pipe" });
+    execSync(`${getPodmanCommand()} image inspect ${tag}`, { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -31,7 +32,7 @@ function dockerImageExists(tag: string): boolean {
 
 function dockerRmi(tag: string): void {
   try {
-    execSync(`docker rmi ${tag}`, { stdio: "pipe" });
+    execSync(`${getPodmanCommand()} rmi ${tag}`, { stdio: "pipe" });
   } catch {
     // ignore if image doesn't exist
   }

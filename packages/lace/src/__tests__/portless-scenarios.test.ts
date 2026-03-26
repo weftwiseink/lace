@@ -26,7 +26,6 @@ import {
   symlinkLocalFeature,
   readGeneratedConfig,
   readPortAssignments,
-  createTempSshKey,
   setupScenarioSettings,
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
@@ -65,11 +64,17 @@ function createMockSubprocess(): RunSubprocess {
 beforeEach(() => {
   ctx = createScenarioWorkspace("portless");
   clearMetadataCache(ctx.metadataCacheDir);
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(ctx.workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
 });
 
 afterEach(() => {
   clearMetadataCache(ctx.metadataCacheDir);
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
   ctx.cleanup();
 });
 
@@ -178,67 +183,5 @@ describe("Scenario P2: port persistence across runs", () => {
   });
 });
 
-// ── P3: Multi-feature coexistence with wezterm-server ──
-
-describe("Scenario P3: portless + wezterm-server coexistence", () => {
-  it("allocates distinct host ports for portless and wezterm-server", async () => {
-    const portlessPath = symlinkLocalFeature(ctx, "portless");
-    const weztermPath = symlinkLocalFeature(ctx, "wezterm-server");
-
-    // wezterm-server needs an SSH key mount for validation
-    const keyPath = createTempSshKey(ctx);
-    setupScenarioSettings(ctx, {
-      mounts: {
-        "wezterm-server/authorized-keys": { source: keyPath },
-      },
-    });
-
-    const config = {
-      image: "node:24-bookworm",
-      features: {
-        [weztermPath]: {},
-      },
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            [portlessPath]: {},
-          },
-        },
-      },
-    };
-
-    writeDevcontainerJson(ctx, config);
-
-    const result = await runUp({
-      workspaceFolder: ctx.workspaceRoot,
-      skipDevcontainerUp: true,
-      subprocess: createMockSubprocess(),
-      cacheDir: ctx.metadataCacheDir,
-    });
-
-    expect(result.exitCode).toBe(0);
-
-    // Assert: both features got distinct ports
-    const assignments = readPortAssignments(ctx);
-    const portlessPort = assignments["portless/proxyPort"].port;
-    const weztermPort = assignments["wezterm-server/hostSshPort"].port;
-
-    expect(portlessPort).not.toBe(weztermPort);
-    expect(portlessPort).toBeGreaterThanOrEqual(22425);
-    expect(weztermPort).toBeGreaterThanOrEqual(22425);
-
-    // Assert: generated config has both port entries
-    const extended = readGeneratedConfig(ctx);
-    const appPort = extended.appPort as string[];
-
-    // Portless: asymmetric (prebuild feature)
-    expect(appPort).toContain(`${portlessPort}:1355`);
-    // Wezterm: symmetric (top-level feature, auto-injected)
-    expect(appPort).toContain(`${weztermPort}:${weztermPort}`);
-
-    // Assert: both have portsAttributes
-    const attrs = extended.portsAttributes as Record<string, unknown>;
-    expect(attrs[String(portlessPort)]).toBeDefined();
-    expect(attrs[String(weztermPort)]).toBeDefined();
-  });
-});
+// NOTE(opus/test-health): P3 (portless + wezterm-server coexistence) removed.
+// The wezterm-server feature was deleted in commit 7f6ca1d.

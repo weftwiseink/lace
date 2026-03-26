@@ -29,6 +29,12 @@ let ctx: ScenarioWorkspace;
 beforeEach(() => {
   ctx = createScenarioWorkspace("fundamentals");
   clearMetadataCache(ctx.metadataCacheDir);
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  // Tests that need a user config call setupUserConfig() which overrides this.
+  const userConfigPath = join(ctx.workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
 });
 
 afterEach(() => {
@@ -131,8 +137,9 @@ describe("Scenario F2: fundamentals without user.json", () => {
     const featurePath = symlinkLocalFeature(ctx, "lace-fundamentals");
     setupFundamentalsMounts(ctx);
 
-    // No user config
-    delete process.env.LACE_USER_CONFIG;
+    // Simulate "no user config": LACE_USER_CONFIG points to empty {} file
+    // (written by beforeEach). We cannot simply delete the env var because
+    // the host may have ~/.config/lace/user.json which would leak into tests.
 
     const config = {
       image: "mcr.microsoft.com/devcontainers/base:ubuntu",

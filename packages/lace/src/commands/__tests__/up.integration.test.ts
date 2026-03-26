@@ -178,6 +178,12 @@ beforeEach(() => {
   clearClassificationCache();
   resetPodmanCommandCache();
 
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
+
   // Set LACE_SETTINGS to point to our test settings location.
   // Create an empty default so loadSettings() does not throw when
   // tests do not call setupSettings() explicitly.
@@ -192,6 +198,7 @@ afterEach(() => {
   resetPodmanCommandCache();
   rmSync(workspaceRoot, { recursive: true, force: true });
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
 });
 
 const STANDARD_DOCKERFILE = "FROM node:24-bookworm\nRUN apt-get update\n";
@@ -2187,7 +2194,7 @@ describe("lace up: inferred mount validation — warns on missing bind-mount sou
           w.includes("Bind mount source does not exist") &&
           w.includes("/nonexistent/path/that/does/not/exist") &&
           w.includes("target: /mnt/data") &&
-          w.includes("Docker will auto-create this as a root-owned directory"),
+          w.includes("container runtime will auto-create this as a root-owned directory"),
       ),
     ).toBe(true);
 

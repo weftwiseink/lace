@@ -32,7 +32,6 @@ import {
   prepareGeneratedConfigForDocker,
   stopContainer,
   cleanupWorkspaceContainers,
-  createTempSshKey,
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
 import type { RunSubprocess } from "@/lib/subprocess";
@@ -44,11 +43,17 @@ let ctx: ScenarioWorkspace;
 beforeEach(() => {
   ctx = createScenarioWorkspace("claude-code");
   clearMetadataCache(ctx.metadataCacheDir);
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(ctx.workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
 });
 
 afterEach(() => {
   clearMetadataCache(ctx.metadataCacheDir);
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
   ctx.cleanup();
 });
 
@@ -270,66 +275,8 @@ describe.skipIf(!isDockerAvailable())(
   },
 );
 
-// ── C5: Multi-feature coexistence with wezterm-server ──
-
-describe("Scenario C5: claude-code + wezterm-server coexistence", () => {
-  it("generates config with both mount and port entries", async () => {
-    const claudePath = symlinkLocalFeature(ctx, "claude-code");
-    const weztermPath = symlinkLocalFeature(ctx, "wezterm-server");
-
-    const claudeDir = join(ctx.workspaceRoot, ".claude-dir");
-    mkdirSync(claudeDir, { recursive: true });
-    const keyPath = createTempSshKey(ctx);
-
-    setupScenarioSettings(ctx, {
-      mounts: {
-        "claude-code/config": { source: claudeDir },
-        "wezterm-server/authorized-keys": { source: keyPath },
-      },
-    });
-
-    const config = {
-      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
-      features: {
-        [claudePath]: {},
-        [weztermPath]: {},
-      },
-    };
-
-    writeDevcontainerJson(ctx, config);
-
-    const result = await runUp({
-      workspaceFolder: ctx.workspaceRoot,
-      skipDevcontainerUp: true,
-      cacheDir: ctx.metadataCacheDir,
-    });
-
-    expect(result.exitCode).toBe(0);
-
-    const extended = readGeneratedConfig(ctx);
-
-    // Assert: claude-code mount is present
-    const mounts = extended.mounts as string[];
-    const claudeMount = mounts.find((m) => m.includes(".claude"));
-    expect(claudeMount).toBeDefined();
-
-    // Assert: wezterm-server port is allocated
-    const port = result.phases.portAssignment!.port!;
-    expect(port).toBeGreaterThanOrEqual(22425);
-
-    // Assert: both features present in generated config
-    const features = extended.features as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(features[claudePath]).toBeDefined();
-    expect(features[weztermPath]).toBeDefined();
-
-    // Assert: wezterm port entries present
-    expect(extended.appPort).toBeDefined();
-    expect(extended.forwardPorts).toContain(port);
-  });
-});
+// NOTE(opus/test-health): C5 (claude-code + wezterm-server coexistence) removed.
+// The wezterm-server feature was deleted in commit 7f6ca1d.
 
 // ── C6: Version pinning passes through ──
 
@@ -483,8 +430,12 @@ describe("Scenario C8: explicit mount entry suppresses auto-injection", () => {
     const extended = readGeneratedConfig(ctx);
     const mounts = extended.mounts as string[];
 
-    // Assert: exactly one claude mount (user's explicit entry, not duplicated)
-    const claudeMounts = mounts.filter((m) => m.includes(".claude"));
-    expect(claudeMounts).toHaveLength(1);
+    // Assert: the explicit claude-code/config mount should not be duplicated.
+    // The config-json mount (targeting .claude.json) is a separate declaration
+    // and is correctly auto-injected alongside the explicit config mount.
+    const configMounts = mounts.filter(
+      (m) => m.includes(".claude") && !m.includes(".claude.json"),
+    );
+    expect(configMounts).toHaveLength(1);
   });
 });

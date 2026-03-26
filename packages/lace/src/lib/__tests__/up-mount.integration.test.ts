@@ -142,6 +142,12 @@ beforeEach(() => {
   clearClassificationCache();
   resetPodmanCommandCache();
 
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
+
   // Set LACE_SETTINGS to point to our test settings location.
   // Create an empty default so loadSettings() does not throw when
   // tests do not call setupSettings() explicitly.
@@ -160,6 +166,7 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
 });
 
 // ── End-to-end mount source resolution (v2 accessor syntax) ──

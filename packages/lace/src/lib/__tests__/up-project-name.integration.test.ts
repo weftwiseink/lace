@@ -75,6 +75,12 @@ beforeEach(() => {
   clearClassificationCache();
   resetPodmanCommandCache();
 
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
+
   // Create an empty default settings so loadSettings() does not throw
   const settingsDir = join(workspaceRoot, ".config", "lace");
   mkdirSync(settingsDir, { recursive: true });
@@ -90,6 +96,7 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
 });
 
 describe("lace up: project name injection", () => {
@@ -228,12 +235,10 @@ describe("lace up: project name injection", () => {
     );
 
     trackProjectMountsDir(specialRoot);
-    process.env.LACE_SETTINGS = join(
-      specialRoot,
-      ".config",
-      "lace",
-      "settings.json",
-    );
+    const specialSettingsDir = join(specialRoot, ".config", "lace");
+    mkdirSync(specialSettingsDir, { recursive: true });
+    writeFileSync(join(specialSettingsDir, "settings.json"), "{}", "utf-8");
+    process.env.LACE_SETTINGS = join(specialSettingsDir, "settings.json");
 
     const result = await runUp({
       workspaceFolder: specialRoot,
@@ -284,12 +289,10 @@ describe("lace up: project name injection", () => {
     );
 
     trackProjectMountsDir(worktreeDir);
-    process.env.LACE_SETTINGS = join(
-      worktreeDir,
-      ".config",
-      "lace",
-      "settings.json",
-    );
+    const wtSettingsDir1 = join(worktreeDir, ".config", "lace");
+    mkdirSync(wtSettingsDir1, { recursive: true });
+    writeFileSync(join(wtSettingsDir1, "settings.json"), "{}", "utf-8");
+    process.env.LACE_SETTINGS = join(wtSettingsDir1, "settings.json");
 
     const result = await runUp({
       workspaceFolder: worktreeDir,
@@ -340,12 +343,10 @@ describe("lace up: project name injection", () => {
     );
 
     trackProjectMountsDir(worktreeDir);
-    process.env.LACE_SETTINGS = join(
-      worktreeDir,
-      ".config",
-      "lace",
-      "settings.json",
-    );
+    const wtSettingsDir2 = join(worktreeDir, ".config", "lace");
+    mkdirSync(wtSettingsDir2, { recursive: true });
+    writeFileSync(join(wtSettingsDir2, "settings.json"), "{}", "utf-8");
+    process.env.LACE_SETTINGS = join(wtSettingsDir2, "settings.json");
 
     const result = await runUp({
       workspaceFolder: worktreeDir,

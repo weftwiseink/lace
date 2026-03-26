@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runUp } from "@/lib/up";
 import { clearMetadataCache } from "@/lib/feature-metadata";
@@ -29,7 +29,6 @@ import {
   isDockerAvailable,
   stopContainer,
   cleanupWorkspaceContainers,
-  createTempSshKey,
   setupScenarioSettings,
   prepareGeneratedConfigForDocker,
   FEATURES_SRC_DIR,
@@ -43,11 +42,17 @@ let ctx: ScenarioWorkspace;
 beforeEach(() => {
   ctx = createScenarioWorkspace("neovim");
   clearMetadataCache(ctx.metadataCacheDir);
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(ctx.workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
 });
 
 afterEach(() => {
   clearMetadataCache(ctx.metadataCacheDir);
   delete process.env.LACE_SETTINGS;
+  delete process.env.LACE_USER_CONFIG;
   ctx.cleanup();
 });
 
@@ -139,58 +144,8 @@ describe("Scenario N2: no port allocation for mount-only feature", () => {
   });
 });
 
-// ── N3: Coexistence with wezterm-server feature ──
-
-describe("Scenario N3: neovim + wezterm-server coexistence", () => {
-  it("both features contribute their mounts to generated config", async () => {
-    const neovimPath = symlinkLocalFeature(ctx, "neovim");
-    const weztermPath = symlinkLocalFeature(ctx, "wezterm-server");
-
-    const pluginDir = join(ctx.workspaceRoot, "nvim-plugins");
-    mkdirSync(pluginDir, { recursive: true });
-    const keyPath = createTempSshKey(ctx);
-
-    setupScenarioSettings(ctx, {
-      mounts: {
-        "neovim/plugins": { source: pluginDir },
-        "wezterm-server/authorized-keys": { source: keyPath },
-      },
-    });
-
-    const config = {
-      image: "mcr.microsoft.com/devcontainers/base:ubuntu",
-      features: {
-        [neovimPath]: {},
-        [weztermPath]: {},
-      },
-    };
-
-    writeDevcontainerJson(ctx, config);
-
-    const result = await runUp({
-      workspaceFolder: ctx.workspaceRoot,
-      skipDevcontainerUp: true,
-      cacheDir: ctx.metadataCacheDir,
-    });
-
-    expect(result.exitCode).toBe(0);
-
-    const extended = readGeneratedConfig(ctx);
-    const mounts = extended.mounts as string[];
-
-    // Assert: neovim mount present
-    const nvimMount = mounts.find((m) => m.includes(".local/share/nvim"));
-    expect(nvimMount).toBeDefined();
-
-    // Assert: wezterm-server authorized-keys mount present
-    const sshMount = mounts.find((m) => m.includes("authorized_keys"));
-    expect(sshMount).toBeDefined();
-
-    // Assert: wezterm-server also got a port allocated
-    expect(result.phases.portAssignment?.exitCode).toBe(0);
-    expect(result.phases.portAssignment?.port).toBeGreaterThanOrEqual(22425);
-  });
-});
+// NOTE(opus/test-health): N3 (neovim + wezterm-server coexistence) removed.
+// The wezterm-server feature was deleted in commit 7f6ca1d.
 
 // ── N4: Version option passes through untouched ──
 

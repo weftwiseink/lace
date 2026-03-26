@@ -13,7 +13,7 @@
  *
  * Set LACE_TEST_KEEP_FIXTURES=1 to preserve temp directories for manual inspection.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { execSync } from "node:child_process";
 import {
   mkdirSync,
@@ -200,6 +200,19 @@ describe.skipIf(!gitAvailable)("workspace smoke tests", () => {
     } else {
       console.log(`Fixtures preserved at: ${fixtureRoot}`);
     }
+  });
+
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  beforeEach(() => {
+    const userConfigPath = join(fixtureRoot, ".user-config.json");
+    writeFileSync(userConfigPath, "{}", "utf-8");
+    process.env.LACE_USER_CONFIG = userConfigPath;
+  });
+
+  afterEach(() => {
+    delete process.env.LACE_USER_CONFIG;
+    delete process.env.LACE_SETTINGS;
   });
 
   // ── Section 1: Workspace detection against real git structures ──

@@ -87,10 +87,16 @@ beforeEach(() => {
     `lace-docker-smoke-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   mkdirSync(workspaceRoot, { recursive: true });
+  // Isolate from host user config to prevent ~/.config/lace/user.json leaking
+  // features, git identity, and mounts that the test mocks don't handle.
+  const userConfigPath = join(workspaceRoot, ".user-config.json");
+  writeFileSync(userConfigPath, "{}", "utf-8");
+  process.env.LACE_USER_CONFIG = userConfigPath;
 });
 
 afterEach(() => {
   rmSync(workspaceRoot, { recursive: true, force: true });
+  delete process.env.LACE_USER_CONFIG;
 });
 
 afterAll(() => {

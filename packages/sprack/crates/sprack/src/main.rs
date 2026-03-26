@@ -197,11 +197,16 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         }
     }
 
-    // DB doesn't exist or was just removed: try to start the poller daemon.
+    // DB doesn't exist or was just removed: try to start the daemons.
     if !daemon::is_poller_running() {
         eprintln!("sprack-poll not running, attempting to start...");
         if let Err(err) = daemon::start_sprack_poll() {
             eprintln!("warning: could not start sprack-poll: {err}");
+        }
+    }
+    if !daemon::is_claude_running() {
+        if let Err(err) = daemon::start_sprack_claude() {
+            eprintln!("warning: could not start sprack-claude: {err}");
         }
     }
 

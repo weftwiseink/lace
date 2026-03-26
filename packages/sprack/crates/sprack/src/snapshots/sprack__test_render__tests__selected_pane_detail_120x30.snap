@@ -2,33 +2,8 @@
 source: crates/sprack/src/test_render.rs
 expression: output
 ---
-  â¼ LOCAL                                                   âclaude-opus-4-6 [thinking...]
-    â¼ dev (1w)                                              âctx: 450K/1M (45%)  agents: 2
-      â¼ editor (1 panes)                                    âtool: Read
->         * bash/sprack-trouble [thinking] 2ag 450K/1M      âtasks: 2
-                                                            â[ ] Fix rendering
-                                                            â[ ] Add tests
-                                                            âupdated: <TIMESTAMP>
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
+  â¼ LOCAL
+    â¼ dev (1w)
+      â¼ editor (1 panes)
+>         * bash/sprack-trouble [thinking] 2ag 450K/1M
  [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

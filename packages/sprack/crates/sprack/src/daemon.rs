@@ -21,6 +21,11 @@ fn poll_pid_path() -> Result<PathBuf> {
     Ok(sprack_data_dir()?.join("poll.pid"))
 }
 
+/// Returns the path to the sprack-claude PID file.
+fn claude_pid_path() -> Result<PathBuf> {
+    Ok(sprack_data_dir()?.join("claude.pid"))
+}
+
 /// Checks whether the sprack-poll daemon is running by validating its PID file.
 pub fn is_poller_running() -> bool {
     let pid_path = match poll_pid_path() {
@@ -133,6 +138,53 @@ pub fn stop_poller() {
     }
     // Remove stale PID file.
     let _ = fs::remove_file(&pid_path);
+}
+
+/// Checks whether the sprack-claude daemon is running by validating its PID file.
+pub fn is_claude_running() -> bool {
+    let pid_path = match claude_pid_path() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    is_process_running(&pid_path)
+}
+
+/// Starts the sprack-claude daemon as a detached background process.
+///
+/// Uses the same sibling-binary resolution and setsid() daemonization as
+/// `start_sprack_poll`. sprack-claude reads the shared state.db populated
+/// by sprack-poll and writes Claude Code integration data.
+pub fn start_sprack_claude() -> Result<()> {
+    let data_dir = sprack_data_dir()?;
+    fs::create_dir_all(&data_dir)?;
+
+    let pid_path = claude_pid_path()?;
+
+    // Remove stale PID file if it exists.
+    if pid_path.exists() && !is_process_running(&pid_path) {
+        let _ = fs::remove_file(&pid_path);
+    }
+
+    let claude_binary = resolve_sibling_binary("sprack-claude");
+
+    let log_path = data_dir.join("claude.log");
+    let log_file = fs::File::create(&log_path)
+        .context("failed to create sprack-claude log file")?;
+
+    let _child = unsafe {
+        Command::new(&claude_binary)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(log_file))
+            .pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            })
+            .spawn()
+    }
+    .context("failed to spawn sprack-claude daemon")?;
+
+    Ok(())
 }
 
 /// Returns the default DB path for existence checks.

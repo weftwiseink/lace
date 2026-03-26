@@ -2,33 +2,8 @@
 source: crates/sprack/src/test_render.rs
 expression: output
 ---
-â¼ LOCAL                                                     âSelect a pane to view details
-  â¼ dev (1w)                                                â
-    â¼ editor (1 panes)                                      â
-        * bash/dev [error] 156K/200K                        â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
+â¼ LOCAL
+  â¼ dev (1w)
+    â¼ editor (1 panes)
+        * bash/dev [error] 156K/200K
  [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

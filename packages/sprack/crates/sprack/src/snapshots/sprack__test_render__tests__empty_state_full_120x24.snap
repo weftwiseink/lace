@@ -2,27 +2,5 @@
 source: crates/sprack/src/test_render.rs
 expression: output
 ---
-                                                            âSelect a pane to view details
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
-                                                            â
+
  [poller: not started] | j/k:nav  h/l:collapse  enter:focus  q/^C:quit

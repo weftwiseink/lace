@@ -5,6 +5,9 @@
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
+// NOTE(opus/sprack-ui-and-ipc-cont): Constraint and Layout are kept for frame_layout.
+// body_layout no longer uses them since the detail panel was removed.
+
 /// Responsive layout tier based on terminal width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutTier {
@@ -30,19 +33,11 @@ pub fn layout_tier(width: u16) -> LayoutTier {
 
 /// Splits the body area into tree and optional detail panel.
 ///
-/// Compact, Standard, and Wide tiers use the full area for the tree.
-/// Inline summaries at Wide tier make a separate detail pane unnecessary.
-/// Full tier splits horizontally: tree (min 40 cols) + detail (fill) for
-/// supplemental debugging metadata.
-pub fn body_layout(area: Rect, tier: LayoutTier) -> (Rect, Option<Rect>) {
-    match tier {
-        LayoutTier::Compact | LayoutTier::Standard | LayoutTier::Wide => (area, None),
-        LayoutTier::Full => {
-            let [tree, detail] =
-                Layout::horizontal([Constraint::Min(40), Constraint::Fill(1)]).areas(area);
-            (tree, Some(detail))
-        }
-    }
+/// All tiers use the full area for the tree with inline summaries.
+/// The detail panel is no longer rendered: inline summaries and the
+/// rich widget provide sufficient information at all layout tiers.
+pub fn body_layout(area: Rect, _tier: LayoutTier) -> (Rect, Option<Rect>) {
+    (area, None)
 }
 
 /// Splits the full terminal area into header, body, and status bar.
@@ -108,10 +103,10 @@ mod tests {
     }
 
     #[test]
-    fn test_body_layout_full_has_detail() {
+    fn test_body_layout_full_no_detail() {
         let area = Rect::new(0, 0, 120, 20);
         let (tree, detail) = body_layout(area, LayoutTier::Full);
-        assert!(tree.width >= 40);
-        assert!(detail.is_some());
+        assert_eq!(tree, area);
+        assert!(detail.is_none());
     }
 }

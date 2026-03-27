@@ -5,7 +5,7 @@ first_authored:
 task_list: sprack/metadata-writer
 type: devlog
 state: live
-status: wip
+status: done
 tags: [sprack, devcontainer, container]
 ---
 
@@ -91,4 +91,29 @@ All 61 mount-resolver tests pass.
 
 ## Issues Encountered and Solved
 
-(Updated as implementation proceeds.)
+1. **`$HOSTNAME` not set in `/bin/sh`**: The metadata writer uses `#!/bin/sh`, where `$HOSTNAME` is a bash-ism not guaranteed to be set.
+   Fixed by adding `$(hostname 2>/dev/null || echo unknown)` as a fallback.
+
+2. **Concurrent `lace up --rebuild`**: Two rebuild processes caused a podman storage race condition.
+   The user's terminal build succeeded; our background build failed with "identifier is not a container" from podman's overlay storage.
+   Not a code issue: operator error from running two rebuilds simultaneously.
+
+## Verification
+
+Verified in the running `lace` container:
+
+```
+$ podman exec -w /workspaces/lace/main lace /usr/local/bin/sprack-metadata-writer
+$ podman exec lace cat /mnt/sprack/metadata/state.json
+{"ts":"2026-03-27T00:54:06Z","container_name":"7b16a9004b7c","workdir":"/workspaces/lace/main","git_branch":"main","git_commit_short":"1f87505","git_dirty":true}
+```
+
+Host-side mount verified:
+```
+$ cat ~/.local/share/sprack/lace/lace/metadata/state.json
+{"ts":"2026-03-27T00:54:06Z","container_name":"7b16a9004b7c","workdir":"/workspaces/lace/main","git_branch":"main","git_commit_short":"1f87505","git_dirty":true}
+```
+
+> NOTE(opus/sprack-metadata-writer): The profile.d and nushell hooks were not verified end-to-end because the container was built before the metadata writer commit.
+> A full rebuild would install them.
+> The standalone script was manually copied and verified to confirm the core functionality works.

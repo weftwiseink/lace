@@ -4,7 +4,13 @@
     "name": "Sprack Integration",
     "description": "Provides a shared mount for sprack hook events and container metadata, enabling host-side tmux status bar integration with container Claude Code sessions.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/sprack",
-    "options": {},
+    "options": {
+        "enableMetadataWriter": {
+            "type": "boolean",
+            "default": true,
+            "description": "Install prompt hook that writes workdir and git state to /mnt/sprack/metadata/state.json"
+        }
+    },
     "containerEnv": {
         "SPRACK_EVENT_DIR": "/mnt/sprack/claude-events"
     },

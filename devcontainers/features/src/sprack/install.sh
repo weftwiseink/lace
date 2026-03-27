@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+ENABLEMETADATAWRITER="${ENABLEMETADATAWRITER:-true}"
 _REMOTE_USER="${_REMOTE_USER:-root}"
 
 # Ensure the mount point exists inside the container.
@@ -35,26 +36,37 @@ cp "$(dirname "$0")/sprack-hook-bridge.sh" "$HOOK_DIR/sprack-hook-bridge"
 chmod +x "$HOOK_DIR/sprack-hook-bridge"
 chown -R "$_REMOTE_USER:$_REMOTE_USER" "$HOOK_DIR"
 
-# Install the git context metadata writer as a profile.d script.
-# This prompt hook writes git branch/commit/dirty state to /mnt/sprack/metadata/state.json
-# on every prompt, giving sprack visibility into the container's git context.
-cat > /etc/profile.d/sprack-metadata.sh << 'PROFILE_EOF'
-__sprack_metadata() {
-    local dir="/mnt/sprack/metadata"
-    [ -d "$dir" ] || return 0
-    local branch commit dirty
-    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
-    commit=$(git rev-parse --short HEAD 2>/dev/null) || commit=""
-    git diff --quiet HEAD 2>/dev/null
-    dirty=$?
-    printf '{"ts":"%s","workdir":"%s","git_branch":"%s","git_commit_short":"%s","git_dirty":%s}\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PWD" "$branch" "$commit" \
-        "$([ "$dirty" -eq 0 ] && echo false || echo true)" > "$dir/state.json"
-}
-# Append to PROMPT_COMMAND for bash. Nushell and other shells use different mechanisms.
+# Install the metadata writer (gated behind enableMetadataWriter option).
+if [ "$ENABLEMETADATAWRITER" = "true" ]; then
+    # Install the standalone metadata writer script.
+    cp "$(dirname "$0")/sprack-metadata-writer.sh" /usr/local/bin/sprack-metadata-writer
+    chmod +x /usr/local/bin/sprack-metadata-writer
+
+    # Bash integration: profile.d script that hooks PROMPT_COMMAND.
+    cat > /etc/profile.d/sprack-metadata.sh << 'PROFILE_EOF'
+# Sprack metadata writer prompt hook.
+# Calls sprack-metadata-writer on every prompt to update git state in /mnt/sprack/metadata/state.json.
 if [ -n "${BASH_VERSION:-}" ]; then
-    PROMPT_COMMAND="__sprack_metadata;${PROMPT_COMMAND:-}"
+    PROMPT_COMMAND="sprack-metadata-writer;${PROMPT_COMMAND:-}"
 fi
 PROFILE_EOF
 
-echo "Sprack integration installed (mount dirs + hook bridge + metadata writer)."
+    # Nushell integration: env file that adds a pre_prompt hook.
+    # Nushell does not source /etc/profile.d/ scripts, so a separate .nu file is needed.
+    # The user's nushell config must source this file (typically via chezmoi dotfiles).
+    mkdir -p /etc/nushell
+    cat > /etc/nushell/sprack-hooks.nu << 'NU_EOF'
+# Sprack metadata writer hook for nushell.
+# Source this file from your nushell env.nu or config.nu:
+#   source /etc/nushell/sprack-hooks.nu
+$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt | default [] | append {||
+    if ("/mnt/sprack/metadata" | path exists) {
+        ^sprack-metadata-writer
+    }
+})
+NU_EOF
+
+    echo "Sprack integration installed (mount dirs + hook bridge + metadata writer)."
+else
+    echo "Sprack integration installed (mount dirs + hook bridge, metadata writer disabled)."
+fi

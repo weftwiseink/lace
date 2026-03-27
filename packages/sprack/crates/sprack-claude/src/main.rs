@@ -322,6 +322,16 @@ fn process_claude_pane(
             session_state.cached_hook_events.extend(hook_events);
         }
         events::merge_hook_events(&mut summary, &session_state.cached_hook_events);
+
+        // If a SessionEnd event has been seen, the Claude session has exited.
+        // Clear the integration and evict the cache entry so the pane is no
+        // longer tracked. This is the primary exit detection for container panes
+        // where current_command cannot distinguish Claude from the container shell.
+        if has_session_end(&session_state.cached_hook_events) {
+            delete_integration(db_connection, &pane.pane_id);
+            session_cache.remove(&pane.pane_id);
+            return;
+        }
     }
 
     // Enrich summary with cached session data (turn counts, tool usage, context trend).
@@ -736,6 +746,23 @@ fn write_error_integration(
         &summary_json,
         &sprack_db::types::ProcessStatus::Error,
     );
+}
+
+/// Checks whether any SessionEnd event exists in the accumulated hook events.
+fn has_session_end(events: &[events::HookEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, events::HookEvent::SessionEnd { .. }))
+}
+
+/// Deletes the integration row for a specific pane.
+fn delete_integration(db_connection: &rusqlite::Connection, pane_id: &str) {
+    if let Err(error) = db_connection.execute(
+        "DELETE FROM process_integrations WHERE pane_id = ?1 AND kind = ?2",
+        rusqlite::params![pane_id, INTEGRATION_KIND],
+    ) {
+        eprintln!("sprack-claude: failed to delete integration for {pane_id}: {error}");
+    }
 }
 
 /// Deletes process_integrations rows for pane IDs no longer running Claude.

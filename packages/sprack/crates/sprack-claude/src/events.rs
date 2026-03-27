@@ -406,8 +406,8 @@ pub fn event_dirs_from_home(home: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
     // Per-project: lace container mounts at ~/.local/share/sprack/lace/*/claude-events/.
-    let lace_dir = home.join(".local/share/sprack/lace");
-    if let Ok(entries) = std::fs::read_dir(&lace_dir) {
+    let container_mounts_dir = home.join(".local/share/sprack/lace");
+    if let Ok(entries) = std::fs::read_dir(&container_mounts_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let events_dir = entry.path().join("claude-events");
             if events_dir.is_dir() {

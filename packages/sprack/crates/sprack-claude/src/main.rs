@@ -5,8 +5,8 @@
 //! to the shared SQLite process_integrations table.
 //!
 //! Local panes are resolved by walking the Linux /proc filesystem from pane PIDs.
-//! Container panes are resolved via the `~/.claude` bind mount using workspace
-//! prefix matching and mtime heuristics.
+//! Container panes are resolved via the sprack devcontainer mount's hook bridge
+//! event files, with a fallback to `~/.claude/projects/` directory matching.
 
 mod cache;
 mod events;
@@ -572,8 +572,8 @@ fn resolve_container_git_via_metadata(
         Err(_) => return false,
     };
 
-    let lace_dir = PathBuf::from(&home).join(".local/share/sprack/lace");
-    let entries = match std::fs::read_dir(&lace_dir) {
+    let container_mounts_dir = PathBuf::from(&home).join(".local/share/sprack/lace");
+    let entries = match std::fs::read_dir(&container_mounts_dir) {
         Ok(e) => e,
         Err(_) => return false,
     };

@@ -184,9 +184,8 @@ fn extract_mtime_value(value: &Option<serde_json::Value>) -> f64 {
 /// Lists root-level .jsonl files in the project directory, sorted by mtime descending.
 ///
 /// Ignores files in subdirectories (which are subagent session files).
-/// Public for use by `LaceContainerResolver`, which skips `sessions-index.json`
-/// because its `fullPath` entries contain container-internal absolute paths
-/// that do not resolve on the host.
+/// Used as a fallback for container resolution when `sessions-index.json`
+/// entries contain container-internal absolute paths that do not resolve on the host.
 pub fn find_via_jsonl_listing(project_dir: &Path) -> Option<PathBuf> {
     let read_dir = std::fs::read_dir(project_dir).ok()?;
 

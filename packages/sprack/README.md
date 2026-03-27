@@ -2,7 +2,7 @@
 
 A tree-style tmux session browser built as cooperating Rust binaries sharing a SQLite database.
 sprack renders a persistent, responsive view of every tmux session, window, and pane as a collapsible tree.
-Sessions are grouped by lace devcontainer using `@lace_container` tmux options.
+Sessions are grouped by container name using tmux session options.
 
 sprack is read-and-navigate only: it does not create, destroy, or rearrange tmux objects.
 
@@ -114,10 +114,6 @@ cargo fmt --all -- --check
 ```
 
 ## Future Work
-
-> TODO(opus/sprack-widget-restyle): Surface git context (branch, commit, worktree branches) in the Claude widget.
-> Requires sprack-claude to inspect the cwd of each Claude process for git state.
-> See `cdocs/proposals/2026-03-24-sprack-claude-widget-restyle.md` for the design.
 
 ## Platform Support
 

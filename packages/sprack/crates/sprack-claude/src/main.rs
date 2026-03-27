@@ -387,7 +387,7 @@ const CONTAINER_SESSION_MAX_AGE: Duration = Duration::from_secs(60);
 
 /// Checks whether the cached session state is still valid for a pane.
 fn is_session_cache_valid(
-    _pane: &sprack_db::types::Pane,
+    pane: &sprack_db::types::Pane,
     cached_state: Option<&SessionFileState>,
 ) -> bool {
     let state = match cached_state {
@@ -405,6 +405,11 @@ fn is_session_cache_valid(
             // Local pane: check if the Claude process is still alive.
             let proc_path = format!("/proc/{pid}");
             if !std::path::Path::new(&proc_path).exists() {
+                return false;
+            }
+            // Guard against PID reuse: if the pane's command is no longer
+            // "claude", the cached session belongs to a previous process.
+            if !pane.current_command.contains("claude") {
                 return false;
             }
         }

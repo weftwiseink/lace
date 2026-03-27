@@ -108,6 +108,7 @@ const SKIPPED_ENTRY_TYPES: &[&str] = &[
     "progress",
     "custom-title",
     "queue-operation",
+    "result",
 ];
 
 /// Extracts the activity state from parsed JSONL entries.
@@ -120,10 +121,14 @@ const SKIPPED_ENTRY_TYPES: &[&str] = &[
 /// - user -> Waiting
 /// - No meaningful entries -> Error
 pub fn extract_activity_state(entries: &[JsonlEntry]) -> ProcessStatus {
-    // Filter to non-sidechain, meaningful entries.
+    // Filter to non-sidechain, non-compact-summary, meaningful entries.
+    // Compact summaries restate earlier messages after context compaction.
+    // A compact `user` entry at the tail would incorrectly show "waiting"
+    // even though the conversation has progressed past that point.
     let meaningful_entries: Vec<&JsonlEntry> = entries
         .iter()
         .filter(|entry| !entry.is_sidechain.unwrap_or(false))
+        .filter(|entry| !entry.is_compact_summary.unwrap_or(false))
         .filter(|entry| !SKIPPED_ENTRY_TYPES.contains(&entry.entry_type.as_str()))
         .collect();
 
@@ -492,6 +497,48 @@ mod tests {
         ];
         let state = extract_activity_state(&entries);
         assert_eq!(state, ProcessStatus::Waiting);
+    }
+
+    #[test]
+    fn test_activity_state_ignores_compact_summary() {
+        // After context compaction, Claude writes compact summary entries
+        // that restate earlier messages. A compact `user` entry at the tail
+        // should NOT cause the state to show "waiting" when the real last
+        // entry was an assistant response.
+        let mut compact_user = make_user_entry();
+        compact_user.is_compact_summary = Some(true);
+
+        let entries = vec![
+            make_assistant_entry(Some("tool_use"), "claude-opus-4-6"),
+            compact_user,
+        ];
+        let state = extract_activity_state(&entries);
+        assert_eq!(state, ProcessStatus::ToolUse);
+    }
+
+    #[test]
+    fn test_activity_state_skips_result_entries() {
+        // "result" entries (tool execution results) are infrastructure, not
+        // conversational state. They should be skipped like other non-user,
+        // non-assistant entry types.
+        let entries = vec![
+            make_assistant_entry(Some("tool_use"), "claude-opus-4-6"),
+            JsonlEntry {
+                entry_type: "result".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: None,
+                message: None,
+                data: None,
+                custom_title: None,
+                agent_name: None,
+            },
+        ];
+        let state = extract_activity_state(&entries);
+        assert_eq!(state, ProcessStatus::ToolUse);
     }
 
     #[test]

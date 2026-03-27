@@ -492,9 +492,9 @@ pub(crate) fn is_session_cache_valid(
     }
 
     match &state.cache_key {
-        session::CacheKey::Pid(pid) => {
+        session::CacheKey::Pid(cached_pid) => {
             // Local pane: check if the Claude process is still alive.
-            let proc_path = format!("/proc/{pid}");
+            let proc_path = format!("/proc/{cached_pid}");
             if !std::path::Path::new(&proc_path).exists() {
                 return false;
             }
@@ -502,6 +502,20 @@ pub(crate) fn is_session_cache_valid(
             // "claude", the cached session belongs to a previous process.
             if !pane.current_command.contains("claude") {
                 return false;
+            }
+            // Guard against session replacement (/new + /rename): verify
+            // the cached Claude PID is still the Claude process running
+            // under this pane's shell. When a user does /new, the old
+            // Claude exits and a new one starts with a different PID.
+            // The old PID may still exist briefly (or be reused), but
+            // find_claude_pid will find the NEW process. If the PIDs
+            // differ, invalidate so re-resolution picks up the new session.
+            if let Some(shell_pid) = pane.pane_pid {
+                if let Some(current_claude_pid) = proc_walk::find_claude_pid(shell_pid) {
+                    if current_claude_pid != *cached_pid {
+                        return false;
+                    }
+                }
             }
         }
         session::CacheKey::ContainerSession(_path) => {

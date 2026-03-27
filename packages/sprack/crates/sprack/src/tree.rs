@@ -164,7 +164,16 @@ fn build_window_items(
         .iter()
         .filter_map(|window| {
             let pane_items = build_pane_items(window, snapshot, own_pane_id, tier, theme);
-            build_window_item(window, pane_items, tier, theme)
+            // Use the total pane count from the DB (before self-filter) for
+            // the window label. The self-filter excludes the TUI's own pane
+            // from the tree children but the label should reflect the actual
+            // window composition, not the filtered view.
+            let total_pane_count = panes_for_window(
+                &window.session_name,
+                window.window_index,
+                &snapshot.panes,
+            ).len();
+            build_window_item(window, pane_items, total_pane_count, tier, theme)
         })
         .collect()
 }
@@ -330,11 +339,11 @@ fn build_pane_item(
 fn build_window_item(
     window: &Window,
     pane_items: Vec<TreeItem<'static, NodeId>>,
+    total_pane_count: usize,
     tier: LayoutTier,
     theme: &Theme,
 ) -> Option<TreeItem<'static, NodeId>> {
-    let pane_count = pane_items.len();
-    let line = format_window_label(window, pane_count, tier, theme);
+    let line = format_window_label(window, total_pane_count, tier, theme);
     let node_id = NodeId::Window(window.session_name.clone(), window.window_index);
     TreeItem::new(node_id, line, pane_items).ok()
 }

@@ -273,15 +273,42 @@ pub fn extract_slug(entries: &[JsonlEntry]) -> Option<String> {
         .find_map(|entry| entry.slug.clone())
 }
 
+/// Extracts a session name from JSONL `custom-title` or `agent-name` entries.
+///
+/// Scans entries in reverse order for the most recent `custom-title` entry.
+/// Falls back to the most recent `agent-name` entry if no `custom-title` exists.
+/// These entry types are emitted by Claude on session resume and `/rename`.
+pub fn extract_jsonl_custom_title(entries: &[JsonlEntry]) -> Option<String> {
+    // Prefer custom-title entries (most authoritative JSONL name source).
+    let title = entries
+        .iter()
+        .rev()
+        .filter(|e| e.entry_type == "custom-title")
+        .find_map(|e| e.custom_title.clone());
+    if title.is_some() {
+        return title;
+    }
+
+    // Fall back to agent-name entries.
+    entries
+        .iter()
+        .rev()
+        .filter(|e| e.entry_type == "agent-name")
+        .find_map(|e| e.agent_name.clone())
+}
+
 /// Resolves the best available session name from available sources.
 ///
-/// Priority: customTitle (user-set via `/rename`) > slug (auto-generated from JSONL) > None.
+/// Priority: customTitle from sessions-index.json > customTitle from JSONL >
+/// agentName from JSONL > slug (auto-generated) > None.
 /// Returns None when no name source is available; callers display a fallback (e.g., "unnamed").
 pub fn resolve_session_name(
     custom_title: Option<&str>,
+    jsonl_title: Option<&str>,
     slug: Option<&str>,
 ) -> Option<String> {
     custom_title
+        .or(jsonl_title)
         .map(|s| s.to_string())
         .or_else(|| slug.map(|s| s.to_string()))
 }
@@ -312,7 +339,12 @@ pub fn build_summary(entries: &[JsonlEntry], custom_title: Option<&str>) -> Clau
     let state_string = state.to_string();
 
     let slug = extract_slug(entries);
-    let session_name = resolve_session_name(custom_title, slug.as_deref());
+    let jsonl_title = extract_jsonl_custom_title(entries);
+    let session_name = resolve_session_name(
+        custom_title,
+        jsonl_title.as_deref(),
+        slug.as_deref(),
+    );
 
     ClaudeSummary {
         state: state_string,
@@ -391,6 +423,8 @@ mod tests {
                 ]),
             }),
             data: None,
+            custom_title: None,
+            agent_name: None,
         }
     }
 
@@ -405,6 +439,8 @@ mod tests {
             slug: None,
             message: None,
             data: None,
+            custom_title: None,
+            agent_name: None,
         }
     }
 
@@ -422,6 +458,8 @@ mod tests {
                 data_type: Some("agent_progress".to_string()),
                 tool_use_id: Some(tool_use_id.to_string()),
             }),
+            custom_title: None,
+            agent_name: None,
         }
     }
 
@@ -563,20 +601,36 @@ mod tests {
 
     #[test]
     fn test_resolve_session_name_prefers_custom_title() {
-        let result = resolve_session_name(Some("My Session"), Some("auto-slug"));
+        let result = resolve_session_name(Some("My Session"), None, Some("auto-slug"));
         assert_eq!(result.as_deref(), Some("My Session"));
     }
 
     #[test]
     fn test_resolve_session_name_falls_back_to_slug() {
-        let result = resolve_session_name(None, Some("auto-slug"));
+        let result = resolve_session_name(None, None, Some("auto-slug"));
         assert_eq!(result.as_deref(), Some("auto-slug"));
     }
 
     #[test]
-    fn test_resolve_session_name_returns_none_when_both_absent() {
-        let result = resolve_session_name(None, None);
+    fn test_resolve_session_name_returns_none_when_all_absent() {
+        let result = resolve_session_name(None, None, None);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_session_name_jsonl_title_over_slug() {
+        let result = resolve_session_name(None, Some("JSONL Title"), Some("auto-slug"));
+        assert_eq!(result.as_deref(), Some("JSONL Title"));
+    }
+
+    #[test]
+    fn test_resolve_session_name_index_title_over_jsonl_title() {
+        let result = resolve_session_name(
+            Some("Index Title"),
+            Some("JSONL Title"),
+            Some("auto-slug"),
+        );
+        assert_eq!(result.as_deref(), Some("Index Title"));
     }
 
     #[test]
@@ -603,6 +657,106 @@ mod tests {
         let entry = make_assistant_entry(Some("end_turn"), "claude-opus-4-6");
         let summary = build_summary(&[entry], None);
         assert_eq!(summary.session_name, None);
+    }
+
+    #[test]
+    fn test_extract_jsonl_custom_title_from_custom_title_entry() {
+        let entries = vec![
+            make_assistant_entry(Some("end_turn"), "claude-opus-4-6"),
+            JsonlEntry {
+                entry_type: "custom-title".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: None,
+                message: None,
+                data: None,
+                custom_title: Some("my-renamed-session".to_string()),
+                agent_name: None,
+            },
+        ];
+        let result = extract_jsonl_custom_title(&entries);
+        assert_eq!(result.as_deref(), Some("my-renamed-session"));
+    }
+
+    #[test]
+    fn test_extract_jsonl_custom_title_falls_back_to_agent_name() {
+        let entries = vec![
+            JsonlEntry {
+                entry_type: "agent-name".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: None,
+                message: None,
+                data: None,
+                custom_title: None,
+                agent_name: Some("agent-display-name".to_string()),
+            },
+        ];
+        let result = extract_jsonl_custom_title(&entries);
+        assert_eq!(result.as_deref(), Some("agent-display-name"));
+    }
+
+    #[test]
+    fn test_extract_jsonl_custom_title_prefers_custom_title_over_agent_name() {
+        let entries = vec![
+            JsonlEntry {
+                entry_type: "agent-name".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: None,
+                message: None,
+                data: None,
+                custom_title: None,
+                agent_name: Some("agent-name".to_string()),
+            },
+            JsonlEntry {
+                entry_type: "custom-title".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: None,
+                message: None,
+                data: None,
+                custom_title: Some("custom-title-wins".to_string()),
+                agent_name: None,
+            },
+        ];
+        let result = extract_jsonl_custom_title(&entries);
+        assert_eq!(result.as_deref(), Some("custom-title-wins"));
+    }
+
+    #[test]
+    fn test_build_summary_uses_jsonl_custom_title_when_no_index_title() {
+        let entries = vec![
+            make_assistant_entry(Some("end_turn"), "claude-opus-4-6"),
+            JsonlEntry {
+                entry_type: "custom-title".to_string(),
+                session_id: None,
+                timestamp: None,
+                is_sidechain: None,
+                parent_tool_use_id: None,
+                is_compact_summary: None,
+                slug: Some("auto-slug".to_string()),
+                message: None,
+                data: None,
+                custom_title: Some("jsonl-title".to_string()),
+                agent_name: None,
+            },
+        ];
+        // No sessions-index.json title (custom_title param is None).
+        let summary = build_summary(&entries, None);
+        assert_eq!(summary.session_name.as_deref(), Some("jsonl-title"));
     }
 
     #[test]

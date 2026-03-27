@@ -231,6 +231,15 @@ fn process_claude_pane(
             }
         }
 
+        // Check new entries for naming data (custom-title, agent-name).
+        // Update session_name if JSONL provides a name and we don't already have
+        // one from sessions-index.json (which is the authoritative source).
+        if session_state.session_name.is_none() {
+            if let Some(jsonl_name) = status::extract_jsonl_custom_title(&entries) {
+                session_state.session_name = Some(jsonl_name);
+            }
+        }
+
         session_state.last_entries = entries;
     }
 

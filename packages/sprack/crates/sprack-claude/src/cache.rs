@@ -512,6 +512,8 @@ mod tests {
             slug: None,
             message: None,
             data: None,
+            custom_title: None,
+            agent_name: None,
         }
     }
 
@@ -540,6 +542,8 @@ mod tests {
                 }]),
             }),
             data: None,
+            custom_title: None,
+            agent_name: None,
         }
     }
 

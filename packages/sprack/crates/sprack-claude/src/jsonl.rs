@@ -53,6 +53,14 @@ pub struct JsonlEntry {
     /// Progress data (present on progress entries).
     #[serde(default)]
     pub data: Option<ProgressData>,
+
+    /// User-set session name (present on "custom-title" entry types).
+    #[serde(rename = "customTitle", default)]
+    pub custom_title: Option<String>,
+
+    /// Agent display name (present on "agent-name" entry types, usually mirrors customTitle).
+    #[serde(rename = "agentName", default)]
+    pub agent_name: Option<String>,
 }
 
 /// Payload from an assistant-type JSONL entry.

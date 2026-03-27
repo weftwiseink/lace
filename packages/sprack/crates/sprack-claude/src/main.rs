@@ -154,11 +154,11 @@ fn process_claude_pane(
         let resolved = if is_local_claude {
             resolve_session_for_pane(pane, claude_home).or_else(|| {
                 container_session.and_then(|session| {
-                    resolver::resolve_container_pane(session, claude_home)
+                    resolver::resolve_container_pane(session, claude_home, &pane.current_path)
                 })
             })
         } else if let Some(session) = container_session {
-            resolver::resolve_container_pane(session, claude_home)
+            resolver::resolve_container_pane(session, claude_home, &pane.current_path)
         } else {
             None
         };

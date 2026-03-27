@@ -124,28 +124,39 @@ impl PaneResolver for LocalResolver {
 /// `transcript_path` from a `SessionStart` event if found, mapping it to the
 /// host-visible path. Falls back to cwd-based event file matching.
 ///
+/// `host_cwd` is the pane's `current_path` on the host: the CWD of the `podman`
+/// process. It provides a hint for host-path-encoded project directories when
+/// bind-mount path leakage causes Claude inside the container to see the host path
+/// instead of the container workspace path.
+///
 /// Returns `None` if the sprack devcontainer feature is not installed (no mount)
 /// or no matching event files exist.
 pub fn resolve_container_pane(
     session: &sprack_db::types::Session,
     claude_home: &Path,
+    host_cwd: &str,
 ) -> Option<SessionFileState> {
     let workspace = session.container_workspace.as_deref()?;
 
-    resolve_container_pane_via_mount(workspace, claude_home)
+    resolve_container_pane_via_mount(workspace, claude_home, host_cwd)
 }
 
 /// Resolves a container pane's session file via hook event files or project directory.
 ///
-/// Three-tier resolution strategy:
+/// Four-tier resolution strategy:
 /// 1. Hook event files: scan event directories for a file matching the workspace cwd.
 ///    If a `SessionStart` event provides a host-visible `transcript_path`, use it.
-/// 2. Project directory: encode the workspace path and look for session files in
-///    `~/.claude/projects/`. Works because `~/.claude` is bind-mounted into containers.
-/// 3. Returns `None` if neither strategy finds a session file.
+/// 2. Project directory (container path): encode the workspace path and look for
+///    session files in `~/.claude/projects/`.
+/// 3. Project directory (host path): encode the pane's host CWD and its parent
+///    directories, looking for session files in `~/.claude/projects/`. This handles
+///    bind-mount path leakage where Claude inside the container sees the host path
+///    instead of the container workspace path.
+/// 4. Returns `None` if no strategy finds a session file.
 fn resolve_container_pane_via_mount(
     workspace: &str,
     claude_home: &Path,
+    host_cwd: &str,
 ) -> Option<SessionFileState> {
     let event_dirs = events::event_dirs();
 
@@ -205,16 +216,16 @@ fn resolve_container_pane_via_mount(
         }
     }
 
-    // Fallback: find a session file in ~/.claude/projects/ matching the workspace.
-    // This works even without hook events because ~/.claude is bind-mounted from the
-    // host, so container sessions create project directories visible here.
-    let encoded_path = proc_walk::encode_project_path(std::path::Path::new(workspace));
-    let project_dir = claude_home.join("projects").join(&encoded_path);
-    let session_file = session::find_via_jsonl_listing(&project_dir)?;
+    // Collect candidate project directories from multiple path encodings.
+    // Bind-mount path leakage can cause Claude inside the container to see the
+    // host filesystem path instead of the container workspace path, creating
+    // session files under a host-path-encoded directory rather than the expected
+    // container-workspace-encoded directory.
+    let best = find_best_project_session(workspace, host_cwd, claude_home)?;
 
     Some(SessionFileState {
-        cache_key: CacheKey::ContainerSession(session_file.clone()),
-        session_file,
+        cache_key: CacheKey::ContainerSession(best.clone()),
+        session_file: best,
         file_position: 0,
         last_entries: Vec::new(),
         event_file_position: 0,
@@ -229,6 +240,64 @@ fn resolve_container_pane_via_mount(
         git_worktrees_mtime: None,
         git_worktree_branches: None,
     })
+}
+
+/// Finds the most recently modified session file across multiple candidate
+/// project directory encodings.
+///
+/// Candidates are derived from:
+/// 1. The container workspace path (e.g., `/workspaces/lace/main`)
+/// 2. The host CWD path and its parent directories (e.g., `/var/home/mjr/code/weft/lace/main/packages/sprack`,
+///    `/var/home/mjr/code/weft/lace/main`, etc.)
+///
+/// Each candidate path is encoded and checked as a project directory under
+/// `~/.claude/projects/`. The session file with the most recent mtime wins.
+fn find_best_project_session(
+    workspace: &str,
+    host_cwd: &str,
+    claude_home: &Path,
+) -> Option<PathBuf> {
+    let projects_dir = claude_home.join("projects");
+
+    // Build list of unique candidate encoded paths.
+    let mut candidates: Vec<String> = Vec::new();
+
+    // 1. Container workspace encoding (canonical).
+    let workspace_encoded = proc_walk::encode_project_path(Path::new(workspace));
+    candidates.push(workspace_encoded);
+
+    // 2. Host CWD and its parent directories.
+    // Walk up from host_cwd to root, adding each as a candidate.
+    // This handles both the exact CWD and parent directories where Claude
+    // might have been started (e.g., monorepo root vs subdirectory).
+    let mut path = Path::new(host_cwd);
+    for _ in 0..10 {
+        let encoded = proc_walk::encode_project_path(path);
+        if !candidates.contains(&encoded) {
+            candidates.push(encoded);
+        }
+        match path.parent() {
+            Some(parent) if parent != path => path = parent,
+            _ => break,
+        }
+    }
+
+    // Find the session file with the most recent mtime across all candidates.
+    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
+
+    for encoded in &candidates {
+        let project_dir = projects_dir.join(encoded);
+        if let Some(session_path) = session::find_via_jsonl_listing(&project_dir) {
+            if let Ok(mtime) = std::fs::metadata(&session_path).and_then(|m| m.modified()) {
+                let dominated = best.as_ref().is_some_and(|(_, best_mtime)| mtime <= *best_mtime);
+                if !dominated {
+                    best = Some((session_path, mtime));
+                }
+            }
+        }
+    }
+
+    best.map(|(path, _)| path)
 }
 
 #[cfg(test)]
@@ -389,7 +458,7 @@ mod tests {
             updated_at: "2026-03-24T12:00:00Z".to_string(),
         };
 
-        let result = resolve_container_pane(&session, claude_home);
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
         assert!(result.is_none(), "should return None without workspace");
     }
 
@@ -408,7 +477,7 @@ mod tests {
         };
 
         // No event directories and no ~/.claude/projects/ dir: resolution should return None.
-        let result = resolve_container_pane(&session, claude_home);
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
         assert!(
             result.is_none(),
             "should return None when no event dirs or project dirs exist"
@@ -444,7 +513,7 @@ mod tests {
         };
 
         // No event directories exist, but the project dir has a session file.
-        let result = resolve_container_pane(&session, claude_home);
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
         assert!(
             result.is_some(),
             "should resolve via project dir fallback when no event files exist"
@@ -453,6 +522,54 @@ mod tests {
         assert_eq!(state.session_file, session_file);
         assert!(state.hook_transcript_path.is_none());
         assert!(state.hook_session_id.is_none());
+    }
+
+    #[test]
+    fn resolve_container_pane_prefers_host_path_when_newer() {
+        // When bind-mount path leakage causes Claude to use the host path,
+        // the resolver should find the session under the host-path encoding
+        // and prefer it over a stale session under the workspace encoding.
+        let temp = tempfile::tempdir().unwrap();
+        let claude_home = temp.path();
+
+        let workspace = "/workspaces/lace/main";
+        let host_cwd = "/var/home/mjr/code/weft/lace/main/packages/sprack";
+
+        // Create a stale session under the workspace encoding.
+        let workspace_encoded = crate::proc_walk::encode_project_path(std::path::Path::new(workspace));
+        let workspace_dir = claude_home.join("projects").join(&workspace_encoded);
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+        let stale_file = workspace_dir.join("session-stale.jsonl");
+        std::fs::write(&stale_file, r#"{"type":"user","message":{"role":"user","content":"old"}}"#).unwrap();
+
+        // Brief pause to ensure different mtime.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        // Create a newer session under the host-path encoding (parent of host_cwd).
+        // The host CWD is .../packages/sprack, but the session is at .../lace/main.
+        let host_parent = "/var/home/mjr/code/weft/lace/main";
+        let host_encoded = crate::proc_walk::encode_project_path(std::path::Path::new(host_parent));
+        let host_dir = claude_home.join("projects").join(&host_encoded);
+        std::fs::create_dir_all(&host_dir).unwrap();
+        let fresh_file = host_dir.join("session-fresh.jsonl");
+        std::fs::write(&fresh_file, r#"{"type":"user","message":{"role":"user","content":"new"}}"#).unwrap();
+
+        let session = sprack_db::types::Session {
+            name: "lace".to_string(),
+            attached: false,
+            container_name: Some("lace".to_string()),
+            container_user: Some("node".to_string()),
+            container_workspace: Some(workspace.to_string()),
+            updated_at: "2026-03-24T12:00:00Z".to_string(),
+        };
+
+        let result = resolve_container_pane(&session, claude_home, host_cwd);
+        assert!(result.is_some(), "should resolve to a session file");
+        let state = result.unwrap();
+        assert_eq!(
+            state.session_file, fresh_file,
+            "should prefer the newer host-path-encoded session over the stale workspace-encoded one"
+        );
     }
 
     #[test]

@@ -11,7 +11,18 @@
 
 set -euo pipefail
 
-EVENT_DIR="${SPRACK_EVENT_DIR:-$HOME/.local/share/sprack/claude-events}"
+# Resolve event directory: explicit env var > container mount > local default.
+# Claude Code hooks do not inherit the container environment, so SPRACK_EVENT_DIR
+# is typically unset inside hook subprocesses. Detect the container bind mount at
+# /mnt/sprack/claude-events (created by the sprack devcontainer feature) to ensure
+# events are written to the host-visible path.
+if [ -n "${SPRACK_EVENT_DIR:-}" ]; then
+  EVENT_DIR="$SPRACK_EVENT_DIR"
+elif [ -d /mnt/sprack/claude-events ]; then
+  EVENT_DIR="/mnt/sprack/claude-events"
+else
+  EVENT_DIR="$HOME/.local/share/sprack/claude-events"
+fi
 
 # Read stdin into a variable (hook input is a single JSON object).
 INPUT=$(cat)

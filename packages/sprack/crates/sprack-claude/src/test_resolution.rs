@@ -328,21 +328,8 @@ fn container_pane_no_integration_when_session_file_stale() {
 
     fix.set_tmux_state(&[session], &[window], &[pane]);
 
-    // First poll cycle: resolves and writes integration.
-    let integrations = fix.run_poll_cycle();
-    // Should have found the session file despite being stale on first resolve.
-    // The staleness check is for *cache invalidation*, not initial resolution.
-    assert_eq!(
-        integrations.len(),
-        1,
-        "first cycle should resolve the session file"
-    );
-
-    // Make the file stale again (the first read may have touched the mtime).
-    TestFixture::set_file_mtime(&session_file, stale_time);
-
-    // Second poll cycle: cache invalidated due to stale mtime. Re-resolution should
-    // detect that the file is stale AND in a terminal state, and skip the integration.
+    // Poll cycle: stale file with terminal state should produce no integration,
+    // even on the first cycle (initial discovery, not just re-resolution).
     let integrations = fix.run_poll_cycle();
     let claude_integrations: Vec<_> = integrations
         .iter()

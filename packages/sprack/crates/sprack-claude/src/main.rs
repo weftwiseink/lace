@@ -111,7 +111,12 @@ pub(crate) fn run_poll_cycle(
         }
     };
 
-    let candidate_panes = resolver::find_candidate_panes(&snapshot);
+    let mut candidate_panes = resolver::find_candidate_panes(&snapshot);
+    // Process local Claude panes (current_command contains "claude") before container
+    // panes. This ensures local panes claim their session files in the dedup map first,
+    // preventing container panes from stealing integrations via bind-mount path leakage
+    // (where the container resolver finds host-side session files via parent path matching).
+    candidate_panes.sort_by_key(|p| if p.current_command.contains("claude") { 0 } else { 1 });
     let container_sessions = resolver::build_container_session_map(&snapshot.sessions);
     let mut active_pane_ids: Vec<String> = Vec::new();
 
@@ -167,7 +172,6 @@ pub(crate) fn process_claude_pane(
     home_dir: &std::path::Path,
 ) {
     // Check if we have a cached session and whether it's still valid.
-    let had_cache_entry = session_cache.contains_key(&pane.pane_id);
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
 
     if !is_cache_valid {
@@ -209,9 +213,10 @@ pub(crate) fn process_claude_pane(
 
     // Fix A2: For container panes, check if the resolved session file is stale
     // AND in a terminal state. If so, the session is inactive — skip it.
-    // Only applies on re-resolution (had_cache_entry && !is_cache_valid), not initial discovery.
+    // Fires on any resolution (initial or re-) to prevent stale sessions from
+    // appearing even on the first poll cycle after daemon restart.
     if let session::CacheKey::ContainerSession(_) = &session_state.cache_key {
-        if had_cache_entry && !is_cache_valid {
+        if !is_cache_valid {
             // We just re-resolved. Check if the file is stale.
             if let Ok(metadata) = std::fs::metadata(&session_state.session_file) {
                 if let Ok(modified) = metadata.modified() {

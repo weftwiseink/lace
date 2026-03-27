@@ -115,6 +115,8 @@ pub(crate) fn run_poll_cycle(
     let container_sessions = resolver::build_container_session_map(&snapshot.sessions);
     let mut active_pane_ids: Vec<String> = Vec::new();
 
+    let mut seen_session_files: HashMap<PathBuf, String> = HashMap::new();
+
     for pane in &candidate_panes {
         active_pane_ids.push(pane.pane_id.clone());
         let container_session = container_sessions.get(&pane.session_name);
@@ -127,6 +129,18 @@ pub(crate) fn run_poll_cycle(
             cache_connection,
             home_dir,
         );
+
+        // Fix A3: Deduplicate integrations by session file path.
+        // If multiple panes resolve to the same session file, keep only the first.
+        if let Some(state) = session_cache.get(&pane.pane_id) {
+            let file = &state.session_file;
+            if let Some(_existing_pane_id) = seen_session_files.get(file) {
+                // Duplicate: delete this pane's integration.
+                delete_integration(db_connection, &pane.pane_id);
+            } else {
+                seen_session_files.insert(file.clone(), pane.pane_id.clone());
+            }
+        }
     }
 
     clean_stale_integrations(db_connection, &active_pane_ids);
@@ -153,6 +167,7 @@ pub(crate) fn process_claude_pane(
     home_dir: &std::path::Path,
 ) {
     // Check if we have a cached session and whether it's still valid.
+    let had_cache_entry = session_cache.contains_key(&pane.pane_id);
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
 
     if !is_cache_valid {
@@ -191,6 +206,39 @@ pub(crate) fn process_claude_pane(
         Some(state) => state,
         None => return,
     };
+
+    // Fix A2: For container panes, check if the resolved session file is stale
+    // AND in a terminal state. If so, the session is inactive — skip it.
+    // Only applies on re-resolution (had_cache_entry && !is_cache_valid), not initial discovery.
+    if let session::CacheKey::ContainerSession(_) = &session_state.cache_key {
+        if had_cache_entry && !is_cache_valid {
+            // We just re-resolved. Check if the file is stale.
+            if let Ok(metadata) = std::fs::metadata(&session_state.session_file) {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.elapsed() {
+                        if elapsed > CONTAINER_SESSION_MAX_AGE {
+                            let probe_entries = jsonl::tail_read(
+                                &session_state.session_file,
+                                jsonl::default_tail_bytes(),
+                            );
+                            let probe_status = status::extract_activity_state(&probe_entries);
+                            if matches!(
+                                probe_status,
+                                sprack_db::types::ProcessStatus::Idle
+                                    | sprack_db::types::ProcessStatus::Waiting
+                                    | sprack_db::types::ProcessStatus::Error
+                            ) {
+                                // Session is inactive. Delete integration and skip.
+                                delete_integration(db_connection, &pane.pane_id);
+                                session_cache.remove(&pane.pane_id);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Read new entries. Periodically force a full tail_read to catch state
     // transitions that incremental reading may have missed (e.g., stale

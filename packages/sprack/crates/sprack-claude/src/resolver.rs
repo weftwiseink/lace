@@ -232,6 +232,23 @@ fn resolve_container_pane_via_mount(
     // container-workspace-encoded directory.
     let best = find_best_project_session(workspace, host_cwd, claude_home)?;
 
+    // Fix B1: Probe the resolved JSONL file for a sessionId, then look up
+    // its customTitle in sessions-index.json. This provides naming for
+    // container sessions resolved via the project directory fallback.
+    // Try two strategies: (1) match by sessionId from the JSONL entries,
+    // (2) match by fullPath in sessions-index.json (handles cases where
+    // the JSONL sessionId differs from the index entry's sessionId).
+    let probe_entries = crate::jsonl::tail_read(&best, crate::jsonl::default_tail_bytes());
+    let session_id = probe_entries
+        .iter()
+        .find_map(|e| e.session_id.as_deref())
+        .map(|s| s.to_string());
+
+    let session_name = session_id
+        .as_deref()
+        .and_then(|sid| session::lookup_session_name_by_id(claude_home, sid))
+        .or_else(|| session::lookup_session_name_by_path(claude_home, &best));
+
     Some(SessionFileState {
         cache_key: CacheKey::ContainerSession(best.clone()),
         session_file: best,
@@ -239,9 +256,9 @@ fn resolve_container_pane_via_mount(
         last_entries: Vec::new(),
         event_file_position: 0,
         cached_hook_events: Vec::new(),
-        session_name: None,
+        session_name,
         hook_transcript_path: None,
-        hook_session_id: None,
+        hook_session_id: session_id,
         git_dir: None,
         git_head_mtime: None,
         git_branch: None,

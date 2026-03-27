@@ -341,17 +341,16 @@ fn container_pane_no_integration_when_session_file_stale() {
     // Make the file stale again (the first read may have touched the mtime).
     TestFixture::set_file_mtime(&session_file, stale_time);
 
-    // Second poll cycle: cache should be invalidated due to stale mtime.
-    // Re-resolution will find the same stale file and write again.
+    // Second poll cycle: cache invalidated due to stale mtime. Re-resolution should
+    // detect that the file is stale AND in a terminal state, and skip the integration.
     let integrations = fix.run_poll_cycle();
-    // The session file still exists and is parseable, so it re-resolves.
-    // BUG: Stale sessions with terminal state should be cleared, not re-resolved.
-    // TODO(opus/session-resolution-fix): After fix A2, change this to assert_eq!(0)
-    // when mtime > CONTAINER_SESSION_MAX_AGE and last entry has terminal stop_reason.
-    assert_eq!(
-        integrations.len(),
-        1,
-        "BUG: stale session re-resolves instead of being cleared"
+    let claude_integrations: Vec<_> = integrations
+        .iter()
+        .filter(|i| i.kind == crate::INTEGRATION_KIND)
+        .collect();
+    assert!(
+        claude_integrations.is_empty(),
+        "stale container session with terminal state should produce no integration"
     );
 }
 
@@ -400,12 +399,12 @@ fn container_session_uses_custom_title_from_sessions_index() {
     let summary: crate::status::ClaudeSummary =
         serde_json::from_str(&integrations[0].summary).unwrap();
 
-    // BUG: Currently None because container fallback bypasses sessions-index.json.
-    // TODO(opus/session-resolution-fix): After fix B1, change this to assert Some("my-custom-session").
+    // Fix B1: container fallback now probes the JSONL for sessionId and looks up
+    // customTitle in sessions-index.json.
     assert_eq!(
         summary.session_name.as_deref(),
-        None,
-        "BUG: container fallback path does not read sessions-index.json customTitle"
+        Some("my-custom-session"),
+        "session_name should come from sessions-index.json customTitle via sessionId probe"
     );
 }
 
@@ -501,31 +500,13 @@ fn multiple_panes_same_session_file_produce_single_integration() {
         .filter(|i| i.kind == crate::INTEGRATION_KIND)
         .collect();
 
-    // Both panes are candidates (container session panes). Each independently
-    // resolves to the same session file. Current behavior: one integration per
-    // pane, so we get 2. The dedup fix should reduce this to 1.
-    //
-    // For now, assert that we get at least 1. The strict dedup assertion is
-    // commented out below for when the fix is implemented.
-    assert!(
-        !claude_integrations.is_empty(),
-        "should produce at least one integration"
+    // Fix A3: dedup by session file path. Two panes resolving to the same file
+    // should produce only one integration.
+    assert_eq!(
+        claude_integrations.len(),
+        1,
+        "duplicate panes resolving to the same session file should produce a single integration"
     );
-
-    // TODO: Uncomment when dedup is implemented.
-    // assert_eq!(
-    //     claude_integrations.len(),
-    //     1,
-    //     "duplicate panes resolving to the same session file should produce a single integration"
-    // );
-
-    // Record the actual count for diagnostic purposes.
-    if claude_integrations.len() > 1 {
-        eprintln!(
-            "NOTE: multiple_panes_same_session_file test: got {} integrations (dedup not yet implemented)",
-            claude_integrations.len()
-        );
-    }
 }
 
 /// A SessionEnd hook event should clear the integration for the pane.

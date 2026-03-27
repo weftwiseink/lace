@@ -255,6 +255,53 @@ pub fn lookup_session_name_by_id(
     None
 }
 
+/// Looks up a session's `customTitle` by searching all `sessions-index.json` files
+/// under `~/.claude/projects/` for an entry whose `fullPath` matches the given session file path.
+///
+/// This is the primary naming path for container sessions resolved via the project
+/// directory fallback, where the JSONL `sessionId` may not match the index entry's
+/// `sessionId` (e.g., when the file was created by a different session than currently
+/// active). Matching by file path is unambiguous.
+pub fn lookup_session_name_by_path(
+    claude_home: &Path,
+    session_file: &Path,
+) -> Option<String> {
+    let projects_dir = claude_home.join("projects");
+    let read_dir = std::fs::read_dir(&projects_dir).ok()?;
+
+    let session_file_str = session_file.to_str()?;
+
+    for entry in read_dir.filter_map(|e| e.ok()) {
+        let index_path = entry.path().join("sessions-index.json");
+        let content = match std::fs::read_to_string(&index_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Try versioned format first, then flat array.
+        let entries: Vec<SessionIndexEntry> =
+            if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+                index.entries
+            } else if let Ok(entries) = serde_json::from_str(&content) {
+                entries
+            } else {
+                continue;
+            };
+
+        for index_entry in &entries {
+            if index_entry.full_path.as_deref() == Some(session_file_str) {
+                if let Some(ref title) = index_entry.custom_title {
+                    if !title.is_empty() {
+                        return Some(title.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

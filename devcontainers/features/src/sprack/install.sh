@@ -4,7 +4,10 @@ set -eu
 ENABLEMETADATAWRITER="${ENABLEMETADATAWRITER:-true}"
 _REMOTE_USER="${_REMOTE_USER:-root}"
 
-# Ensure the mount point exists inside the container.
+# Create mount point and subdirectories in the image layer.
+# NOTE: When /mnt/sprack is a host bind mount, these directories are overlaid at
+# runtime by the (possibly empty) host directory. The hook bridge and metadata writer
+# handle runtime subdirectory creation themselves via mkdir -p.
 mkdir -p /mnt/sprack/claude-events
 mkdir -p /mnt/sprack/metadata
 chown -R "$_REMOTE_USER:$_REMOTE_USER" /mnt/sprack

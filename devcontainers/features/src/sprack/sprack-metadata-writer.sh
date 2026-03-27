@@ -3,8 +3,16 @@
 # Designed to be called from a shell prompt hook (PROMPT_COMMAND, pre_prompt, etc.).
 # Fast path: bails early if /mnt/sprack/metadata does not exist or cwd is not a git repo.
 
-METADATA_DIR="/mnt/sprack/metadata"
-[ -d "$METADATA_DIR" ] || exit 0
+MOUNT_POINT="/mnt/sprack"
+METADATA_DIR="$MOUNT_POINT/metadata"
+
+# Bail if the sprack mount point does not exist (feature not installed or mount not configured).
+[ -d "$MOUNT_POINT" ] || exit 0
+
+# Ensure the metadata subdirectory exists. The mount point is a host bind mount,
+# so directories created at image build time (install.sh) are overlaid at runtime.
+# The first prompt hook invocation creates the subdirectory on the host via the mount.
+[ -d "$METADATA_DIR" ] || mkdir -p "$METADATA_DIR" 2>/dev/null || exit 0
 
 # Fast bail if not in a git repo.
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0

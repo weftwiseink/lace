@@ -197,6 +197,11 @@ fn resolve_container_pane_via_mount(
 
         // If we have a host-visible transcript_path, use it directly.
         if let Some(ref tp) = transcript_path {
+            // Look up session name from host sessions-index.json files.
+            let session_name = session_id
+                .as_deref()
+                .and_then(|sid| session::lookup_session_name_by_id(claude_home, sid));
+
             return Some(SessionFileState {
                 cache_key: CacheKey::ContainerSession(tp.clone()),
                 session_file: tp.clone(),
@@ -204,7 +209,7 @@ fn resolve_container_pane_via_mount(
                 last_entries: Vec::new(),
                 event_file_position: position,
                 cached_hook_events: hook_events,
-                session_name: None,
+                session_name,
                 hook_transcript_path: transcript_path,
                 hook_session_id: session_id,
                 git_dir: None,

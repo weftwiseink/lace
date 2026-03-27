@@ -278,6 +278,14 @@ fn process_claude_pane(
                 {
                     session_state.hook_session_id = Some(session_id.clone());
 
+                    // Lazy session name lookup: when a hook provides a session_id
+                    // and we don't yet have a name, search host sessions-index.json
+                    // files. This is the primary naming path for container sessions.
+                    if session_state.session_name.is_none() {
+                        session_state.session_name =
+                            session::lookup_session_name_by_id(claude_home, session_id);
+                    }
+
                     if let Some(tp) = transcript_path {
                         let tp_path = PathBuf::from(tp);
                         // Only use transcript_path if the file exists on the host.

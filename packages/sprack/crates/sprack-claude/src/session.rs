@@ -211,6 +211,50 @@ pub fn find_via_jsonl_listing(project_dir: &Path) -> Option<PathBuf> {
     jsonl_files.into_iter().next().map(|(path, _)| path)
 }
 
+/// Looks up a session's `customTitle` by searching all `sessions-index.json` files
+/// under `~/.claude/projects/` for an entry matching the given `session_id`.
+///
+/// Used to resolve container session names: the container itself has no
+/// `sessions-index.json`, but the host project directory's index has entries
+/// for sessions started via hooks, keyed by `sessionId`.
+pub fn lookup_session_name_by_id(
+    claude_home: &Path,
+    session_id: &str,
+) -> Option<String> {
+    let projects_dir = claude_home.join("projects");
+    let read_dir = std::fs::read_dir(&projects_dir).ok()?;
+
+    for entry in read_dir.filter_map(|e| e.ok()) {
+        let index_path = entry.path().join("sessions-index.json");
+        let content = match std::fs::read_to_string(&index_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Try versioned format first, then flat array.
+        let entries: Vec<SessionIndexEntry> =
+            if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+                index.entries
+            } else if let Ok(entries) = serde_json::from_str(&content) {
+                entries
+            } else {
+                continue;
+            };
+
+        for index_entry in &entries {
+            if index_entry.session_id.as_deref() == Some(session_id) {
+                if let Some(ref title) = index_entry.custom_title {
+                    if !title.is_empty() {
+                        return Some(title.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +471,82 @@ mod tests {
 
         assert_eq!(state.session_file, correct_file);
         assert_eq!(state.file_position, 0);
+    }
+
+    #[test]
+    fn lookup_session_name_by_id_finds_custom_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_home = dir.path();
+        let project_dir = claude_home.join("projects").join("-some-project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let index = serde_json::json!({
+            "version": 1,
+            "entries": [
+                {
+                    "sessionId": "abc-123",
+                    "fullPath": "/home/user/.claude/projects/-some-project/abc-123.jsonl",
+                    "fileMtime": 1700000000000u64,
+                    "customTitle": "my-session-name"
+                },
+                {
+                    "sessionId": "def-456",
+                    "fullPath": "/home/user/.claude/projects/-some-project/def-456.jsonl",
+                    "fileMtime": 1700000001000u64
+                }
+            ]
+        });
+        std::fs::write(
+            project_dir.join("sessions-index.json"),
+            serde_json::to_string(&index).unwrap(),
+        )
+        .unwrap();
+
+        let result = lookup_session_name_by_id(claude_home, "abc-123");
+        assert_eq!(result.as_deref(), Some("my-session-name"));
+
+        // Session without customTitle returns None.
+        let result = lookup_session_name_by_id(claude_home, "def-456");
+        assert_eq!(result, None);
+
+        // Nonexistent session returns None.
+        let result = lookup_session_name_by_id(claude_home, "nonexistent");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn lookup_session_name_by_id_searches_multiple_project_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_home = dir.path();
+
+        let proj_a = claude_home.join("projects").join("-project-a");
+        let proj_b = claude_home.join("projects").join("-project-b");
+        std::fs::create_dir_all(&proj_a).unwrap();
+        std::fs::create_dir_all(&proj_b).unwrap();
+
+        // Only project B has the target session.
+        let index_a = serde_json::json!([{"sessionId": "other", "fullPath": "x.jsonl"}]);
+        std::fs::write(
+            proj_a.join("sessions-index.json"),
+            serde_json::to_string(&index_a).unwrap(),
+        )
+        .unwrap();
+
+        let index_b = serde_json::json!({
+            "version": 1,
+            "entries": [{
+                "sessionId": "target-id",
+                "fullPath": "y.jsonl",
+                "customTitle": "found-in-b"
+            }]
+        });
+        std::fs::write(
+            proj_b.join("sessions-index.json"),
+            serde_json::to_string(&index_b).unwrap(),
+        )
+        .unwrap();
+
+        let result = lookup_session_name_by_id(claude_home, "target-id");
+        assert_eq!(result.as_deref(), Some("found-in-b"));
     }
 }

@@ -2,21 +2,17 @@
 //!
 //! `LocalResolver` wraps the existing `/proc` walk + session file discovery
 //! logic for local panes.
-//! `LaceContainerResolver` handles panes in lace devcontainer sessions by
-//! discovering session files via the `~/.claude` bind mount and workspace
-//! prefix matching with an mtime heuristic.
+//! Container panes are resolved via the sprack devcontainer mount: hook bridge
+//! event files in per-project directories provide the session file path directly,
+//! eliminating bind-mount prefix-matching heuristics.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
 
+use crate::events;
 use crate::proc_walk;
 use crate::session::{self, CacheKey, SessionFileState};
-
-/// Maximum age for a container session file candidate to be considered active.
-/// Directories whose newest `.jsonl` mtime is older than this are ignored.
-const CONTAINER_RECENCY_THRESHOLD: Duration = Duration::from_secs(300);
 
 /// Session names for which the "container_name without container_workspace" warning
 /// has already been emitted. Prevents per-cycle stderr spam.
@@ -77,7 +73,7 @@ pub fn build_container_session_map(
 /// Trait for resolving a tmux pane to its Claude Code session file.
 ///
 /// Internal to sprack-claude: exists for separation of concerns between
-/// local `/proc` walking and container bind-mount resolution.
+/// local `/proc` walking and container mount-based resolution.
 /// Used directly in tests; main.rs dispatches via convenience functions.
 #[allow(dead_code)]
 pub trait PaneResolver {
@@ -121,61 +117,95 @@ impl PaneResolver for LocalResolver {
     }
 }
 
-/// Resolves container panes via the `~/.claude` bind mount.
+/// Resolves container panes via the sprack devcontainer mount.
 ///
-/// Skips `/proc` walking (can't cross PID namespace boundaries).
-/// Enumerates `claude_home/projects/` directories matching the workspace prefix
-/// derived from the session's `container_workspace`, then selects the directory
-/// with the most recently modified `.jsonl` file.
-#[allow(dead_code)]
-pub struct LaceContainerResolver<'a> {
-    /// The parent session's lace metadata.
-    pub session: &'a sprack_db::types::Session,
+/// Scans event directories (`~/.local/share/sprack/lace/*/claude-events/`) for
+/// hook bridge event files matching the container's workspace cwd. Extracts the
+/// `transcript_path` from a `SessionStart` event if found, mapping it to the
+/// host-visible path. Falls back to cwd-based event file matching.
+///
+/// Returns `None` if the sprack devcontainer feature is not installed (no mount)
+/// or no matching event files exist.
+pub fn resolve_container_pane(
+    session: &sprack_db::types::Session,
+    claude_home: &Path,
+) -> Option<SessionFileState> {
+    let workspace = session.container_workspace.as_deref()?;
+
+    resolve_container_pane_via_mount(workspace, claude_home)
 }
 
-impl<'a> PaneResolver for LaceContainerResolver<'a> {
-    fn resolve(&self, _pane: &sprack_db::types::Pane, claude_home: &Path) -> Option<SessionFileState> {
-        let workspace = self.session.container_workspace.as_deref()?;
-        let project_dir = find_container_project_dir(workspace, claude_home)?;
+/// Resolves a container pane's session file via the sprack mount event directories.
+///
+/// Searches all event directories for an event file matching the workspace cwd.
+/// If a `SessionStart` event provides a `transcript_path` that exists on the host,
+/// uses that directly. Otherwise falls back to cwd-based matching to find a session
+/// file in `~/.claude/projects/`.
+fn resolve_container_pane_via_mount(
+    workspace: &str,
+    claude_home: &Path,
+) -> Option<SessionFileState> {
+    let event_dirs = events::event_dirs();
 
-        // TODO(opus/sprack-hooks): Remove this bind-mount resolution fallback
-        // once hook event bridge is implemented. The hook approach provides
-        // session_id and cwd directly, eliminating prefix-matching fragility.
-        let session_file = session::find_via_jsonl_listing(&project_dir)?;
+    // Search event directories for an event file matching this workspace.
+    let mut event_file: Option<PathBuf> = None;
+    for event_dir in &event_dirs {
+        if let Some(found) = events::find_event_file(event_dir, workspace) {
+            event_file = Some(found);
+            break;
+        }
+    }
 
-        Some(SessionFileState {
-            cache_key: CacheKey::ContainerSession(session_file.clone()),
-            session_file,
+    let event_file = event_file?;
+
+    // Read event file to find transcript_path from SessionStart.
+    let mut position = 0u64;
+    let hook_events = events::read_events(&event_file, &mut position);
+
+    let mut transcript_path: Option<PathBuf> = None;
+    let mut session_id: Option<String> = None;
+
+    for event in &hook_events {
+        if let events::HookEvent::SessionStart {
+            session_id: sid,
+            transcript_path: tp,
+            ..
+        } = event
+        {
+            session_id = Some(sid.clone());
+            if let Some(tp) = tp {
+                let tp_path = PathBuf::from(tp);
+                if tp_path.is_file() {
+                    transcript_path = Some(tp_path);
+                }
+            }
+        }
+    }
+
+    // If we have a host-visible transcript_path, use it directly.
+    if let Some(ref tp) = transcript_path {
+        return Some(SessionFileState {
+            cache_key: CacheKey::ContainerSession(tp.clone()),
+            session_file: tp.clone(),
             file_position: 0,
             last_entries: Vec::new(),
-            event_file_position: 0,
-            cached_hook_events: Vec::new(),
+            event_file_position: position,
+            cached_hook_events: hook_events,
             session_name: None,
-            hook_transcript_path: None,
-            hook_session_id: None,
+            hook_transcript_path: transcript_path,
+            hook_session_id: session_id,
             git_dir: None,
             git_head_mtime: None,
             git_branch: None,
             git_commit_short: None,
             git_worktrees_mtime: None,
             git_worktree_branches: None,
-        })
+        });
     }
-}
 
-/// Convenience function for resolving container panes from `main.rs`.
-///
-/// Constructs a `LaceContainerResolver` and resolves without a specific pane
-/// (container resolution depends on session metadata, not pane PID).
-pub fn resolve_container_pane(
-    session: &sprack_db::types::Session,
-    claude_home: &Path,
-) -> Option<SessionFileState> {
-    let workspace = session.container_workspace.as_deref()?;
-    let project_dir = find_container_project_dir(workspace, claude_home)?;
-
-    // TODO(opus/sprack-hooks): Remove this bind-mount resolution fallback
-    // once hook event bridge is implemented.
+    // Fallback: try to find a session file in ~/.claude/projects/ matching the workspace.
+    let encoded_path = proc_walk::encode_project_path(std::path::Path::new(workspace));
+    let project_dir = claude_home.join("projects").join(&encoded_path);
     let session_file = session::find_via_jsonl_listing(&project_dir)?;
 
     Some(SessionFileState {
@@ -187,7 +217,7 @@ pub fn resolve_container_pane(
         cached_hook_events: Vec::new(),
         session_name: None,
         hook_transcript_path: None,
-        hook_session_id: None,
+        hook_session_id: session_id,
         git_dir: None,
         git_head_mtime: None,
         git_branch: None,
@@ -197,71 +227,9 @@ pub fn resolve_container_pane(
     })
 }
 
-/// Finds the best-matching project directory for a container workspace.
-///
-/// Encodes the workspace path as a prefix, enumerates all directories in
-/// `claude_home/projects/` that start with that prefix, and selects the one
-/// whose most recently modified `.jsonl` file has the latest mtime.
-///
-/// Directories whose newest `.jsonl` is older than `CONTAINER_RECENCY_THRESHOLD`
-/// are excluded to avoid selecting stale worktree directories.
-pub fn find_container_project_dir(workspace: &str, claude_home: &Path) -> Option<PathBuf> {
-    let prefix = proc_walk::encode_project_path(Path::new(workspace));
-    let projects_dir = claude_home.join("projects");
-
-    let read_dir = std::fs::read_dir(&projects_dir).ok()?;
-    let now = SystemTime::now();
-
-    let candidates: Vec<(PathBuf, SystemTime)> = read_dir
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&prefix)
-        })
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let dir = entry.path();
-            let newest_mtime = newest_jsonl_mtime(&dir)?;
-
-            // Exclude directories with stale session files.
-            if let Ok(age) = now.duration_since(newest_mtime) {
-                if age > CONTAINER_RECENCY_THRESHOLD {
-                    return None;
-                }
-            }
-
-            Some((dir, newest_mtime))
-        })
-        .collect();
-
-    candidates
-        .into_iter()
-        .max_by_key(|(_, mtime)| *mtime)
-        .map(|(path, _)| path)
-}
-
-/// Returns the mtime of the most recently modified `.jsonl` file in a directory.
-///
-/// Only considers root-level files (not subdirectories, which contain subagent sessions).
-fn newest_jsonl_mtime(dir: &Path) -> Option<SystemTime> {
-    let read_dir = std::fs::read_dir(dir).ok()?;
-
-    read_dir
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            let path = entry.path();
-            path.is_file() && path.extension().is_some_and(|ext| ext == "jsonl")
-        })
-        .filter_map(|entry| entry.metadata().ok()?.modified().ok())
-        .max()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     /// Creates a test Pane with the required fields, using defaults for layout fields.
     fn make_test_pane(
@@ -289,221 +257,6 @@ mod tests {
         }
     }
 
-    /// Creates a synthetic `~/.claude/projects/` structure for testing.
-    fn create_test_projects_dir(
-        base: &Path,
-        dirs_with_files: &[(&str, &[(&str, Duration)])],
-    ) {
-        let projects_dir = base.join("projects");
-        std::fs::create_dir_all(&projects_dir).unwrap();
-
-        let now = SystemTime::now();
-
-        for (dir_name, files) in dirs_with_files {
-            let dir_path = projects_dir.join(dir_name);
-            std::fs::create_dir_all(&dir_path).unwrap();
-
-            for (file_name, age) in *files {
-                let file_path = dir_path.join(file_name);
-                std::fs::write(&file_path, r#"{"type":"user"}"#).unwrap();
-
-                // Set mtime to now - age.
-                let mtime = now - *age;
-                let mtime_filetime = filetime::FileTime::from_system_time(mtime);
-                filetime::set_file_mtime(&file_path, mtime_filetime).unwrap();
-            }
-        }
-    }
-
-    #[test]
-    fn find_container_project_dir_selects_by_prefix_and_mtime() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[
-                // Matching prefix, recent file.
-                (
-                    "-workspaces-lace-main",
-                    &[("session-a.jsonl", Duration::from_secs(10))],
-                ),
-                // Matching prefix, older file.
-                (
-                    "-workspaces-lace-feature",
-                    &[("session-b.jsonl", Duration::from_secs(60))],
-                ),
-                // Non-matching prefix.
-                (
-                    "-workspaces-other-project",
-                    &[("session-c.jsonl", Duration::from_secs(5))],
-                ),
-            ],
-        );
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(result.is_some());
-        let selected = result.unwrap();
-        assert!(
-            selected.ends_with("-workspaces-lace-main"),
-            "expected -workspaces-lace-main, got: {}",
-            selected.display()
-        );
-    }
-
-    #[test]
-    fn find_container_project_dir_excludes_stale_directories() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[
-                // Matching prefix but very old (beyond recency threshold).
-                (
-                    "-workspaces-lace-main",
-                    &[("session-old.jsonl", Duration::from_secs(600))],
-                ),
-            ],
-        );
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(
-            result.is_none(),
-            "stale directory should be excluded"
-        );
-    }
-
-    #[test]
-    fn find_container_project_dir_returns_none_for_no_matches() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[(
-                "-workspaces-other-project",
-                &[("session.jsonl", Duration::from_secs(10))],
-            )],
-        );
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn find_container_project_dir_handles_empty_projects_dir() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-        std::fs::create_dir_all(claude_home.join("projects")).unwrap();
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn find_container_project_dir_handles_missing_projects_dir() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-        // Don't create the projects directory at all.
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn find_container_project_dir_multiple_worktrees_selects_most_recent() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[
-                (
-                    "-workspaces-lace-main",
-                    &[("session-a.jsonl", Duration::from_secs(120))],
-                ),
-                (
-                    "-workspaces-lace-feature-branch",
-                    &[("session-b.jsonl", Duration::from_secs(5))],
-                ),
-                (
-                    "-workspaces-lace-hotfix",
-                    &[("session-c.jsonl", Duration::from_secs(30))],
-                ),
-            ],
-        );
-
-        let result = find_container_project_dir("/workspaces/lace", claude_home);
-        assert!(result.is_some());
-        let selected = result.unwrap();
-        assert!(
-            selected.ends_with("-workspaces-lace-feature-branch"),
-            "expected most recent worktree, got: {}",
-            selected.display()
-        );
-    }
-
-    #[test]
-    fn container_resolver_resolve_finds_session_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[(
-                "-workspaces-lace-main",
-                &[("session-abc.jsonl", Duration::from_secs(10))],
-            )],
-        );
-
-        let session = sprack_db::types::Session {
-            name: "lace-dev".to_string(),
-            attached: false,
-            container_name: Some("dev-container".to_string()),
-            container_user: Some("node".to_string()),
-            container_workspace: Some("/workspaces/lace".to_string()),
-            updated_at: "2026-03-24T12:00:00Z".to_string(),
-        };
-
-        let pane = make_test_pane("%0", "lace-dev", "ssh", Some(1234));
-
-        let resolver = LaceContainerResolver { session: &session };
-        let result = resolver.resolve(&pane, claude_home);
-
-        assert!(result.is_some(), "resolver should find session file");
-        let state = result.unwrap();
-        assert!(
-            state.session_file.to_string_lossy().contains("session-abc.jsonl"),
-            "should resolve to the session file"
-        );
-        assert!(
-            matches!(state.cache_key, CacheKey::ContainerSession(_)),
-            "cache key should be ContainerSession variant"
-        );
-    }
-
-    #[test]
-    fn container_resolver_returns_none_without_workspace() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        let session = sprack_db::types::Session {
-            name: "lace-dev".to_string(),
-            attached: false,
-            container_name: Some("dev-container".to_string()),
-            container_user: Some("node".to_string()),
-            container_workspace: None, // No workspace set.
-            updated_at: "2026-03-24T12:00:00Z".to_string(),
-        };
-
-        let pane = make_test_pane("%0", "lace-dev", "ssh", Some(1234));
-
-        let resolver = LaceContainerResolver { session: &session };
-        let result = resolver.resolve(&pane, claude_home);
-        assert!(result.is_none(), "should return None without workspace");
-    }
-
     #[test]
     fn local_resolver_returns_none_without_pane_pid() {
         let temp = tempfile::tempdir().unwrap();
@@ -517,42 +270,8 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_selects_container_resolver_for_container_session() {
-        // Verify the dispatch logic: pane with container_name gets container resolution.
-        let temp = tempfile::tempdir().unwrap();
-        let claude_home = temp.path();
-
-        create_test_projects_dir(
-            claude_home,
-            &[(
-                "-workspaces-lace-main",
-                &[("session.jsonl", Duration::from_secs(5))],
-            )],
-        );
-
-        let session = sprack_db::types::Session {
-            name: "lace-dev".to_string(),
-            attached: false,
-            container_name: Some("dev-container".to_string()),
-            container_user: Some("node".to_string()),
-            container_workspace: Some("/workspaces/lace".to_string()),
-            updated_at: "2026-03-24T12:00:00Z".to_string(),
-        };
-
-        // Use the convenience function that main.rs calls.
-        let result = resolve_container_pane(&session, claude_home);
-        assert!(result.is_some(), "container resolution should succeed");
-
-        let state = result.unwrap();
-        assert!(matches!(state.cache_key, CacheKey::ContainerSession(_)));
-    }
-
-    #[test]
     fn dispatch_selects_local_resolver_for_non_container_pane() {
         // Verify that a pane without container_name uses the local resolver path.
-        // The local resolver will return None (no real /proc), but the dispatch
-        // logic should not attempt container resolution.
-
         // No container_session means resolve_container_pane is not called.
         // This test verifies the find_candidate_panes filter logic.
         let snapshot = sprack_db::types::DbSnapshot {
@@ -606,7 +325,7 @@ mod tests {
                 make_test_pane("%0", "lace-dev", "ssh", Some(1234)),
                 // Local claude pane.
                 make_test_pane("%1", "local-dev", "claude", Some(5678)),
-                // Non-candidate: not claude, not lace.
+                // Non-candidate: not claude, not container.
                 make_test_pane("%2", "local-dev", "vim", Some(9999)),
             ],
             integrations: vec![],
@@ -650,5 +369,72 @@ mod tests {
             candidates.is_empty(),
             "pane should not be a candidate when container_workspace is missing"
         );
+    }
+
+    #[test]
+    fn resolve_container_pane_returns_none_without_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let claude_home = temp.path();
+
+        let session = sprack_db::types::Session {
+            name: "lace-dev".to_string(),
+            attached: false,
+            container_name: Some("dev-container".to_string()),
+            container_user: Some("node".to_string()),
+            container_workspace: None,
+            updated_at: "2026-03-24T12:00:00Z".to_string(),
+        };
+
+        let result = resolve_container_pane(&session, claude_home);
+        assert!(result.is_none(), "should return None without workspace");
+    }
+
+    #[test]
+    fn resolve_container_pane_returns_none_without_event_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        let claude_home = temp.path();
+
+        let session = sprack_db::types::Session {
+            name: "lace-dev".to_string(),
+            attached: false,
+            container_name: Some("dev-container".to_string()),
+            container_user: Some("node".to_string()),
+            container_workspace: Some("/workspaces/lace".to_string()),
+            updated_at: "2026-03-24T12:00:00Z".to_string(),
+        };
+
+        // No event directories and no ~/.claude/projects/ dir: resolution should return None.
+        let result = resolve_container_pane(&session, claude_home);
+        assert!(
+            result.is_none(),
+            "should return None when no event dirs or project dirs exist"
+        );
+    }
+
+    #[test]
+    fn build_container_session_map_filters_by_container_name() {
+        let sessions = vec![
+            sprack_db::types::Session {
+                name: "container-dev".to_string(),
+                attached: false,
+                container_name: Some("dev".to_string()),
+                container_user: None,
+                container_workspace: None,
+                updated_at: String::new(),
+            },
+            sprack_db::types::Session {
+                name: "local-dev".to_string(),
+                attached: false,
+                container_name: None,
+                container_user: None,
+                container_workspace: None,
+                updated_at: String::new(),
+            },
+        ];
+
+        let map = build_container_session_map(&sessions);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("container-dev"));
+        assert!(!map.contains_key("local-dev"));
     }
 }

@@ -14,4 +14,3 @@ rusqlite = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 tempfile = "3"
-filetime = "0.2"

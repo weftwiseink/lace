@@ -751,11 +751,14 @@ fn format_rich_widget(
         }
     }
 
-    // Git context line: disabled pending redesign.
-    // Data collection continues in sprack-claude but rendering is suppressed.
-    // See RFP: sprack-git-context-iteration for the redesign plan.
-    // TODO(opus/sprack-git-context): Re-enable after container support and
-    // worktree enumeration redesign (show sibling sessions, not all worktrees).
+    // Git context line: rendered when git_branch is available (local or container panes).
+    if let Some(ref branch) = summary.git_branch {
+        let mut git_display = format!("  on {branch}");
+        if let Some(ref commit) = summary.git_commit_short {
+            git_display.push_str(&format!("@{commit}"));
+        }
+        lines.push(Line::from(Span::styled(git_display, theme.subtext0)));
+    }
 
     // Session purpose line.
     if let Some(purpose) = &summary.session_purpose {

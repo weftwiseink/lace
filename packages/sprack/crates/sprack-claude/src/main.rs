@@ -389,7 +389,7 @@ pub(crate) fn process_claude_pane(
         }
         session::CacheKey::ContainerSession(_) => {
             if let Some(ref session) = container_session {
-                resolve_container_git_state(session, &mut summary);
+                resolve_container_git_state(session, home_dir, &mut summary);
             }
         }
     }
@@ -591,6 +591,7 @@ struct ContainerGitMetadata {
 /// not available.
 fn resolve_container_git_state(
     session: &sprack_db::types::Session,
+    home_dir: &std::path::Path,
     summary: &mut ClaudeSummary,
 ) {
     let container_name = match &session.container_name {
@@ -599,7 +600,7 @@ fn resolve_container_git_state(
     };
 
     // Primary: read from sprack mount metadata.
-    if resolve_container_git_via_metadata(container_name, summary) {
+    if resolve_container_git_via_metadata(container_name, home_dir, summary) {
         return;
     }
 
@@ -616,14 +617,10 @@ fn resolve_container_git_state(
 /// state was populated.
 fn resolve_container_git_via_metadata(
     container_name: &str,
+    home_dir: &std::path::Path,
     summary: &mut ClaudeSummary,
 ) -> bool {
-    let home = match std::env::var("HOME") {
-        Ok(h) => h,
-        Err(_) => return false,
-    };
-
-    let container_mounts_dir = PathBuf::from(&home).join(".local/share/sprack/lace");
+    let container_mounts_dir = home_dir.join(".local/share/sprack/lace");
     let entries = match std::fs::read_dir(&container_mounts_dir) {
         Ok(e) => e,
         Err(_) => return false,

@@ -865,3 +865,95 @@ fn sidechain_entries_filtered_from_state() {
         "sidechain entries should be filtered; last non-sidechain entry is end_turn (Idle)"
     );
 }
+
+/// Custom-title entry at the start of a large file should be found via head_read
+/// when it falls outside the 32KB tail window.
+#[test]
+fn custom_title_found_via_head_read_in_large_file() {
+    let mut fix = TestFixture::new();
+    let workspace = "/workspaces/lace";
+
+    // Build a large JSONL file: custom-title early, then many entries to push
+    // the file past the 32KB tail window.
+    let mut entries = vec![
+        mock_user_entry(),
+        mock_custom_title_entry("my-early-title"),
+    ];
+
+    // Add enough entries to exceed 32KB. Each assistant entry is ~200 bytes.
+    // 32KB / 200 bytes = ~164 entries needed.
+    for _ in 0..200 {
+        entries.push(mock_user_entry());
+        entries.push(mock_assistant_entry(Some("end_turn"), "claude-opus-4-6"));
+    }
+
+    fix.add_session_file(workspace, "large-session", &entries);
+
+    let session = make_container_session("lace-dev", "dev-container", workspace);
+    let window = make_window("lace-dev", 0, "main");
+    let pane = make_pane("%0", "lace-dev", 0, "ssh");
+
+    fix.set_tmux_state(&[session], &[window], &[pane]);
+
+    let integrations = fix.run_poll_cycle();
+    assert_eq!(integrations.len(), 1);
+
+    let summary: crate::status::ClaudeSummary =
+        serde_json::from_str(&integrations[0].summary).unwrap();
+    assert_eq!(
+        summary.session_name.as_deref(),
+        Some("my-early-title"),
+        "custom-title at file start should be found via head_read for large files"
+    );
+}
+
+/// find_session_file prefers a newer file on disk over an older indexed file.
+/// This handles the case where a new session is actively writing but hasn't
+/// been added to sessions-index.json yet.
+#[test]
+fn find_session_file_prefers_newer_disk_file_over_stale_index() {
+    let fix = TestFixture::new();
+    let workspace = "/workspaces/lace";
+
+    // Create an older session file that IS in the index.
+    let old_file = fix.add_session_file(
+        workspace,
+        "old-session",
+        &[mock_user_entry(), mock_assistant_entry(Some("end_turn"), "claude-opus-4-6")],
+    );
+
+    // Create sessions-index.json pointing to the old file.
+    fix.add_sessions_index(
+        workspace,
+        &[serde_json::json!({
+            "sessionId": "old-session",
+            "fullPath": old_file.to_str().unwrap(),
+            "fileMtime": 1700000000000u64,
+            "isSidechain": false,
+            "customTitle": "old-title"
+        })],
+    );
+
+    // Brief pause to ensure different mtime.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    // Create a newer session file that is NOT in the index.
+    fix.add_session_file(
+        workspace,
+        "new-session",
+        &[mock_user_entry(), mock_assistant_entry(None, "claude-opus-4-6")],
+    );
+
+    // find_session_file should prefer the newer file on disk.
+    let encoded = crate::proc_walk::encode_project_path(std::path::Path::new(workspace));
+    let project_dir = fix.claude_home().join("projects").join(&encoded);
+    let resolved = crate::session::find_session_file(&project_dir);
+
+    assert!(resolved.is_some());
+    let resolved = resolved.unwrap();
+    assert!(
+        resolved.path.to_str().unwrap().contains("new-session"),
+        "should resolve to the newer non-indexed file, got: {:?}",
+        resolved.path
+    );
+}

@@ -112,20 +112,75 @@ pub struct ResolvedSession {
 
 /// Finds the active session file for a Claude Code project directory.
 ///
-/// Primary strategy: parse sessions-index.json, filter out sidechains,
-/// and select the entry with the most recent file modification time.
-/// Fallback: list root-level .jsonl files sorted by mtime descending.
+/// Two-source strategy: parse sessions-index.json for the most recent indexed entry
+/// AND list root-level .jsonl files by mtime. If the most recent file on disk is NOT
+/// present in the index (a genuinely new session that hasn't been indexed yet) and is
+/// newer than the best indexed entry, prefer it. Files that ARE in the index but were
+/// filtered out (e.g., sidechains) are not promoted over the index result.
 pub fn find_session_file(project_dir: &Path) -> Option<ResolvedSession> {
-    // Primary: parse sessions-index.json.
-    if let Some(resolved) = find_via_sessions_index(project_dir) {
-        return Some(resolved);
-    }
+    let index_result = find_via_sessions_index(project_dir);
+    let listing_path = find_via_jsonl_listing(project_dir);
 
-    // Fallback: list root-level .jsonl files by mtime (no customTitle available).
-    find_via_jsonl_listing(project_dir).map(|path| ResolvedSession {
-        path,
-        custom_title: None,
-    })
+    match (&index_result, &listing_path) {
+        (Some(indexed), Some(listed)) => {
+            if indexed.path == *listed {
+                // Same file: use the index result (has customTitle).
+                return index_result;
+            }
+            // Different files. Only prefer the listing if it's genuinely
+            // not in the index (new session), not just filtered out (sidechain).
+            let in_index = is_path_in_sessions_index(project_dir, listed);
+            if in_index {
+                // The index already knows about this file and filtered it.
+                // Trust the index's decision.
+                return index_result;
+            }
+            // Genuinely new file. Compare actual filesystem mtime.
+            let index_mtime = std::fs::metadata(&indexed.path)
+                .and_then(|m| m.modified())
+                .ok();
+            let list_mtime = std::fs::metadata(listed)
+                .and_then(|m| m.modified())
+                .ok();
+            match (index_mtime, list_mtime) {
+                (Some(im), Some(lm)) if lm > im => {
+                    // Non-indexed file is newer: prefer it.
+                    Some(ResolvedSession {
+                        path: listed.clone(),
+                        custom_title: None,
+                    })
+                }
+                _ => index_result,
+            }
+        }
+        (Some(_), None) => index_result,
+        (None, Some(listed)) => Some(ResolvedSession {
+            path: listed.clone(),
+            custom_title: None,
+        }),
+        (None, None) => None,
+    }
+}
+
+/// Checks whether a file path appears in any entry of the project's sessions-index.json.
+fn is_path_in_sessions_index(project_dir: &Path, file_path: &Path) -> bool {
+    let index_path = project_dir.join("sessions-index.json");
+    let content = match std::fs::read_to_string(&index_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let entries: Vec<SessionIndexEntry> =
+        if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
+            index.entries
+        } else if let Ok(entries) = serde_json::from_str(&content) {
+            entries
+        } else {
+            return false;
+        };
+    let file_str = file_path.to_str().unwrap_or("");
+    entries
+        .iter()
+        .any(|e| e.full_path.as_deref() == Some(file_str))
 }
 
 /// Parses sessions-index.json and returns the most recent non-sidechain session file.

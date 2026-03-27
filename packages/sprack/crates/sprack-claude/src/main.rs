@@ -304,6 +304,19 @@ pub(crate) fn process_claude_pane(
         session_state.last_entries = entries;
     }
 
+    // If session_name is still None after tail_read, do a one-time head_read.
+    // The custom-title entry from /rename is written near the start of the file
+    // and may fall outside the 32KB tail window for large sessions.
+    if session_state.session_name.is_none() && session_state.poll_cycle_count <= 1 {
+        let head_entries = jsonl::head_read(
+            &session_state.session_file,
+            jsonl::default_head_bytes(),
+        );
+        if let Some(jsonl_name) = status::extract_jsonl_custom_title(&head_entries) {
+            session_state.session_name = Some(jsonl_name);
+        }
+    }
+
     if session_state.last_entries.is_empty() {
         write_error_integration(db_connection, &pane.pane_id, "no parseable session entries");
         return;

@@ -182,6 +182,52 @@ fn tail_read_inner(path: &Path, max_bytes: u64) -> anyhow::Result<Vec<JsonlEntry
     Ok(entries)
 }
 
+/// Default head-read window: 8KB covers the first ~20-30 entries, sufficient
+/// to find session naming entries (custom-title, agent-name) written at session start.
+const DEFAULT_HEAD_BYTES: u64 = 8 * 1024;
+
+/// Returns the default head-read byte count.
+pub fn default_head_bytes() -> u64 {
+    DEFAULT_HEAD_BYTES
+}
+
+/// Reads the first `max_bytes` of a JSONL file, parsing complete lines as entries.
+///
+/// Used to find session naming entries (custom-title, agent-name) that are written
+/// near the start of the file and fall outside the tail_read window for large sessions.
+pub fn head_read(path: &Path, max_bytes: u64) -> Vec<JsonlEntry> {
+    head_read_inner(path, max_bytes).unwrap_or_default()
+}
+
+fn head_read_inner(path: &Path, max_bytes: u64) -> anyhow::Result<Vec<JsonlEntry>> {
+    let mut file = std::fs::File::open(path)?;
+    let file_length = file.metadata()?.len();
+    let read_length = file_length.min(max_bytes) as usize;
+
+    let mut buffer = vec![0u8; read_length];
+    file.read_exact(&mut buffer)?;
+
+    // Convert to string, discarding the last partial line if we truncated.
+    let text = String::from_utf8_lossy(&buffer);
+    let text = if (read_length as u64) < file_length {
+        // Truncated: discard last partial line.
+        match text.rfind('\n') {
+            Some(pos) => &text[..pos],
+            None => return Ok(Vec::new()),
+        }
+    } else {
+        &text
+    };
+
+    let entries = text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| serde_json::from_str::<JsonlEntry>(line).ok())
+        .collect();
+
+    Ok(entries)
+}
+
 /// Reads new entries appended to a JSONL file since the last read position.
 ///
 /// Updates `position` to the new file size. If the file shrank (rotation),

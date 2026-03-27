@@ -392,6 +392,7 @@ fn find_batch_prune_boundary(tasks: &[TaskEntry], batch_starts: &[usize]) -> usi
 /// Per-project directories are at `~/.local/share/sprack/lace/*/claude-events/`.
 /// The legacy flat directory is at `~/.local/share/sprack/claude-events/`.
 /// Per-project directories are searched first (higher priority: more likely to be current).
+#[allow(dead_code)]
 pub fn event_dirs() -> Vec<PathBuf> {
     let home = match std::env::var("HOME") {
         Ok(h) => PathBuf::from(h),

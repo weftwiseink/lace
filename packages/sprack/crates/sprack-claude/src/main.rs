@@ -17,6 +17,9 @@ mod resolver;
 mod session;
 mod status;
 
+#[cfg(test)]
+mod test_resolution;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,7 +31,7 @@ use crate::session::SessionFileState;
 use crate::status::ClaudeSummary;
 
 /// Integration kind identifier for process_integrations table.
-const INTEGRATION_KIND: &str = "claude_code";
+pub(crate) const INTEGRATION_KIND: &str = "claude_code";
 
 /// Poll interval between cycles.
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
@@ -36,7 +39,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(2000);
 /// How often to force a tail_read instead of incremental_read, in poll cycles.
 /// At 2-second poll intervals, 5 cycles = ~10 seconds. This catches state
 /// transitions that incremental reading missed (e.g., stale stop_reason: null).
-const TAIL_READ_REFRESH_INTERVAL: u32 = 5;
+pub(crate) const TAIL_READ_REFRESH_INTERVAL: u32 = 5;
 
 /// How often to check for signals during a wait.
 const SIGNAL_CHECK_GRANULARITY: Duration = Duration::from_millis(50);
@@ -65,7 +68,8 @@ fn run() -> anyhow::Result<()> {
 
     let home = std::env::var("HOME")
         .map_err(|_| anyhow::anyhow!("HOME environment variable not set"))?;
-    let claude_home = PathBuf::from(&home).join(".claude");
+    let home_dir = PathBuf::from(&home);
+    let claude_home = home_dir.join(".claude");
 
     // Open session cache DB. Non-fatal: if it fails, proceed without cache enrichment.
     let cache_connection = match cache::open_cache_db(None) {
@@ -82,6 +86,7 @@ fn run() -> anyhow::Result<()> {
             &mut session_cache,
             &claude_home,
             cache_connection.as_ref(),
+            &home_dir,
         );
 
         if wait_for_shutdown_signal(&mut signals, POLL_INTERVAL) {
@@ -91,11 +96,12 @@ fn run() -> anyhow::Result<()> {
 }
 
 /// Executes a single poll cycle: find Claude panes, resolve sessions, write status.
-fn run_poll_cycle(
+pub(crate) fn run_poll_cycle(
     db_connection: &rusqlite::Connection,
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
     cache_connection: Option<&rusqlite::Connection>,
+    home_dir: &std::path::Path,
 ) {
     let snapshot = match sprack_db::read::read_full_state(db_connection) {
         Ok(snapshot) => snapshot,
@@ -119,6 +125,7 @@ fn run_poll_cycle(
             claude_home,
             container_session,
             cache_connection,
+            home_dir,
         );
     }
 
@@ -136,13 +143,14 @@ fn run_poll_cycle(
 /// first (the process is running on the host). Falls back to container resolution
 /// for container sessions if local resolution fails. For non-claude panes in
 /// container sessions, uses container resolution directly.
-fn process_claude_pane(
+pub(crate) fn process_claude_pane(
     db_connection: &rusqlite::Connection,
     pane: &sprack_db::types::Pane,
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
     container_session: Option<&sprack_db::types::Session>,
     cache_connection: Option<&rusqlite::Connection>,
+    home_dir: &std::path::Path,
 ) {
     // Check if we have a cached session and whether it's still valid.
     let is_cache_valid = is_session_cache_valid(pane, session_cache.get(&pane.pane_id));
@@ -159,11 +167,11 @@ fn process_claude_pane(
         let resolved = if is_local_claude {
             resolve_session_for_pane(pane, claude_home).or_else(|| {
                 container_session.and_then(|session| {
-                    resolver::resolve_container_pane(session, claude_home, &pane.current_path)
+                    resolver::resolve_container_pane(session, claude_home, &pane.current_path, home_dir)
                 })
             })
         } else if let Some(session) = container_session {
-            resolver::resolve_container_pane(session, claude_home, &pane.current_path)
+            resolver::resolve_container_pane(session, claude_home, &pane.current_path, home_dir)
         } else {
             None
         };
@@ -256,7 +264,7 @@ fn process_claude_pane(
     // Read hook events and merge into summary (graceful: no-op if no event files exist).
     // Search all event directories: per-project mounts first, then legacy flat directory.
     let event_file = {
-        let dirs = events::event_dirs();
+        let dirs = events::event_dirs_from_home(home_dir);
         let mut found: Option<PathBuf> = None;
         for event_dir in &dirs {
             // Prefer session_id-based lookup when a previous SessionStart provided one.
@@ -400,10 +408,10 @@ fn process_claude_pane(
 
 /// Maximum age for a container session file to be considered "still active".
 /// Container panes have no PID to check, so staleness relies on file mtime.
-const CONTAINER_SESSION_MAX_AGE: Duration = Duration::from_secs(60);
+pub(crate) const CONTAINER_SESSION_MAX_AGE: Duration = Duration::from_secs(60);
 
 /// Checks whether the cached session state is still valid for a pane.
-fn is_session_cache_valid(
+pub(crate) fn is_session_cache_valid(
     pane: &sprack_db::types::Pane,
     cached_state: Option<&SessionFileState>,
 ) -> bool {
@@ -697,7 +705,7 @@ fn resolve_container_git_via_exec(
 }
 
 /// Writes an integration with a single retry on failure.
-fn write_integration_with_retry(
+pub(crate) fn write_integration_with_retry(
     db_connection: &rusqlite::Connection,
     pane_id: &str,
     summary_json: &str,
@@ -726,7 +734,7 @@ fn write_integration_with_retry(
 }
 
 /// Writes an error integration entry for a pane.
-fn write_error_integration(
+pub(crate) fn write_error_integration(
     db_connection: &rusqlite::Connection,
     pane_id: &str,
     error_message: &str,
@@ -778,7 +786,7 @@ fn has_session_end(events: &[events::HookEvent]) -> bool {
 }
 
 /// Deletes the integration row for a specific pane.
-fn delete_integration(db_connection: &rusqlite::Connection, pane_id: &str) {
+pub(crate) fn delete_integration(db_connection: &rusqlite::Connection, pane_id: &str) {
     if let Err(error) = db_connection.execute(
         "DELETE FROM process_integrations WHERE pane_id = ?1 AND kind = ?2",
         rusqlite::params![pane_id, INTEGRATION_KIND],
@@ -788,7 +796,7 @@ fn delete_integration(db_connection: &rusqlite::Connection, pane_id: &str) {
 }
 
 /// Deletes process_integrations rows for pane IDs no longer running Claude.
-fn clean_stale_integrations(db_connection: &rusqlite::Connection, active_pane_ids: &[String]) {
+pub(crate) fn clean_stale_integrations(db_connection: &rusqlite::Connection, active_pane_ids: &[String]) {
     // Read existing claude_code integrations.
     let snapshot = match sprack_db::read::read_full_state(db_connection) {
         Ok(snapshot) => snapshot,

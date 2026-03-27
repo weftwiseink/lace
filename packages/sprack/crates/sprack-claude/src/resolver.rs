@@ -136,10 +136,11 @@ pub fn resolve_container_pane(
     session: &sprack_db::types::Session,
     claude_home: &Path,
     host_cwd: &str,
+    home_dir: &Path,
 ) -> Option<SessionFileState> {
     let workspace = session.container_workspace.as_deref()?;
 
-    resolve_container_pane_via_mount(workspace, claude_home, host_cwd)
+    resolve_container_pane_via_mount(workspace, claude_home, host_cwd, home_dir)
 }
 
 /// Resolves a container pane's session file via hook event files or project directory.
@@ -158,8 +159,9 @@ fn resolve_container_pane_via_mount(
     workspace: &str,
     claude_home: &Path,
     host_cwd: &str,
+    home_dir: &Path,
 ) -> Option<SessionFileState> {
-    let event_dirs = events::event_dirs();
+    let event_dirs = events::event_dirs_from_home(home_dir);
 
     // Search event directories for an event file matching this workspace.
     let mut event_file: Option<PathBuf> = None;
@@ -466,7 +468,7 @@ mod tests {
             updated_at: "2026-03-24T12:00:00Z".to_string(),
         };
 
-        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path", temp.path());
         assert!(result.is_none(), "should return None without workspace");
     }
 
@@ -485,7 +487,7 @@ mod tests {
         };
 
         // No event directories and no ~/.claude/projects/ dir: resolution should return None.
-        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path", temp.path());
         assert!(
             result.is_none(),
             "should return None when no event dirs or project dirs exist"
@@ -521,7 +523,7 @@ mod tests {
         };
 
         // No event directories exist, but the project dir has a session file.
-        let result = resolve_container_pane(&session, claude_home, "/some/host/path");
+        let result = resolve_container_pane(&session, claude_home, "/some/host/path", temp.path());
         assert!(
             result.is_some(),
             "should resolve via project dir fallback when no event files exist"
@@ -571,7 +573,7 @@ mod tests {
             updated_at: "2026-03-24T12:00:00Z".to_string(),
         };
 
-        let result = resolve_container_pane(&session, claude_home, host_cwd);
+        let result = resolve_container_pane(&session, claude_home, host_cwd, temp.path());
         assert!(result.is_some(), "should resolve to a session file");
         let state = result.unwrap();
         assert_eq!(

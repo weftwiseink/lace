@@ -5,7 +5,7 @@ first_authored:
 task_list: sprack/session-resolution-fix
 type: proposal
 state: live
-status: review_ready
+status: implementation_accepted
 tags: [sprack, session_resolution, state_detection, liveness, architecture]
 ---
 

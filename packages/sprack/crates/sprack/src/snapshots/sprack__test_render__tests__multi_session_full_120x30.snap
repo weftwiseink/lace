@@ -3,7 +3,7 @@ source: crates/sprack/src/test_render.rs
 expression: output
 ---
 â¼ REMOTE-APP
-  â¼ remote-app (1w) :22427
+  â¼ remote-app (1w) [remote-app]
     â¼ code (1 panes) *
         claude/sprack-trouble [thinking]
           opus-4-6 | 450K/1M | 2 subagents

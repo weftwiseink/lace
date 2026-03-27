@@ -96,9 +96,9 @@ mod tests {
         Session {
             name: name.to_string(),
             attached: false,
-            lace_container: None,
-            lace_user: None,
-            lace_workspace: None,
+            container_name: None,
+            container_user: None,
+            container_workspace: None,
             updated_at: "2026-03-21T12:00:00Z".to_string(),
         }
     }
@@ -110,11 +110,11 @@ mod tests {
         }
     }
 
-    fn make_session_lace(name: &str, container: &str) -> Session {
+    fn make_session_container(name: &str, container: &str) -> Session {
         Session {
-            lace_container: Some(container.to_string()),
-            lace_user: Some("node".to_string()),
-            lace_workspace: Some("/workspace".to_string()),
+            container_name: Some(container.to_string()),
+            container_user: Some("node".to_string()),
+            container_workspace: Some("/workspace".to_string()),
             ..make_session(name)
         }
     }
@@ -188,7 +188,7 @@ mod tests {
     fn populate_multi_session(db: &Connection) {
         let sessions = vec![
             make_session_attached("dev"),
-            make_session_lace("remote-app", "remote-app"),
+            make_session_container("remote-app", "remote-app"),
         ];
         let windows = vec![
             make_window("dev", 0, "editor"),

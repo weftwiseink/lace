@@ -111,9 +111,9 @@ mod tests {
         Session {
             name: name.to_string(),
             attached: false,
-            lace_container: None,
-            lace_user: None,
-            lace_workspace: None,
+            container_name: None,
+            container_user: None,
+            container_workspace: None,
             updated_at: "2026-03-21T12:00:00Z".to_string(),
         }
     }
@@ -201,9 +201,9 @@ mod tests {
             Session {
                 name: "dev".to_string(),
                 attached: true,
-                lace_container: Some("dev".to_string()),
-                lace_user: Some("node".to_string()),
-                lace_workspace: Some("/workspace".to_string()),
+                container_name: Some("dev".to_string()),
+                container_user: Some("node".to_string()),
+                container_workspace: Some("/workspace".to_string()),
                 updated_at: "2026-03-21T12:00:00Z".to_string(),
             },
             make_test_session("main"),

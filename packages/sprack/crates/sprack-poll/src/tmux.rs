@@ -3,7 +3,7 @@
 //! Runs `tmux list-panes -a -F` with a tab-delimited format string to fetch
 //! all panes across all sessions. Tab is used as the delimiter because it is a
 //! control character that cannot appear in tmux session names, window names,
-//! pane titles, or paths. Also reads per-session lace metadata via
+//! pane titles, or paths. Also reads per-session container metadata via
 //! `tmux show-options`.
 
 use std::collections::HashMap;
@@ -176,29 +176,30 @@ pub fn parse_tmux_output(raw: &str) -> TmuxSnapshot {
     build_snapshot(parsed_lines)
 }
 
-/// Lace metadata for a single session, read from tmux user options.
+/// Container metadata for a single session, read from tmux user options.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LaceMeta {
+pub struct ContainerMeta {
     pub container: Option<String>,
     pub user: Option<String>,
     pub workspace: Option<String>,
 }
 
-/// Reads lace-specific tmux user options for each session.
+/// Reads container tmux user options for each session.
 ///
 /// Calls `tmux show-options -qvt $session @lace_container/user/workspace` per session.
+/// Sprack reads lace-branded tmux options but stores them as generic container metadata.
 /// When `socket` is `Some`, targets an isolated tmux server (for testing).
 /// Missing options produce `None` values, not errors.
-pub fn query_lace_options(session_names: &[String], socket: Option<&str>) -> HashMap<String, LaceMeta> {
+pub fn query_container_options(session_names: &[String], socket: Option<&str>) -> HashMap<String, ContainerMeta> {
     let mut result = HashMap::new();
     for session_name in session_names {
-        let container = read_lace_option(session_name, "@lace_container", socket);
-        let user = read_lace_option(session_name, "@lace_user", socket);
-        let workspace = read_lace_option(session_name, "@lace_workspace", socket);
+        let container = read_tmux_option(session_name, "@lace_container", socket);
+        let user = read_tmux_option(session_name, "@lace_user", socket);
+        let workspace = read_tmux_option(session_name, "@lace_workspace", socket);
 
         result.insert(
             session_name.clone(),
-            LaceMeta {
+            ContainerMeta {
                 container,
                 user,
                 workspace,
@@ -208,18 +209,18 @@ pub fn query_lace_options(session_names: &[String], socket: Option<&str>) -> Has
     result
 }
 
-/// Reads a single lace tmux user option for a session.
+/// Reads a single tmux user option for a session.
 ///
 /// Returns `None` if the option is not set or the command fails.
-fn read_lace_option(session_name: &str, option_name: &str, socket: Option<&str>) -> Option<String> {
+fn read_tmux_option(session_name: &str, option_name: &str, socket: Option<&str>) -> Option<String> {
     let output = tmux_command(&["show-options", "-qvt", session_name, option_name], socket).ok()?;
-    parse_lace_option(&output)
+    parse_tmux_option(&output)
 }
 
 /// Parses the output of `tmux show-options -qv`.
 ///
 /// Returns `Some(value)` for non-empty output, `None` for empty/whitespace-only.
-pub fn parse_lace_option(output: &str) -> Option<String> {
+pub fn parse_tmux_option(output: &str) -> Option<String> {
     let trimmed = output.trim();
     if trimmed.is_empty() {
         None
@@ -228,13 +229,13 @@ pub fn parse_lace_option(output: &str) -> Option<String> {
     }
 }
 
-/// Converts a `TmuxSnapshot` and lace metadata into sprack-db types.
+/// Converts a `TmuxSnapshot` and container metadata into sprack-db types.
 ///
 /// Flattens the hierarchical snapshot into three separate vectors matching
 /// the sprack-db schema.
 pub fn to_db_types(
     snapshot: &TmuxSnapshot,
-    lace_meta: &HashMap<String, LaceMeta>,
+    container_meta: &HashMap<String, ContainerMeta>,
 ) -> (
     Vec<sprack_db::types::Session>,
     Vec<sprack_db::types::Window>,
@@ -247,13 +248,13 @@ pub fn to_db_types(
     let timestamp = sprack_db::write::now_iso8601();
 
     for tmux_session in &snapshot.sessions {
-        let meta = lace_meta.get(&tmux_session.name);
+        let meta = container_meta.get(&tmux_session.name);
         sessions.push(sprack_db::types::Session {
             name: tmux_session.name.clone(),
             attached: tmux_session.attached,
-            lace_container: meta.and_then(|m| m.container.clone()),
-            lace_user: meta.and_then(|m| m.user.clone()),
-            lace_workspace: meta.and_then(|m| m.workspace.clone()),
+            container_name: meta.and_then(|m| m.container.clone()),
+            container_user: meta.and_then(|m| m.user.clone()),
+            container_workspace: meta.and_then(|m| m.workspace.clone()),
             updated_at: timestamp.clone(),
         });
 
@@ -668,22 +669,22 @@ mod tests {
     }
 
     #[test]
-    fn test_lace_options_parsing() {
-        assert_eq!(parse_lace_option("2222\n"), Some("2222".to_string()));
-        assert_eq!(parse_lace_option("node\n"), Some("node".to_string()));
+    fn test_tmux_option_parsing() {
+        assert_eq!(parse_tmux_option("2222\n"), Some("2222".to_string()));
+        assert_eq!(parse_tmux_option("node\n"), Some("node".to_string()));
         assert_eq!(
-            parse_lace_option("/workspace\n"),
+            parse_tmux_option("/workspace\n"),
             Some("/workspace".to_string())
         );
         // Whitespace-only is treated as missing.
-        assert_eq!(parse_lace_option("  \n"), None);
+        assert_eq!(parse_tmux_option("  \n"), None);
     }
 
     #[test]
-    fn test_lace_options_missing() {
-        assert_eq!(parse_lace_option(""), None);
-        assert_eq!(parse_lace_option("\n"), None);
-        assert_eq!(parse_lace_option("   "), None);
+    fn test_tmux_option_missing() {
+        assert_eq!(parse_tmux_option(""), None);
+        assert_eq!(parse_tmux_option("\n"), None);
+        assert_eq!(parse_tmux_option("   "), None);
     }
 
     #[test]
@@ -716,24 +717,24 @@ mod tests {
             }],
         };
 
-        let mut lace_meta = HashMap::new();
-        lace_meta.insert(
+        let mut container_meta = HashMap::new();
+        container_meta.insert(
             "dev".to_string(),
-            LaceMeta {
+            ContainerMeta {
                 container: Some("dev".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
         );
 
-        let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
+        let (sessions, windows, panes) = to_db_types(&snapshot, &container_meta);
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].name, "dev");
         assert!(sessions[0].attached);
-        assert_eq!(sessions[0].lace_container.as_deref(), Some("dev"));
-        assert_eq!(sessions[0].lace_user.as_deref(), Some("node"));
-        assert_eq!(sessions[0].lace_workspace.as_deref(), Some("/workspace"));
+        assert_eq!(sessions[0].container_name.as_deref(), Some("dev"));
+        assert_eq!(sessions[0].container_user.as_deref(), Some("node"));
+        assert_eq!(sessions[0].container_workspace.as_deref(), Some("/workspace"));
 
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].session_name, "dev");
@@ -761,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_db_types_without_lace_meta() {
+    fn test_to_db_types_without_container_meta() {
         let snapshot = TmuxSnapshot {
             sessions: vec![TmuxSession {
                 name: "local".to_string(),
@@ -790,12 +791,12 @@ mod tests {
             }],
         };
 
-        let lace_meta = HashMap::new();
-        let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
+        let container_meta = HashMap::new();
+        let (sessions, windows, panes) = to_db_types(&snapshot, &container_meta);
 
-        assert_eq!(sessions[0].lace_container, None);
-        assert_eq!(sessions[0].lace_user, None);
-        assert_eq!(sessions[0].lace_workspace, None);
+        assert_eq!(sessions[0].container_name, None);
+        assert_eq!(sessions[0].container_user, None);
+        assert_eq!(sessions[0].container_workspace, None);
         // Window index u32 -> i32 conversion.
         assert_eq!(windows[0].window_index, 3);
         // Pane pid u32 -> Option<u32>.

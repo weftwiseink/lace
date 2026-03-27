@@ -73,7 +73,7 @@ pub fn read_integrations(
 
 fn read_sessions(conn: &Connection) -> Result<Vec<Session>, SprackDbError> {
     let mut statement = conn.prepare(
-        "SELECT name, attached, lace_container, lace_user, lace_workspace, updated_at
+        "SELECT name, attached, container_name, container_user, container_workspace, updated_at
          FROM sessions ORDER BY name",
     )?;
     let rows = statement.query_map([], |row| {
@@ -81,9 +81,9 @@ fn read_sessions(conn: &Connection) -> Result<Vec<Session>, SprackDbError> {
         Ok(Session {
             name: row.get(0)?,
             attached: attached_int != 0,
-            lace_container: row.get(2)?,
-            lace_user: row.get(3)?,
-            lace_workspace: row.get(4)?,
+            container_name: row.get(2)?,
+            container_user: row.get(3)?,
+            container_workspace: row.get(4)?,
             updated_at: row.get(5)?,
         })
     })?;

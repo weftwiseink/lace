@@ -2,7 +2,7 @@
 //!
 //! Converts a `DbSnapshot` into a `Vec<TreeItem<NodeId>>` hierarchy:
 //! HostGroup > Session > Window > Pane.
-//! Sessions are grouped by `@lace_container` (same container = same host group).
+//! Sessions are grouped by `container_name` (same container = same host group).
 
 use std::collections::HashMap;
 use std::fmt;
@@ -78,7 +78,7 @@ pub(crate) fn parse_claude_summary(integration: &Integration) -> Option<ClaudeSu
 /// Identifier for tree nodes, distinguishing node types for tmux navigation.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NodeId {
-    /// Container host group keyed by lace_container or "local".
+    /// Container host group keyed by container_name or "local".
     HostGroup(String),
     /// Tmux session keyed by session name.
     Session(String),
@@ -105,7 +105,7 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// A host group: sessions sharing the same `@lace_container`.
+/// A host group: sessions sharing the same `container_name`.
 struct HostGroup {
     name: String,
     container: Option<String>,
@@ -114,7 +114,7 @@ struct HostGroup {
 
 /// Builds the full tree from a DB snapshot.
 ///
-/// Groups sessions by `@lace_container`, filters out the TUI's own pane,
+/// Groups sessions by `container_name`, filters out the TUI's own pane,
 /// and formats labels according to the current layout tier.
 pub fn build_tree(
     snapshot: &DbSnapshot,
@@ -184,12 +184,12 @@ fn build_pane_items(
         .collect()
 }
 
-/// Groups sessions by `@lace_container`. Sessions without a container go under "local".
+/// Groups sessions by `container_name`. Sessions without a container go under "local".
 fn group_sessions_by_host(sessions: &[Session]) -> Vec<HostGroup> {
     let mut container_map: HashMap<Option<String>, Vec<Session>> = HashMap::new();
     for session in sessions {
         container_map
-            .entry(session.lace_container.clone())
+            .entry(session.container_name.clone())
             .or_default()
             .push(session.clone());
     }
@@ -637,7 +637,7 @@ fn format_session_label(
             if window_count > 0 {
                 spans.push(Span::styled(format!(" ({window_count}w)"), theme.subtext0));
             }
-            if let Some(ref container) = session.lace_container {
+            if let Some(ref container) = session.container_name {
                 spans.push(Span::styled(format!(" [{container}]"), theme.surface2_fg));
             }
             let status = if session.attached {
@@ -960,36 +960,36 @@ mod tests {
             Session {
                 name: "dev".to_string(),
                 attached: true,
-                lace_container: Some("dev-container".to_string()),
-                lace_user: None,
-                lace_workspace: None,
+                container_name: Some("dev-container".to_string()),
+                container_user: None,
+                container_workspace: None,
                 updated_at: String::new(),
             },
             Session {
                 name: "logs".to_string(),
                 attached: false,
-                lace_container: Some("dev-container".to_string()),
-                lace_user: None,
-                lace_workspace: None,
+                container_name: Some("dev-container".to_string()),
+                container_user: None,
+                container_workspace: None,
                 updated_at: String::new(),
             },
             Session {
                 name: "scratch".to_string(),
                 attached: false,
-                lace_container: None,
-                lace_user: None,
-                lace_workspace: None,
+                container_name: None,
+                container_user: None,
+                container_workspace: None,
                 updated_at: String::new(),
             },
         ];
 
         let groups = group_sessions_by_host(&sessions);
 
-        // Port 2222 group comes first, local comes last.
+        // Container group comes first, local comes last.
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].port, Some(2222));
+        assert_eq!(groups[0].container.as_deref(), Some("dev-container"));
         assert_eq!(groups[0].sessions.len(), 2);
-        assert_eq!(groups[1].port, None);
+        assert_eq!(groups[1].container, None);
         assert_eq!(groups[1].name, "local");
     }
 
@@ -1076,9 +1076,9 @@ mod tests {
             sessions: vec![sprack_db::types::Session {
                 name: "s".to_string(),
                 attached: true,
-                lace_container: None,
-                lace_user: None,
-                lace_workspace: None,
+                container_name: None,
+                container_user: None,
+                container_workspace: None,
                 updated_at: String::new(),
             }],
             windows: vec![sprack_db::types::Window {

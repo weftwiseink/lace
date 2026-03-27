@@ -5,8 +5,8 @@
 //! to the shared SQLite process_integrations table.
 //!
 //! Local panes are resolved by walking the Linux /proc filesystem from pane PIDs.
-//! Container panes (lace devcontainer sessions) are resolved via the `~/.claude`
-//! bind mount using workspace prefix matching and mtime heuristics.
+//! Container panes are resolved via the `~/.claude` bind mount using workspace
+//! prefix matching and mtime heuristics.
 
 mod cache;
 mod events;
@@ -101,18 +101,18 @@ fn run_poll_cycle(
     };
 
     let candidate_panes = resolver::find_candidate_panes(&snapshot);
-    let lace_sessions = resolver::build_lace_session_map(&snapshot.sessions);
+    let container_sessions = resolver::build_container_session_map(&snapshot.sessions);
     let mut active_pane_ids: Vec<String> = Vec::new();
 
     for pane in &candidate_panes {
         active_pane_ids.push(pane.pane_id.clone());
-        let lace_session = lace_sessions.get(&pane.session_name);
+        let container_session = container_sessions.get(&pane.session_name);
         process_claude_pane(
             db_connection,
             pane,
             session_cache,
             claude_home,
-            lace_session,
+            container_session,
             cache_connection,
         );
     }
@@ -125,18 +125,18 @@ fn run_poll_cycle(
 
 /// Processes a single Claude pane: resolve session, read entries, write status.
 ///
-/// Dispatches to `LocalResolver` or `LaceContainerResolver` based on pane context.
+/// Dispatches to `LocalResolver` or container resolution based on pane context.
 ///
 /// For panes with "claude" in `current_command`, tries local `/proc` resolution
 /// first (the process is running on the host). Falls back to container resolution
-/// for lace sessions if local resolution fails. For non-claude panes in lace
-/// sessions (e.g., ssh tunnels), uses container resolution directly.
+/// for container sessions if local resolution fails. For non-claude panes in
+/// container sessions, uses container resolution directly.
 fn process_claude_pane(
     db_connection: &rusqlite::Connection,
     pane: &sprack_db::types::Pane,
     session_cache: &mut HashMap<String, SessionFileState>,
     claude_home: &std::path::Path,
-    lace_session: Option<&sprack_db::types::Session>,
+    container_session: Option<&sprack_db::types::Session>,
     cache_connection: Option<&rusqlite::Connection>,
 ) {
     // Check if we have a cached session and whether it's still valid.
@@ -153,11 +153,11 @@ fn process_claude_pane(
 
         let resolved = if is_local_claude {
             resolve_session_for_pane(pane, claude_home).or_else(|| {
-                lace_session.and_then(|session| {
+                container_session.and_then(|session| {
                     resolver::resolve_container_pane(session, claude_home)
                 })
             })
-        } else if let Some(session) = lace_session {
+        } else if let Some(session) = container_session {
             resolver::resolve_container_pane(session, claude_home)
         } else {
             None

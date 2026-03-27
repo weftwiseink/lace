@@ -110,16 +110,16 @@ pub fn write_integration(
 
 fn insert_sessions(conn: &Connection, sessions: &[Session]) -> Result<(), SprackDbError> {
     let mut statement = conn.prepare(
-        "INSERT INTO sessions (name, attached, lace_container, lace_user, lace_workspace, updated_at)
+        "INSERT INTO sessions (name, attached, container_name, container_user, container_workspace, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     for session in sessions {
         statement.execute(rusqlite::params![
             session.name,
             session.attached as i32,
-            session.lace_container,
-            session.lace_user,
-            session.lace_workspace,
+            session.container_name,
+            session.container_user,
+            session.container_workspace,
             session.updated_at,
         ])?;
     }

@@ -1,13 +1,13 @@
 //! Hash-based change detection for tmux state.
 //!
 //! Uses `std::hash::DefaultHasher` to detect whether raw tmux output
-//! or lace metadata has changed between poll cycles. The hash is only
+//! or container metadata has changed between poll cycles. The hash is only
 //! for change detection, not security.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::tmux::{LaceMeta, TmuxSnapshot};
+use crate::tmux::{ContainerMeta, TmuxSnapshot};
 
 /// Computes a 64-bit hash of a string for change detection.
 #[cfg(test)]
@@ -27,16 +27,16 @@ pub fn compute_snapshot_hash(snapshot: &TmuxSnapshot) -> u64 {
     hasher.finish()
 }
 
-/// Computes a hash over the lace metadata map for change detection.
+/// Computes a hash over the container metadata map for change detection.
 ///
 /// Sorts keys to ensure deterministic ordering regardless of HashMap iteration order.
-pub fn compute_lace_meta_hash(lace_meta: &HashMap<String, LaceMeta>) -> u64 {
+pub fn compute_container_meta_hash(container_meta: &HashMap<String, ContainerMeta>) -> u64 {
     let mut hasher = DefaultHasher::new();
-    let mut sorted_keys: Vec<&String> = lace_meta.keys().collect();
+    let mut sorted_keys: Vec<&String> = container_meta.keys().collect();
     sorted_keys.sort();
     for key in sorted_keys {
         key.hash(&mut hasher);
-        let meta = &lace_meta[key];
+        let meta = &container_meta[key];
         meta.container.hash(&mut hasher);
         meta.user.hash(&mut hasher);
         meta.workspace.hash(&mut hasher);
@@ -75,12 +75,12 @@ mod tests {
     }
 
     #[test]
-    fn test_lace_meta_hash_detects_change() {
+    fn test_container_meta_hash_detects_change() {
         let mut meta_a = HashMap::new();
         meta_a.insert(
             "dev".to_string(),
-            LaceMeta {
-                port: Some(2222),
+            ContainerMeta {
+                container: Some("dev-container".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
@@ -89,26 +89,26 @@ mod tests {
         let mut meta_b = HashMap::new();
         meta_b.insert(
             "dev".to_string(),
-            LaceMeta {
-                port: Some(3333),
+            ContainerMeta {
+                container: Some("other-container".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
         );
 
         assert_ne!(
-            compute_lace_meta_hash(&meta_a),
-            compute_lace_meta_hash(&meta_b)
+            compute_container_meta_hash(&meta_a),
+            compute_container_meta_hash(&meta_b)
         );
     }
 
     #[test]
-    fn test_lace_meta_hash_detects_no_change() {
+    fn test_container_meta_hash_detects_no_change() {
         let mut meta_a = HashMap::new();
         meta_a.insert(
             "dev".to_string(),
-            LaceMeta {
-                port: Some(2222),
+            ContainerMeta {
+                container: Some("dev-container".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
@@ -117,16 +117,16 @@ mod tests {
         let mut meta_b = HashMap::new();
         meta_b.insert(
             "dev".to_string(),
-            LaceMeta {
-                port: Some(2222),
+            ContainerMeta {
+                container: Some("dev-container".to_string()),
                 user: Some("node".to_string()),
                 workspace: Some("/workspace".to_string()),
             },
         );
 
         assert_eq!(
-            compute_lace_meta_hash(&meta_a),
-            compute_lace_meta_hash(&meta_b)
+            compute_container_meta_hash(&meta_a),
+            compute_container_meta_hash(&meta_b)
         );
     }
 }

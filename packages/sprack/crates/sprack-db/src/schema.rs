@@ -21,7 +21,7 @@ pub fn init_schema(conn: &Connection) -> Result<(), SprackDbError> {
 
     match version {
         0 | 1 => {
-            // Fresh DB, pre-versioning, or v1 (lace_port INTEGER).
+            // Fresh DB, pre-versioning, or v1 (lace_port/lace_container columns).
             // Drop and recreate at current version. Breakage is acceptable
             // per the podman-exec migration proposal: no backwards-compatible shim.
             conn.execute_batch(
@@ -51,9 +51,9 @@ PRAGMA user_version = 2;
 CREATE TABLE IF NOT EXISTS sessions (
     name           TEXT PRIMARY KEY,
     attached       INTEGER NOT NULL DEFAULT 0,
-    lace_container TEXT,
-    lace_user      TEXT,
-    lace_workspace TEXT,
+    container_name      TEXT,
+    container_user      TEXT,
+    container_workspace TEXT,
     updated_at     TEXT NOT NULL
 );
 

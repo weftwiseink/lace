@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 use signal_hook::consts::{SIGINT, SIGTERM, SIGUSR1};
 use signal_hook::iterator::Signals;
 
-use crate::diff::{compute_lace_meta_hash, compute_snapshot_hash};
+use crate::diff::{compute_container_meta_hash, compute_snapshot_hash};
 use crate::tmux::{
-    parse_tmux_output, query_lace_options, query_tmux_state, to_db_types, TmuxError,
+    parse_tmux_output, query_container_options, query_tmux_state, to_db_types, TmuxError,
 };
 
 /// Default poll interval between cycles.
@@ -56,7 +56,7 @@ fn run() -> anyhow::Result<()> {
     let mut signals = Signals::new([SIGUSR1, SIGINT, SIGTERM])?;
 
     let mut last_tmux_hash: Option<u64> = None;
-    let mut last_lace_hash: Option<u64> = None;
+    let mut last_container_hash: Option<u64> = None;
     let mut server_absent_since: Option<Instant> = None;
 
     loop {
@@ -82,23 +82,23 @@ fn run() -> anyhow::Result<()> {
         // Parse and check for changes.
         let snapshot = parse_tmux_output(&raw_output);
         let session_names = snapshot.session_names();
-        let lace_meta = query_lace_options(&session_names, None);
+        let container_meta = query_container_options(&session_names, None);
 
         let current_tmux_hash = compute_snapshot_hash(&snapshot);
-        let current_lace_hash = compute_lace_meta_hash(&lace_meta);
+        let current_container_hash = compute_container_meta_hash(&container_meta);
 
         let tmux_changed = last_tmux_hash.as_ref() != Some(&current_tmux_hash);
-        let lace_changed = last_lace_hash.as_ref() != Some(&current_lace_hash);
+        let container_changed = last_container_hash.as_ref() != Some(&current_container_hash);
 
-        if tmux_changed || lace_changed {
-            let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
+        if tmux_changed || container_changed {
+            let (sessions, windows, panes) = to_db_types(&snapshot, &container_meta);
             if let Err(error) = sprack_db::write::write_tmux_state(&db, &sessions, &windows, &panes)
             {
                 eprintln!("sprack-poll: DB write failed: {error}");
                 // Retry next cycle.
             } else {
                 last_tmux_hash = Some(current_tmux_hash);
-                last_lace_hash = Some(current_lace_hash);
+                last_container_hash = Some(current_container_hash);
             }
         }
 
@@ -256,8 +256,8 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use crate::diff::{compute_lace_meta_hash, compute_snapshot_hash};
-    use crate::tmux::{parse_tmux_output, to_db_types, LaceMeta};
+    use crate::diff::{compute_container_meta_hash, compute_snapshot_hash};
+    use crate::tmux::{parse_tmux_output, to_db_types, ContainerMeta};
 
     /// Opens an in-memory DB with schema for integration tests.
     fn open_test_db() -> Connection {
@@ -349,14 +349,14 @@ mod tests {
         let snapshot = parse_tmux_output(&raw_output);
         let session_names = snapshot.session_names();
 
-        // No real tmux server: use empty lace meta.
-        let lace_meta: HashMap<String, LaceMeta> = session_names
+        // No real tmux server: use empty container meta.
+        let container_meta: HashMap<String, ContainerMeta> = session_names
             .iter()
             .map(|name| {
                 (
                     name.clone(),
-                    LaceMeta {
-                        port: None,
+                    ContainerMeta {
+                        container: None,
                         user: None,
                         workspace: None,
                     },
@@ -364,7 +364,7 @@ mod tests {
             })
             .collect();
 
-        let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
+        let (sessions, windows, panes) = to_db_types(&snapshot, &container_meta);
         sprack_db::write::write_tmux_state(&conn, &sessions, &windows, &panes).unwrap();
 
         let db_snapshot = sprack_db::read::read_full_state(&conn).unwrap();
@@ -396,8 +396,8 @@ mod tests {
         );
 
         let snapshot = parse_tmux_output(&raw_output);
-        let lace_meta = HashMap::new();
-        let (sessions, windows, panes) = to_db_types(&snapshot, &lace_meta);
+        let container_meta = HashMap::new();
+        let (sessions, windows, panes) = to_db_types(&snapshot, &container_meta);
 
         // First write.
         sprack_db::write::write_tmux_state(&conn1, &sessions, &windows, &panes).unwrap();
@@ -407,11 +407,11 @@ mod tests {
         let snapshot_again = parse_tmux_output(&raw_output);
         let hash_first = compute_snapshot_hash(&snapshot);
         let hash_second = compute_snapshot_hash(&snapshot_again);
-        let lace_hash_first = compute_lace_meta_hash(&lace_meta);
-        let lace_hash_second = compute_lace_meta_hash(&lace_meta);
+        let container_hash_first = compute_container_meta_hash(&container_meta);
+        let container_hash_second = compute_container_meta_hash(&container_meta);
 
         assert_eq!(hash_first, hash_second);
-        assert_eq!(lace_hash_first, lace_hash_second);
+        assert_eq!(container_hash_first, container_hash_second);
 
         // Since hashes match, the real poller would skip the write.
         // Verify data_version hasn't changed (no second write occurred).
@@ -467,8 +467,8 @@ mod tests {
         .join("\n");
 
         let snapshot_initial = parse_tmux_output(&raw_output_initial);
-        let lace_meta = HashMap::new();
-        let (sessions, windows, panes) = to_db_types(&snapshot_initial, &lace_meta);
+        let container_meta = HashMap::new();
+        let (sessions, windows, panes) = to_db_types(&snapshot_initial, &container_meta);
         sprack_db::write::write_tmux_state(&conn, &sessions, &windows, &panes).unwrap();
 
         let db_state = sprack_db::read::read_full_state(&conn).unwrap();
@@ -481,7 +481,7 @@ mod tests {
         );
 
         let snapshot_replaced = parse_tmux_output(&raw_output_replaced);
-        let (sessions, windows, panes) = to_db_types(&snapshot_replaced, &lace_meta);
+        let (sessions, windows, panes) = to_db_types(&snapshot_replaced, &container_meta);
         sprack_db::write::write_tmux_state(&conn, &sessions, &windows, &panes).unwrap();
 
         let db_state = sprack_db::read::read_full_state(&conn).unwrap();

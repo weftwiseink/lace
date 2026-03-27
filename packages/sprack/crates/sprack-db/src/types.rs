@@ -8,19 +8,19 @@ use std::str::FromStr;
 
 use crate::error::SprackDbError;
 
-/// A tmux session with optional lace metadata.
+/// A tmux session with optional container metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Session {
     /// Tmux session name (primary key).
     pub name: String,
     /// Whether a client is currently attached to this session.
     pub attached: bool,
-    /// Container name from the @lace_container tmux option, if this is a lace session.
-    pub lace_container: Option<String>,
-    /// Username from the @lace_user tmux option, if this is a lace session.
-    pub lace_user: Option<String>,
-    /// Workspace path from the @lace_workspace tmux option, if this is a lace session.
-    pub lace_workspace: Option<String>,
+    /// Container name from the `@lace_container` tmux option, if this is a container session.
+    pub container_name: Option<String>,
+    /// Username from the `@lace_user` tmux option, if this is a container session.
+    pub container_user: Option<String>,
+    /// Workspace path from the `@lace_workspace` tmux option, if this is a container session.
+    pub container_workspace: Option<String>,
     /// ISO 8601 timestamp of when this record was last updated.
     pub updated_at: String,
 }

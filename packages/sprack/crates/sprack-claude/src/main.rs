@@ -337,10 +337,16 @@ fn process_claude_pane(
         }
     }
 
-    // Resolve git state for local panes using pane cwd.
-    // Only attempt for local panes (PID-keyed cache entries).
-    if matches!(session_state.cache_key, session::CacheKey::Pid(_)) {
-        resolve_git_state(session_state, &pane.current_path, &mut summary);
+    // Resolve git state: local panes via pane cwd, container panes via mount metadata.
+    match &session_state.cache_key {
+        session::CacheKey::Pid(_) => {
+            resolve_git_state(session_state, &pane.current_path, &mut summary);
+        }
+        session::CacheKey::ContainerSession(_) => {
+            if let Some(ref session) = container_session {
+                resolve_container_git_state(session, &mut summary);
+            }
+        }
     }
 
     let process_status = status::summary_to_process_status(&summary);
@@ -511,6 +517,140 @@ fn resolve_git_state(
     summary.git_branch = session_state.git_branch.clone();
     summary.git_commit_short = session_state.git_commit_short.clone();
     summary.git_worktree_branches = session_state.git_worktree_branches.clone();
+}
+
+/// Metadata read from a sprack mount's `state.json` file.
+///
+/// Written by the optional metadata writer in the sprack devcontainer feature.
+/// Located at `~/.local/share/sprack/lace/<project>/metadata/state.json` on the host.
+#[derive(Debug, serde::Deserialize)]
+struct ContainerGitMetadata {
+    #[serde(default)]
+    container_name: Option<String>,
+    #[serde(default)]
+    git_branch: Option<String>,
+    #[serde(default)]
+    git_commit_short: Option<String>,
+}
+
+/// Resolves git state for a container pane using the sprack mount metadata.
+///
+/// Primary path: reads `state.json` from per-project mount directories and matches
+/// by `container_name`. Falls back to `podman exec git` if the metadata file is
+/// not available.
+fn resolve_container_git_state(
+    session: &sprack_db::types::Session,
+    summary: &mut ClaudeSummary,
+) {
+    let container_name = match &session.container_name {
+        Some(name) => name,
+        None => return,
+    };
+
+    // Primary: read from sprack mount metadata.
+    if resolve_container_git_via_metadata(container_name, summary) {
+        return;
+    }
+
+    // Fallback: podman exec git commands.
+    if let Some(workspace) = &session.container_workspace {
+        resolve_container_git_via_exec(container_name, workspace, summary);
+    }
+}
+
+/// Reads container git state from the sprack mount metadata file.
+///
+/// Scans `~/.local/share/sprack/lace/*/metadata/state.json` for a file whose
+/// `container_name` field matches the target container. Returns `true` if git
+/// state was populated.
+fn resolve_container_git_via_metadata(
+    container_name: &str,
+    summary: &mut ClaudeSummary,
+) -> bool {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+
+    let lace_dir = PathBuf::from(&home).join(".local/share/sprack/lace");
+    let entries = match std::fs::read_dir(&lace_dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+
+    for entry in entries.filter_map(|e| e.ok()) {
+        let metadata_path = entry.path().join("metadata/state.json");
+        if let Ok(content) = std::fs::read_to_string(&metadata_path) {
+            if let Ok(meta) = serde_json::from_str::<ContainerGitMetadata>(&content) {
+                // Match by container_name field inside the metadata file.
+                let matches = meta
+                    .container_name
+                    .as_deref()
+                    .is_some_and(|name| name == container_name);
+                if matches {
+                    summary.git_branch = meta.git_branch;
+                    summary.git_commit_short = meta.git_commit_short;
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Resolves container git state by executing `git` commands inside the container.
+///
+/// Adds ~50ms per call for subprocess overhead. Used as a fallback when the
+/// sprack devcontainer feature's metadata writer is not installed.
+fn resolve_container_git_via_exec(
+    container_name: &str,
+    workspace: &str,
+    summary: &mut ClaudeSummary,
+) {
+    // git rev-parse --abbrev-ref HEAD
+    if let Ok(output) = std::process::Command::new("podman")
+        .args([
+            "exec",
+            "--workdir",
+            workspace,
+            container_name,
+            "git",
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+        ])
+        .output()
+    {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !branch.is_empty() {
+                summary.git_branch = Some(branch);
+            }
+        }
+    }
+
+    // git rev-parse --short HEAD
+    if let Ok(output) = std::process::Command::new("podman")
+        .args([
+            "exec",
+            "--workdir",
+            workspace,
+            container_name,
+            "git",
+            "rev-parse",
+            "--short",
+            "HEAD",
+        ])
+        .output()
+    {
+        if output.status.success() {
+            let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !commit.is_empty() {
+                summary.git_commit_short = Some(commit);
+            }
+        }
+    }
 }
 
 /// Writes an integration with a single retry on failure.

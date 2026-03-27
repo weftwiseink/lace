@@ -170,15 +170,24 @@ fn insert_panes(conn: &Connection, panes: &[Pane]) -> Result<(), SprackDbError> 
     Ok(())
 }
 
+/// Returns the current UTC time as seconds since the Unix epoch.
+pub fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Returns the current time as an ISO 8601 string with UTC timezone.
 ///
 /// Used by write operations in this module and exported for other crates
 /// (e.g., sprack-poll) that need timestamps in the same format.
 pub fn now_iso8601() -> String {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
+    epoch_secs_to_iso8601(now_epoch_secs())
+}
+
+/// Converts seconds since the Unix epoch to an ISO 8601 string (`YYYY-MM-DDTHH:MM:SSZ`).
+fn epoch_secs_to_iso8601(secs: u64) -> String {
     let (hour, minute, second) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
 
     // Howard Hinnant's civil_from_days algorithm.
@@ -195,4 +204,40 @@ pub fn now_iso8601() -> String {
     let y = if m <= 2 { y + 1 } else { y };
 
     format!("{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+/// Parses an ISO 8601 timestamp (`YYYY-MM-DDTHH:MM:SSZ`) into seconds since the Unix epoch.
+///
+/// Returns `None` if the format doesn't match. Inverse of `now_iso8601`.
+pub fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
+    // Expected format: "YYYY-MM-DDTHH:MM:SSZ" (20 chars).
+    if s.len() != 20 || !s.ends_with('Z') {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    if bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' || bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+
+    let y: i64 = s[0..4].parse().ok()?;
+    let m: i64 = s[5..7].parse().ok()?;
+    let d: i64 = s[8..10].parse().ok()?;
+    let hour: u64 = s[11..13].parse().ok()?;
+    let minute: u64 = s[14..16].parse().ok()?;
+    let second: u64 = s[17..19].parse().ok()?;
+
+    // Inverse of Howard Hinnant's civil_from_days: days_from_civil.
+    let y_adj = if m <= 2 { y - 1 } else { y };
+    let era = y_adj.div_euclid(400);
+    let yoe = y_adj.rem_euclid(400);
+    let m_adj = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * m_adj + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+
+    if days < 0 {
+        return None;
+    }
+
+    Some(days as u64 * 86400 + hour * 3600 + minute * 60 + second)
 }

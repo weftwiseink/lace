@@ -185,25 +185,21 @@ fn expand_all_recursive(
     }
 }
 
+/// Maximum age in seconds for a heartbeat to be considered fresh.
+const HEARTBEAT_STALE_THRESHOLD_SECS: u64 = 5;
+
 /// Checks whether a heartbeat timestamp is fresh (within 5 seconds of now).
 ///
-/// The timestamp is an ISO 8601 string. We parse the seconds since epoch
-/// heuristically: if parsing fails, treat as stale.
+/// The timestamp is an ISO 8601 string (`YYYY-MM-DDTHH:MM:SSZ`).
+/// Parses it to epoch seconds and compares against the current time.
+/// Returns `false` if the timestamp cannot be parsed or is stale.
 fn is_heartbeat_fresh(timestamp: &str) -> bool {
-    // The heartbeat is stored as an ISO 8601 string from SQLite's datetime().
-    // Format: "YYYY-MM-DD HH:MM:SS" (UTC).
-    // We do a simple check: parse the timestamp, compare to current time.
-    // If we can't parse it, assume stale.
-
-    // Simple approach: shell out to nothing, just check if the string is non-empty.
-    // A proper implementation would parse the timestamp, but for now we treat
-    // any non-empty heartbeat as potentially healthy and rely on the poller
-    // daemon's actual running status.
-    //
-    // NOTE(opus/sprack-tui): Full timestamp parsing deferred to avoid adding
-    // a datetime dependency. The poller writes heartbeats every 1-2 seconds,
-    // so any heartbeat means the poller was running recently.
-    !timestamp.is_empty()
+    let heartbeat_epoch = match sprack_db::write::parse_iso8601_to_epoch(timestamp) {
+        Some(epoch) => epoch,
+        None => return false,
+    };
+    let now_epoch = sprack_db::write::now_epoch_secs();
+    now_epoch.saturating_sub(heartbeat_epoch) <= HEARTBEAT_STALE_THRESHOLD_SECS
 }
 
 #[cfg(test)]
@@ -211,12 +207,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_is_heartbeat_fresh_nonempty_is_fresh() {
-        assert!(is_heartbeat_fresh("2026-03-21 12:00:00"));
+    fn test_is_heartbeat_fresh_current_timestamp() {
+        let now = sprack_db::write::now_iso8601();
+        assert!(is_heartbeat_fresh(&now));
+    }
+
+    #[test]
+    fn test_is_heartbeat_fresh_old_timestamp_is_stale() {
+        // A timestamp from the past is stale.
+        assert!(!is_heartbeat_fresh("2020-01-01T00:00:00Z"));
     }
 
     #[test]
     fn test_is_heartbeat_fresh_empty_is_stale() {
         assert!(!is_heartbeat_fresh(""));
+    }
+
+    #[test]
+    fn test_is_heartbeat_fresh_invalid_format_is_stale() {
+        assert!(!is_heartbeat_fresh("not-a-timestamp"));
     }
 }

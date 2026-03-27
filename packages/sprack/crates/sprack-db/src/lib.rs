@@ -456,7 +456,37 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // === 14. WAL verification ===
+    // === 14. ISO 8601 timestamp round-trip ===
+
+    #[test]
+    fn test_now_iso8601_round_trips_through_parse() {
+        let now_str = write::now_iso8601();
+        let now_epoch = write::now_epoch_secs();
+        let parsed_epoch = write::parse_iso8601_to_epoch(&now_str);
+        assert!(parsed_epoch.is_some());
+        // The two epoch values should be identical or within 1 second
+        // (now_iso8601 and now_epoch_secs are separate calls).
+        let delta = now_epoch.abs_diff(parsed_epoch.unwrap());
+        assert!(delta <= 1, "epoch delta was {delta}");
+    }
+
+    #[test]
+    fn test_parse_iso8601_known_value() {
+        // 2026-01-01T00:00:00Z = Unix epoch + 56 years worth of days.
+        let epoch = write::parse_iso8601_to_epoch("2026-01-01T00:00:00Z");
+        assert!(epoch.is_some());
+        // 2026-01-01 = 20454 days since 1970-01-01 (verified externally).
+        assert_eq!(epoch.unwrap(), 20454 * 86400);
+    }
+
+    #[test]
+    fn test_parse_iso8601_rejects_invalid() {
+        assert!(write::parse_iso8601_to_epoch("").is_none());
+        assert!(write::parse_iso8601_to_epoch("not a timestamp").is_none());
+        assert!(write::parse_iso8601_to_epoch("2026-01-01 00:00:00").is_none()); // space instead of T, no Z
+    }
+
+    // === 15. WAL verification ===
 
     #[test]
     fn test_wal_verification_with_file_based_db() {

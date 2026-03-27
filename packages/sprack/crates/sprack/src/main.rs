@@ -172,7 +172,12 @@ fn install_panic_hook() {
     }));
 }
 
-/// Opens the database, starting sprack-poll and waiting if the DB doesn't exist.
+/// Opens the database and ensures daemons are running.
+///
+/// When a custom DB path is given, opens it directly without daemon management.
+/// Otherwise, opens or waits for the default DB, starting daemons if needed.
+/// Always checks daemon health when using the default path, even if the DB
+/// already exists: daemons may have died since the DB was last written.
 fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Connection> {
     // If a custom path was given, try to open it directly.
     if let Some(path) = db_path {
@@ -184,7 +189,12 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
     let default_path = daemon::default_db_path()?;
     if default_path.exists() {
         match sprack_db::open_db_readonly(None) {
-            Ok(conn) => return Ok(conn),
+            Ok(conn) => {
+                // DB opened successfully. Ensure daemons are alive: they may have
+                // died since they last wrote to the DB.
+                ensure_daemons_running();
+                return Ok(conn);
+            }
             Err(sprack_db::SprackDbError::UnsupportedSchemaVersion(v)) => {
                 // DB was created by an older binary. Delete it so the poller
                 // recreates it with the current schema.
@@ -200,18 +210,8 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         }
     }
 
-    // DB doesn't exist or was just removed: try to start the daemons.
-    if !daemon::is_poller_running() {
-        eprintln!("sprack-poll not running, attempting to start...");
-        if let Err(err) = daemon::start_sprack_poll() {
-            eprintln!("warning: could not start sprack-poll: {err}");
-        }
-    }
-    if !daemon::is_claude_running() {
-        if let Err(err) = daemon::start_sprack_claude() {
-            eprintln!("warning: could not start sprack-claude: {err}");
-        }
-    }
+    // DB doesn't exist or was just removed: start daemons and wait for DB.
+    ensure_daemons_running();
 
     // Wait up to 5 seconds for the DB to appear with the correct schema.
     // The poller needs time to: start up, connect to tmux, query state,
@@ -260,6 +260,25 @@ fn open_or_wait_for_db(db_path: Option<&std::path::Path>) -> Result<rusqlite::Co
         "Database not found at {}. Is sprack-poll running?\nTry: cargo build && cargo run -p sprack",
         default_path.display()
     );
+}
+
+/// Ensures both sprack-poll and sprack-claude daemons are running.
+///
+/// Checks PID files for each daemon and starts any that are not alive.
+/// Errors are logged to stderr but do not prevent the TUI from starting.
+fn ensure_daemons_running() {
+    if !daemon::is_poller_running() {
+        eprintln!("sprack-poll not running, attempting to start...");
+        if let Err(err) = daemon::start_sprack_poll() {
+            eprintln!("warning: could not start sprack-poll: {err}");
+        }
+    }
+    if !daemon::is_claude_running() {
+        eprintln!("sprack-claude not running, attempting to start...");
+        if let Err(err) = daemon::start_sprack_claude() {
+            eprintln!("warning: could not start sprack-claude: {err}");
+        }
+    }
 }
 
 /// Sets up the terminal: raw mode, alternate screen, mouse capture.

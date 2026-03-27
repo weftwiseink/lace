@@ -33,6 +33,11 @@ const INTEGRATION_KIND: &str = "claude_code";
 /// Poll interval between cycles.
 const POLL_INTERVAL: Duration = Duration::from_millis(2000);
 
+/// How often to force a tail_read instead of incremental_read, in poll cycles.
+/// At 2-second poll intervals, 5 cycles = ~10 seconds. This catches state
+/// transitions that incremental reading missed (e.g., stale stop_reason: null).
+const TAIL_READ_REFRESH_INTERVAL: u32 = 5;
+
 /// How often to check for signals during a wait.
 const SIGNAL_CHECK_GRANULARITY: Duration = Duration::from_millis(50);
 
@@ -179,8 +184,13 @@ fn process_claude_pane(
         None => return,
     };
 
-    // Read new entries.
-    let entries = if session_state.file_position == 0 {
+    // Read new entries. Periodically force a full tail_read to catch state
+    // transitions that incremental reading may have missed (e.g., stale
+    // stop_reason: null cached in last_entries when no new data arrives).
+    session_state.poll_cycle_count += 1;
+    let force_tail_read = session_state.poll_cycle_count % TAIL_READ_REFRESH_INTERVAL == 0;
+
+    let entries = if session_state.file_position == 0 || force_tail_read {
         let entries = jsonl::tail_read(&session_state.session_file, jsonl::default_tail_bytes());
         session_state.file_position = std::fs::metadata(&session_state.session_file)
             .map(|m| m.len())
@@ -440,6 +450,7 @@ fn resolve_session_for_pane(
         git_commit_short: None,
         git_worktrees_mtime: None,
         git_worktree_branches: None,
+        poll_cycle_count: 0,
     })
 }
 

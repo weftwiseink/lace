@@ -113,6 +113,7 @@ impl PaneResolver for LocalResolver {
             git_commit_short: None,
             git_worktrees_mtime: None,
             git_worktree_branches: None,
+            poll_cycle_count: 0,
         })
     }
 }
@@ -212,6 +213,7 @@ fn resolve_container_pane_via_mount(
                 git_commit_short: None,
                 git_worktrees_mtime: None,
                 git_worktree_branches: None,
+                poll_cycle_count: 0,
             });
         }
     }
@@ -239,6 +241,7 @@ fn resolve_container_pane_via_mount(
         git_commit_short: None,
         git_worktrees_mtime: None,
         git_worktree_branches: None,
+        poll_cycle_count: 0,
     })
 }
 

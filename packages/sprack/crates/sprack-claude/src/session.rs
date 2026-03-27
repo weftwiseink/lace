@@ -96,6 +96,10 @@ pub struct SessionFileState {
     pub git_worktrees_mtime: Option<std::time::SystemTime>,
     /// Cached worktree branch names (other branches, excluding current).
     pub git_worktree_branches: Option<Vec<String>>,
+    /// Poll cycle counter for periodic tail_read refresh.
+    /// Every N cycles, a full tail_read replaces incremental_read to catch
+    /// state transitions that incremental reading may have missed.
+    pub poll_cycle_count: u32,
 }
 
 /// Result of resolving a session file: the path and optional user-set session name.
@@ -370,6 +374,7 @@ mod tests {
             git_commit_short: None,
             git_worktrees_mtime: None,
             git_worktree_branches: None,
+            poll_cycle_count: 0,
         };
 
         assert!(state.hook_transcript_path.is_none());
@@ -400,6 +405,7 @@ mod tests {
             git_commit_short: None,
             git_worktrees_mtime: None,
             git_worktree_branches: None,
+            poll_cycle_count: 0,
         };
 
         // Simulate receiving a SessionStart hook event with a different transcript_path.

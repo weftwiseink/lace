@@ -16,7 +16,7 @@ dirty=$?
 
 printf '{"ts":"%s","container_name":"%s","workdir":"%s","git_branch":"%s","git_commit_short":"%s","git_dirty":%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    "${HOSTNAME:-unknown}" \
+    "${HOSTNAME:-$(hostname 2>/dev/null || echo unknown)}" \
     "$PWD" \
     "$branch" \
     "$commit" \

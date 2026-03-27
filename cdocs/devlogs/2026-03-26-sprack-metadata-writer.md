@@ -73,6 +73,22 @@ Nushell's `$env.config.hooks.pre_prompt` accepts closures; we append one that ca
 > The user's nushell config (or chezmoi-managed dotfiles) must explicitly source this file.
 > This is consistent with how lace-fundamentals handles nushell: the feature sets the shell, but config comes from dotfiles.
 
+## Mount Auto-Creation Investigation
+
+The user reported a potential bug: the mount resolver should `mkdir -p` the source directory when `${lace.projectName}` is used with `sourceMustBe: "directory"`.
+
+Investigation shows this is already implemented correctly in `resolveValidatedSource()` (mount-resolver.ts line 343):
+```
+if (decl.sourceMustBe === "directory" && !existsSync(expandedPath) && !expandedPath.includes("${"))
+```
+The auto-creation:
+1. Only applies to `sourceMustBe: "directory"` (not files).
+2. Skips paths with unresolved `${...}` variables.
+3. Creates recursively with `mkdirSync(expandedPath, { recursive: true })`.
+
+The test suite has an explicit test case ("auto-creates recommended directory source when it does not exist") at line 1072 that verifies this behavior.
+All 61 mount-resolver tests pass.
+
 ## Issues Encountered and Solved
 
 (Updated as implementation proceeds.)

@@ -114,6 +114,8 @@ export interface UpOptions {
   skipValidation?: boolean;
   /** Force rebuild of prebuild image (bypass cache) */
   rebuild?: boolean;
+  /** Validate only: skip prebuild and devcontainer phases (for `lace validate`). */
+  validateOnly?: boolean;
 }
 
 // Documented in CONTRIBUTING.md -- update if changing this pattern
@@ -158,6 +160,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     cacheDir,
     skipValidation = false,
     rebuild = false,
+    validateOnly = false,
   } = options;
 
   const runLog = new RunLog(workspaceFolder, devcontainerArgs);
@@ -896,8 +899,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
-  // Phase: Prebuild (if configured)
-  if (hasPrebuildFeatures) {
+  // Phase: Prebuild (if configured, skipped in validateOnly mode)
+  if (hasPrebuildFeatures && !validateOnly) {
     console.log("Running prebuild...");
     // Pass merged prebuild features (includes user features) to avoid re-reading source file
     const mergedPrebuild = extractPrebuildFeatures(configMinimal.raw);
@@ -1018,8 +1021,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
 
   // Phase: Invoke devcontainer up
-  if (skipDevcontainerUp) {
-    result.message = "lace up completed (devcontainer up skipped)";
+  if (skipDevcontainerUp || validateOnly) {
+    result.message = validateOnly
+      ? "Validation passed."
+      : "lace up completed (devcontainer up skipped)";
     return result;
   }
 

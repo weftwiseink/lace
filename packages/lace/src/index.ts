@@ -5,6 +5,7 @@ import { resolveMountsCommand } from "@/commands/resolve-mounts";
 import { restoreCommand } from "@/commands/restore";
 import { statusCommand } from "@/commands/status";
 import { upCommand } from "@/commands/up";
+import { validateCommand } from "@/commands/validate";
 
 const main = defineCommand({
   meta: {
@@ -18,6 +19,7 @@ const main = defineCommand({
     restore: restoreCommand,
     status: statusCommand,
     up: upCommand,
+    validate: validateCommand,
   },
 });
 

@@ -962,6 +962,81 @@ describe("MountPathResolver — re-resolves validated mounts when source disappe
   });
 });
 
+// ── Stale non-validated mount re-resolution (load-time existsSync check) ──
+
+describe("MountPathResolver — discards non-override assignments when source path is gone", () => {
+  it("discards non-override entry with non-existent path, re-derives on resolveSource", () => {
+    trackProjectMountsDir(workspaceFolder);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const goneDir = join(testDir, "deleted-dir");
+    // Do NOT create goneDir: it should not exist
+
+    // Persist a stale assignment pointing to a directory that doesn't exist
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const staleAssignments: MountAssignmentsFile = {
+      assignments: {
+        "myns/data": {
+          label: "myns/data",
+          resolvedSource: goneDir,
+          isOverride: false,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(staleAssignments, null, 2),
+      "utf-8",
+    );
+
+    // Create resolver — load() should discard the stale entry and warn
+    const resolver = new MountPathResolver(workspaceFolder, {});
+    const result = resolver.resolveSource("myns/data");
+
+    // Should have re-derived to the default path (not the gone dir)
+    expect(result).not.toBe(goneDir);
+    expect(existsSync(result)).toBe(true);
+
+    // Should have warned about the stale path
+    const warnings = warnSpy.mock.calls.map(c => c[0]);
+    expect(warnings.some((w: string) => w.includes("source no longer exists") && w.includes("myns/data"))).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it("preserves override entry even when source path does not exist (validated at resolveSource time)", () => {
+    const goneDir = join(testDir, "deleted-override-dir");
+    // Do NOT create goneDir
+
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const assignments: MountAssignmentsFile = {
+      assignments: {
+        "myns/data": {
+          label: "myns/data",
+          resolvedSource: goneDir,
+          isOverride: true,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(assignments, null, 2),
+      "utf-8",
+    );
+
+    // Override entries are preserved at load time (validated later in resolveSource)
+    const resolver = new MountPathResolver(workspaceFolder, {});
+    const allAssignments = resolver.getAssignments();
+    expect(allAssignments.length).toBe(1);
+    expect(allAssignments[0].resolvedSource).toBe(goneDir);
+    expect(allAssignments[0].isOverride).toBe(true);
+  });
+});
+
 // ── Container variable resolution ──
 
 describe("MountPathResolver — container variable resolution", () => {

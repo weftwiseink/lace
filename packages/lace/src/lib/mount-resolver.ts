@@ -162,6 +162,17 @@ export class MountPathResolver {
           );
           continue; // Skip stale entry — will be re-resolved on next resolveSource()
         }
+        // Staleness detection: non-override assignment points to a path that
+        // no longer exists on disk. Discard so resolveSource() re-derives and
+        // auto-creates the directory. The sourceMustBe case is handled
+        // separately in resolveSource() which checks existsSync at call time.
+        if (!assignment.isOverride && !existsSync(assignment.resolvedSource)) {
+          console.warn(
+            `Warning: Mount "${label}" source no longer exists: ${assignment.resolvedSource}. ` +
+              `Re-deriving on next resolution.`,
+          );
+          continue;
+        }
         this.assignments.set(label, assignment);
       }
     } catch {

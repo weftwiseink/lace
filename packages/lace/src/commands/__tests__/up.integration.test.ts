@@ -2615,3 +2615,48 @@ describe("lace up: T13b -- custom --name in runArgs targets correct container", 
     expect(dockerExecCall!.args[1]).toBe("my-custom");
   });
 });
+
+// ── Debug log and footer integration tests ──
+
+describe("lace up: debug log persistence", () => {
+  it("returns logPath on success", async () => {
+    setupWorkspace(
+      JSON.stringify({ image: "node:24-bookworm" }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.logPath).toBeDefined();
+    expect(result.logPath).toContain(".lace/logs/");
+    // Log file should exist on disk
+    expect(existsSync(result.logPath!)).toBe(true);
+  });
+
+  it("returns logPath on failure", async () => {
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          "source=/nonexistent/path/for/log/test,target=/mnt/data,type=bind",
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.logPath).toBeDefined();
+    expect(existsSync(result.logPath!)).toBe(true);
+  });
+});

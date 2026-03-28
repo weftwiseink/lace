@@ -3,6 +3,7 @@ import { defineCommand } from "citty";
 import { runUp, type UpOptions } from "@/lib/up";
 import { runSubprocess as defaultRunSubprocess } from "@/lib/subprocess";
 import { getPodmanCommand } from "@/lib/container-runtime";
+import { formatDebugFooter } from "@/lib/debug-footer";
 
 /**
  * Quick check: is a container running for this workspace folder?
@@ -119,6 +120,16 @@ export const upCommand = defineCommand({
       containerMayBeRunning,
     };
     console.error(`LACE_RESULT: ${JSON.stringify(laceResult)}`);
+
+    // Emit agent-friendly debugging footer on failure
+    if (result.exitCode !== 0 && failedPhase) {
+      console.error("");
+      console.error(formatDebugFooter({
+        logPath: result.logPath,
+        failedPhase,
+        workspaceFolder,
+      }));
+    }
 
     process.exitCode = result.exitCode;
   },

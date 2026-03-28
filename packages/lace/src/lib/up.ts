@@ -61,6 +61,7 @@ import {
   deleteRuntimeFingerprint,
 } from "./config-drift";
 import { getPodmanCommand } from "./container-runtime";
+import { RunLog } from "./run-log";
 
 /**
  * Query the container runtime for host ports held by this workspace's running container.
@@ -119,6 +120,8 @@ export interface UpOptions {
 export interface UpResult {
   exitCode: number;
   message: string;
+  /** Absolute path to the run log file, if log persistence succeeded. */
+  logPath?: string;
   phases: {
     workspaceLayout?: { exitCode: number; message: string };
     hostValidation?: { exitCode: number; message: string };
@@ -157,11 +160,34 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     rebuild = false,
   } = options;
 
+  const runLog = new RunLog(workspaceFolder, devcontainerArgs);
+
   const result: UpResult = {
     exitCode: 0,
     message: "",
+    logPath: runLog.getLogPath(),
     phases: {},
   };
+
+  /** Finalize the run log before returning. Wraps in try/catch: never affects result. */
+  function finalizeLog(): void {
+    try {
+      // Log all recorded phases from result
+      for (const [name, phase] of Object.entries(result.phases)) {
+        if (!phase) continue;
+        runLog.logPhase({
+          name,
+          status: phase.exitCode === 0 ? "pass" : "fail",
+          message: "message" in phase ? (phase as { message: string }).message : undefined,
+        });
+      }
+      runLog.finalize({ exitCode: result.exitCode, message: result.message });
+    } catch {
+      // Never affect the caller
+    }
+  }
+
+  try {
 
   const devcontainerPath = join(
     workspaceFolder,
@@ -668,6 +694,19 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     return result;
   }
 
+  // Record config summary in the run log
+  if (templateResult) {
+    const summaryParts: string[] = [];
+    if (templateResult.allocations.length > 0) {
+      summaryParts.push(`ports: ${templateResult.allocations.map(a => `${a.label}=${a.port}`).join(", ")}`);
+    }
+    if (templateResult.mountAssignments.length > 0) {
+      summaryParts.push(`mounts: ${templateResult.mountAssignments.map(a => `${a.label}=${a.resolvedSource}`).join(", ")}`);
+    }
+    if (summaryParts.length > 0) {
+      runLog.setConfigSummary(summaryParts.join("\n"));
+    }
+  }
 
   // ── Phase 3+: Inferred mount validation ──
   // After template resolution, scan resolved mounts for missing bind-mount sources.
@@ -995,6 +1034,16 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   result.phases.devcontainerUp = upResult;
 
+  // Capture devcontainerUp stderr for the run log
+  if (upResult.stderr) {
+    runLog.logSubprocess({
+      phase: "devcontainerUp",
+      command: "devcontainer up",
+      exitCode: upResult.exitCode,
+      stderr: upResult.stderr,
+    });
+  }
+
   if (upResult.exitCode !== 0) {
     result.exitCode = upResult.exitCode;
     result.message = `devcontainer up failed: ${upResult.stderr}`;
@@ -1075,6 +1124,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   result.message = "lace up completed successfully";
   return result;
+
+  } finally {
+    finalizeLog();
+  }
 }
 
 interface GenerateExtendedConfigOptions {

@@ -2166,7 +2166,7 @@ describe("lace up: host validation — no validate config", () => {
 // ── Inferred mount validation integration tests ──
 
 describe("lace up: inferred mount validation — fails on missing bind-mount source", () => {
-  it("throws error for missing source with actionable guidance", async () => {
+  it("shows static mount fallback format for unlabeled mounts", async () => {
     setupWorkspace(
       JSON.stringify({
         image: "node:24-bookworm",
@@ -2187,7 +2187,48 @@ describe("lace up: inferred mount validation — fails on missing bind-mount sou
     expect(result.message).toContain("Bind mount source(s) do not exist on host");
     expect(result.message).toContain("/nonexistent/path/that/does/not/exist");
     expect(result.message).toContain("target: /mnt/data");
-    expect(result.message).toContain("settings.json");
+    expect(result.message).toContain("static mount entry");
+    expect(result.message).toContain("fix: mkdir -p");
+    expect(result.phases.mountValidation).toBeDefined();
+    expect(result.phases.mountValidation!.exitCode).toBe(1);
+  });
+
+  it("shows attributed format with label and feature for declared mounts", async () => {
+    // Set up a workspace with a feature that declares a mount with sourceMustBe: "file".
+    // File-type validated mounts are NOT auto-created, so the source won't exist
+    // and validation will fail at Phase 7.5 (sourceMustBe validation).
+    const missingFile = "/nonexistent/path/that/does/not/exist.key";
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            mounts: {
+              config: {
+                target: "/mnt/config",
+                recommendedSource: missingFile,
+                sourceMustBe: "file",
+                description: "Required config file",
+                hint: "touch " + missingFile,
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    // Fails at Phase 7.5 (sourceMustBe validation), not the post-resolution scan.
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("project");
+    expect(result.message).toContain(missingFile);
+    expect(result.message).toContain("file");
   });
 });
 

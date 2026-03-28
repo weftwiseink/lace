@@ -125,6 +125,7 @@ export interface UpResult {
     portAssignment?: { exitCode: number; message: string; port?: number };
     metadataValidation?: { exitCode: number; message: string };
     templateResolution?: { exitCode: number; message: string };
+    mountValidation?: { exitCode: number; message: string };
     prebuild?: { exitCode: number; message: string };
     resolveMounts?: { exitCode: number; message: string };
     generateConfig?: { exitCode: number; message: string };
@@ -676,7 +677,16 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   {
     const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
     const resolvedMounts = (resolvedConfig.mounts ?? []) as string[];
-    const missingMounts: Array<{ source: string; target: string }> = [];
+    const mountAssignments = templateResult?.mountAssignments ?? [];
+
+    interface MissingMount {
+      source: string;
+      target: string;
+      label?: string;
+      declaration?: import("./feature-metadata").LaceMountDeclaration;
+    }
+
+    const missingMounts: MissingMount[] = [];
     for (const mount of resolvedMounts) {
       if (!mount.includes('type=bind')) continue;
       const sourceMatch = mount.match(/source=([^,]+)/);
@@ -686,18 +696,34 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       if (source.includes('${')) continue; // Skip devcontainer variables
       if (!existsSync(source)) {
         const target = targetMatch?.[1] ?? 'unknown';
-        missingMounts.push({ source, target });
+        // Cross-reference against mount assignments and declarations for attribution
+        const assignment = mountAssignments.find(a => a.resolvedSource === source);
+        const label = assignment?.label;
+        const declaration = label ? mountDeclarations[label] : undefined;
+        missingMounts.push({ source, target, label, declaration });
       }
     }
     if (missingMounts.length > 0) {
-      const details = missingMounts.map(({ source, target }) =>
-        `  • ${source}\n    target: ${target}`
-      ).join('\n');
-      const msg =
-        `Bind mount source(s) do not exist on host:\n${details}\n\n` +
-        `Create the missing path(s), or configure an override in ~/.config/lace/settings.json:\n` +
-        `  { "mounts": { "<namespace>/<label>": { "source": "/path/to/source" } } }\n\n` +
-        `To clear stale cached paths, delete .lace/mount-assignments.json and re-run.`;
+      const details = missingMounts.map(({ source, target, label, declaration }) => {
+        if (label && declaration) {
+          const featureName = label.split('/')[0];
+          const typeNote = declaration.sourceMustBe
+            ? `(sourceMustBe: ${declaration.sourceMustBe})`
+            : '(auto-created directory)';
+          const lines = [
+            `  ${label}: ${source}`,
+            `    target: ${target}`,
+            `    declared by: ${featureName} feature ${typeNote}`,
+            `    fix: mkdir -p ${source}`,
+            `         or override in ~/.config/lace/settings.json:`,
+            `           { "mounts": { "${label}": { "source": "/path/to/dir" } } }`,
+          ];
+          return lines.join('\n');
+        }
+        // Static mount (no matching label): fallback format
+        return `  ${source} (static mount entry)\n    target: ${target}\n    fix: mkdir -p ${source}`;
+      }).join('\n\n');
+      const msg = `Bind mount source(s) do not exist on host:\n\n${details}`;
       result.phases.mountValidation = { exitCode: 1, message: msg };
       result.exitCode = 1;
       result.message = msg;

@@ -2165,10 +2165,8 @@ describe("lace up: host validation — no validate config", () => {
 
 // ── Inferred mount validation integration tests ──
 
-describe("lace up: inferred mount validation — warns on missing bind-mount source", () => {
-  it("emits warning for missing source but does not fail", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
+describe("lace up: inferred mount validation — fails on missing bind-mount source", () => {
+  it("throws error for missing source with actionable guidance", async () => {
     setupWorkspace(
       JSON.stringify({
         image: "node:24-bookworm",
@@ -2185,20 +2183,11 @@ describe("lace up: inferred mount validation — warns on missing bind-mount sou
       cacheDir: metadataCacheDir,
     });
 
-    expect(result.exitCode).toBe(0);
-    // Should have warned about the missing source with Docker auto-create context
-    const warnings = warnSpy.mock.calls.map((c) => c[0]);
-    expect(
-      warnings.some(
-        (w: string) =>
-          w.includes("Bind mount source does not exist") &&
-          w.includes("/nonexistent/path/that/does/not/exist") &&
-          w.includes("target: /mnt/data") &&
-          w.includes("container runtime will auto-create this as a root-owned directory"),
-      ),
-    ).toBe(true);
-
-    warnSpy.mockRestore();
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("Bind mount source(s) do not exist on host");
+    expect(result.message).toContain("/nonexistent/path/that/does/not/exist");
+    expect(result.message).toContain("target: /mnt/data");
+    expect(result.message).toContain("settings.json");
   });
 });
 

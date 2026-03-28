@@ -245,10 +245,18 @@ export class MountPathResolver {
         (existing.isOverride && settingsOverridePath === null) ||
         // Case 3: persisted as override but settings override path changed
         (existing.isOverride && settingsOverridePath !== null && existing.resolvedSource !== settingsOverridePath);
-      if (!overrideChanged) {
+
+      // Re-resolve validated mounts when their persisted source no longer
+      // exists on disk. This catches stale assignments (e.g., directory
+      // deleted, projectName changed) and triggers fresh resolution with
+      // auto-creation and proper variable substitution.
+      const decl = this.declarations[label];
+      const sourceGone = decl?.sourceMustBe && !existing.isOverride && !existsSync(existing.resolvedSource);
+
+      if (!overrideChanged && !sourceGone) {
         return existing.resolvedSource;
       }
-      // Override state changed — fall through to re-resolve
+      // Override state changed or source gone — fall through to re-resolve
     }
 
     // Branch for validated mounts (sourceMustBe is set)

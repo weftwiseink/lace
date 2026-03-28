@@ -878,6 +878,90 @@ describe("MountPathResolver — validated mounts (sourceMustBe)", () => {
   });
 });
 
+// ── Stale validated mount re-resolution ──
+
+describe("MountPathResolver — re-resolves validated mounts when source disappears", () => {
+  it("re-resolves sourceMustBe:'directory' mount when persisted path no longer exists", () => {
+    const staleDir = join(testDir, "gone-dir");
+    const freshDir = join(testDir, "fresh-dir");
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: freshDir,
+        sourceMustBe: "directory",
+      },
+    };
+
+    // Persist a stale assignment pointing to a directory that doesn't exist
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const staleAssignments: MountAssignmentsFile = {
+      assignments: {
+        "sprack/data": {
+          label: "sprack/data",
+          resolvedSource: staleDir,
+          isOverride: false,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(staleAssignments, null, 2),
+      "utf-8",
+    );
+
+    // Create resolver — should detect stale source, re-resolve, and auto-create
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("sprack/data");
+
+    // Should resolve to the recommendedSource, not the stale path
+    expect(result).toBe(freshDir);
+    expect(result).not.toBe(staleDir);
+    // Auto-creation should have created the directory
+    expect(existsSync(freshDir)).toBe(true);
+  });
+
+  it("returns cached assignment when validated mount source still exists", () => {
+    const existingDir = join(testDir, "existing-dir");
+    mkdirSync(existingDir, { recursive: true });
+
+    const declarations: Record<string, LaceMountDeclaration> = {
+      "sprack/data": {
+        target: "/mnt/sprack",
+        recommendedSource: join(testDir, "other-dir"),
+        sourceMustBe: "directory",
+      },
+    };
+
+    // Persist a valid assignment
+    const persistDir = join(workspaceFolder, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const assignments: MountAssignmentsFile = {
+      assignments: {
+        "sprack/data": {
+          label: "sprack/data",
+          resolvedSource: existingDir,
+          isOverride: false,
+          assignedAt: new Date().toISOString(),
+        },
+      },
+    };
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify(assignments, null, 2),
+      "utf-8",
+    );
+
+    const resolver = new MountPathResolver(workspaceFolder, {}, declarations);
+    const result = resolver.resolveSource("sprack/data");
+
+    // Should return cached path since it still exists
+    expect(result).toBe(existingDir);
+  });
+});
+
 // ── Container variable resolution ──
 
 describe("MountPathResolver — container variable resolution", () => {

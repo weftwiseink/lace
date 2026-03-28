@@ -670,10 +670,13 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   // ── Phase 3+: Inferred mount validation ──
   // After template resolution, scan resolved mounts for missing bind-mount sources.
-  // These are warnings only — the container runtime auto-creates missing directory sources.
+  // Hard error: podman with --userns=keep-id fails on missing sources (statfs ENOENT),
+  // and even when the runtime auto-creates them, the result is a root-owned directory
+  // that causes permission issues. Fail early with actionable guidance.
   {
     const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
     const resolvedMounts = (resolvedConfig.mounts ?? []) as string[];
+    const missingMounts: Array<{ source: string; target: string }> = [];
     for (const mount of resolvedMounts) {
       if (!mount.includes('type=bind')) continue;
       const sourceMatch = mount.match(/source=([^,]+)/);
@@ -683,11 +686,22 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       if (source.includes('${')) continue; // Skip devcontainer variables
       if (!existsSync(source)) {
         const target = targetMatch?.[1] ?? 'unknown';
-        console.warn(
-          `Warning: Bind mount source does not exist: ${source} (target: ${target})\n` +
-          `  → The container runtime will auto-create this as a root-owned directory, which may cause permission issues.`,
-        );
+        missingMounts.push({ source, target });
       }
+    }
+    if (missingMounts.length > 0) {
+      const details = missingMounts.map(({ source, target }) =>
+        `  • ${source}\n    target: ${target}`
+      ).join('\n');
+      const msg =
+        `Bind mount source(s) do not exist on host:\n${details}\n\n` +
+        `Create the missing path(s), or configure an override in ~/.config/lace/settings.json:\n` +
+        `  { "mounts": { "<namespace>/<label>": { "source": "/path/to/source" } } }\n\n` +
+        `To clear stale cached paths, delete .lace/mount-assignments.json and re-run.`;
+      result.phases.mountValidation = { exitCode: 1, message: msg };
+      result.exitCode = 1;
+      result.message = msg;
+      return result;
     }
     // Also check workspaceMount if it's a concrete bind mount
     const wsMount = resolvedConfig.workspaceMount;

@@ -53,6 +53,7 @@ export const validateCommand = defineCommand({
       console.error(formatDebugFooter({
         logPath: result.logPath,
         failedPhase,
+        projectName: result.projectName,
         workspaceFolder,
       }));
     }

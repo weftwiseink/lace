@@ -127,6 +127,7 @@ export const upCommand = defineCommand({
       console.error(formatDebugFooter({
         logPath: result.logPath,
         failedPhase,
+        projectName: result.projectName,
         workspaceFolder,
       }));
     }

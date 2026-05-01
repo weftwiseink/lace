@@ -2660,3 +2660,254 @@ describe("lace up: debug log persistence", () => {
     expect(existsSync(result.logPath!)).toBe(true);
   });
 });
+
+// ── End-to-end error scenario tests ──
+
+describe("lace up: end-to-end error scenarios", () => {
+  // Scenario 1: Missing declared mount source (full flow)
+  // A sourceMustBe: "file" declaration with a nonexistent recommendedSource triggers
+  // Phase 7.5 (sourceMustBe validation). File mounts are NOT auto-created, so the
+  // mount fails with full attribution including feature name, settings.json guidance,
+  // and a remediation hint.
+  it("Scenario 1: missing declared mount source produces attributed error with log", async () => {
+    const missingFile = "/nonexistent/e2e/scenario1/required.key";
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            mounts: {
+              sshkey: {
+                target: "/home/node/.ssh/id_ed25519",
+                recommendedSource: missingFile,
+                sourceMustBe: "file",
+                description: "SSH private key for git operations",
+                hint: "ssh-keygen -t ed25519 -f " + missingFile,
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    // Should fail at Phase 7.5 (sourceMustBe validation)
+    expect(result.exitCode).toBe(1);
+
+    // Attribution: the label namespace is "project" (from extractProjectMountDeclarations)
+    expect(result.message).toContain("project");
+    expect(result.message).toContain(missingFile);
+    expect(result.message).toContain("file");
+
+    // Remediation hint from the declaration
+    expect(result.message).toContain("ssh-keygen");
+
+    // Settings.json guidance is included
+    expect(result.message).toContain("settings.json");
+
+    // Log file exists and captures the failure
+    expect(result.logPath).toBeDefined();
+    expect(existsSync(result.logPath!)).toBe(true);
+
+    const logContent = readFileSync(result.logPath!, "utf-8");
+    // The failing phase is recorded as templateResolution in the log
+    expect(logContent).toContain("templateResolution: fail");
+  });
+
+  // Scenario 2: Stale persisted assignment recovery
+  // A non-override mount-assignments.json entry pointing to a deleted directory
+  // is discarded at load() time. The mount is re-resolved to a fresh default path
+  // and the run succeeds.
+  it("Scenario 2: stale persisted assignment is discarded and re-resolved", async () => {
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            mounts: {
+              data: {
+                target: "/mnt/data",
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    // Write a mount-assignments.json with a non-override entry pointing to a gone path
+    const persistDir = join(workspaceRoot, ".lace");
+    mkdirSync(persistDir, { recursive: true });
+    const goneDir = join(workspaceRoot, "deleted-mount-source");
+    // Do NOT create goneDir: it doesn't exist on disk
+    writeFileSync(
+      join(persistDir, "mount-assignments.json"),
+      JSON.stringify({
+        assignments: {
+          "project/data": {
+            label: "project/data",
+            resolvedSource: goneDir,
+            isOverride: false,
+            assignedAt: new Date().toISOString(),
+          },
+        },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await runUp({
+        workspaceFolder: workspaceRoot,
+        subprocess: createMock(),
+        skipDevcontainerUp: true,
+        cacheDir: metadataCacheDir,
+      });
+
+      // Auto-recovery: stale entry discarded, fresh path derived and auto-created
+      expect(result.exitCode).toBe(0);
+
+      // A warning was logged about the stale path
+      const warnings = warnSpy.mock.calls.map((c) => c[0]);
+      expect(
+        warnings.some(
+          (w: string) =>
+            typeof w === "string" &&
+            w.includes("source no longer exists") &&
+            w.includes("project/data"),
+        ),
+      ).toBe(true);
+
+      // Log file exists and shows all phases passed
+      expect(result.logPath).toBeDefined();
+      expect(existsSync(result.logPath!)).toBe(true);
+
+      const logContent = readFileSync(result.logPath!, "utf-8");
+      // No "fail" status in the phases section (all should be "pass")
+      const phasesSection = logContent.split("── phases ──")[1]?.split("──")[0] ?? "";
+      expect(phasesSection).not.toContain(": fail");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  // Scenario 3: Multiple missing static bind mounts
+  // Two static bind mount strings in mounts:[] point to nonexistent paths.
+  // Phase 3+ (inferred mount validation) reports BOTH in a single error, each
+  // with the "static mount entry" fallback format.
+  it("Scenario 3: multiple missing static mounts are all reported", async () => {
+    const missingA = "/nonexistent/e2e/scenario3/volume-a";
+    const missingB = "/nonexistent/e2e/scenario3/volume-b";
+
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        mounts: [
+          `source=${missingA},target=/mnt/alpha,type=bind`,
+          `source=${missingB},target=/mnt/beta,type=bind`,
+        ],
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    expect(result.exitCode).toBe(1);
+
+    // Both missing sources are reported in the error
+    expect(result.message).toContain(missingA);
+    expect(result.message).toContain(missingB);
+
+    // Both use the static mount fallback format
+    expect(result.message).toContain("static mount entry");
+
+    // Remediation guidance for each
+    expect(result.message).toContain("fix: mkdir -p");
+
+    // Target paths are shown for context
+    expect(result.message).toContain("target: /mnt/alpha");
+    expect(result.message).toContain("target: /mnt/beta");
+
+    // The mountValidation phase captured the error
+    expect(result.phases.mountValidation).toBeDefined();
+    expect(result.phases.mountValidation!.exitCode).toBe(1);
+
+    // Log file captures the failure
+    expect(result.logPath).toBeDefined();
+    expect(existsSync(result.logPath!)).toBe(true);
+
+    const logContent = readFileSync(result.logPath!, "utf-8");
+    expect(logContent).toContain("mountValidation: fail");
+  });
+
+  // Scenario 4: `lace validate` catches mount error (validateOnly mode)
+  // Same setup as Scenario 1 but with validateOnly: true. The error output
+  // is identical, and the prebuild phase is skipped entirely.
+  it("Scenario 4: validateOnly catches mount error without attempting prebuild", async () => {
+    const missingFile = "/nonexistent/e2e/scenario4/cert.pem";
+    setupWorkspace(
+      JSON.stringify({
+        image: "node:24-bookworm",
+        customizations: {
+          lace: {
+            mounts: {
+              cert: {
+                target: "/etc/ssl/certs/custom.pem",
+                recommendedSource: missingFile,
+                sourceMustBe: "file",
+                description: "TLS certificate for internal services",
+                hint: "openssl req -x509 -newkey rsa:2048 -keyout /dev/null -out " + missingFile + " -days 365 -nodes",
+              },
+            },
+            // Add a prebuild feature to verify it is NOT invoked
+            prebuildFeatures: {
+              "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await runUp({
+      workspaceFolder: workspaceRoot,
+      subprocess: createMock(),
+      validateOnly: true,
+      skipDevcontainerUp: true,
+      cacheDir: metadataCacheDir,
+    });
+
+    // Same error quality as Scenario 1
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("project");
+    expect(result.message).toContain(missingFile);
+    expect(result.message).toContain("file");
+    expect(result.message).toContain("settings.json");
+
+    // Prebuild was NOT attempted (validateOnly skips it)
+    expect(result.phases.prebuild).toBeUndefined();
+
+    // devcontainer up was NOT attempted
+    expect(mockCalls).not.toContainEqual(
+      expect.objectContaining({
+        command: "devcontainer",
+        args: expect.arrayContaining(["up"]),
+      }),
+    );
+
+    // Log file still captures the validation failure
+    expect(result.logPath).toBeDefined();
+    expect(existsSync(result.logPath!)).toBe(true);
+
+    const logContent = readFileSync(result.logPath!, "utf-8");
+    expect(logContent).toContain("templateResolution: fail");
+  });
+});

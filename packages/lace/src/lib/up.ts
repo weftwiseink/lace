@@ -124,6 +124,8 @@ export interface UpResult {
   message: string;
   /** Absolute path to the run log file, if log persistence succeeded. */
   logPath?: string;
+  /** Derived project name (e.g., "whelm"). Available after workspace classification. */
+  projectName?: string;
   phases: {
     workspaceLayout?: { exitCode: number; message: string };
     hostValidation?: { exitCode: number; message: string };
@@ -205,11 +207,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     configMinimal = readDevcontainerConfigMinimal(devcontainerPath);
   } catch (err) {
     if (err instanceof DevcontainerConfigError) {
-      return {
-        exitCode: 1,
-        message: err.message,
-        phases: {},
-      };
+      result.exitCode = 1;
+      result.message = err.message;
+      return result;
     }
     throw err;
   }
@@ -248,6 +248,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       const { classification } = classifyWorkspace(workspaceFolder);
       projectName = deriveProjectName(classification, workspaceFolder);
     }
+    result.projectName = projectName;
   }
 
   // ── Phase 0b: Host-side validation ──
@@ -889,11 +890,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       config = readDevcontainerConfig(devcontainerPath);
     } catch (err) {
       if (err instanceof DevcontainerConfigError) {
-        return {
-          exitCode: 1,
-          message: err.message,
-          phases: {},
-        };
+        result.exitCode = 1;
+        result.message = err.message;
+        return result;
       }
       throw err;
     }

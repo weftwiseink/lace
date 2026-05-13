@@ -1305,9 +1305,17 @@ function runDevcontainerUp(
   }
 
   args.push("--docker-path", getPodmanCommand());
-  // Disable BuildKit for podman compatibility. BuildKit's RUN --mount=type=bind
-  // corrupts /tmp permissions (1777 -> 755) in rootless podman/buildah, breaking
-  // apt-get GPG verification in subsequent build steps.
+  // Workaround for containers/buildah#6503: rootless podman + `--layers` (default)
+  // overlay graph driver invents /tmp at mode 755 (not the parent's 1777) when a
+  // layer blob lacks a tar entry for /tmp but includes entries underneath it.
+  // Devcontainer CLI feature install triggers this via `RUN --mount=type=bind,target=/tmp/build-features-src/...`,
+  // breaking apt-get GPG verification on subsequent feature install steps with
+  // `Couldn't create temporary file /tmp/apt.conf.XXXXX`. The defensive
+  // `RUN chmod 1777 /tmp` in the project Dockerfile may be sufficient on its own,
+  // making this flag potentially redundant; see
+  // cdocs/reports/2026-05-12-pretest-experiment-buildkit-never-drop.md for the
+  // empirical verification and cdocs/reports/2026-05-12-podman-tmp-buildkit-bug-investigation.md
+  // for the upstream tracking.
   args.push("--buildkit", "never");
   // Remove stale dev_container_feature_content_temp image and containers.
   // Without BuildKit, podman caches FROM scratch + COPY layers even when the

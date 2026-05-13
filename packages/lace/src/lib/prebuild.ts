@@ -314,9 +314,14 @@ export function runPrebuild(options: PrebuildOptions = {}): PrebuildResult {
     `Features: ${Object.keys(prebuildFeatures).join(", ")}`,
   );
 
-  // Disable BuildKit for podman compatibility. BuildKit's RUN --mount=type=bind
-  // corrupts /tmp permissions (1777 -> 755) in rootless podman/buildah, breaking
-  // apt-get GPG verification in subsequent feature installs.
+  // Workaround for containers/buildah#6503: rootless podman + `--layers` (default)
+  // overlay graph driver invents /tmp at mode 755 (not the parent's 1777) when a
+  // layer blob lacks a tar entry for /tmp but includes entries underneath it.
+  // Devcontainer CLI feature install triggers this via `RUN --mount=type=bind,target=/tmp/build-features-src/...`,
+  // breaking apt-get GPG verification on subsequent feature install steps.
+  // The defensive `RUN chmod 1777 /tmp` in the project Dockerfile may be sufficient
+  // on its own; see cdocs/reports/2026-05-12-pretest-experiment-buildkit-never-drop.md
+  // for empirical verification of whether this flag can be dropped.
   //
   // Also disable buildah layer caching via BUILDAH_LAYERS=false. Without BuildKit,
   // the devcontainer CLI builds a scratch-based content image. Podman caches

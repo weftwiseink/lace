@@ -5,49 +5,52 @@ first_authored:
 task_list: weftwise/parallel-feature-development
 type: proposal
 state: live
-status: implementation_ready
-last_reviewed:
-  status: accepted
-  by: "@claude-opus-4-7"
-  at: 2026-05-14T11:55:00-07:00
-  round: 7
+status: review_ready
 tags: [worktree, portless, parallel-development, weftwise, multi-project]
 ---
 
 # Streamlined Parallel Feature Development for Weftwise
 
-> BLUF(opus/weftwise-parallel-dev): Weftwise's `scripts/worktree.sh` gains a `dev` subcommand and the project adopts the portless container feature; lace gains a `portlessAlias` port-metadata flag that its `validate` command picks up automatically to run a generic host-port-availability check and print an informational pointer toward the future clean-URLs work.
-> Browser reaches each worktree at `http://{branch}.weftwise.localhost:<lace-allocated-port>/` concurrently, multi-project safe (each project gets its own host port).
-> Port-80 binding, host-side portless lifecycle, and clean-URL routing are out of scope for this proposal and live in the follow-up RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`.
+> BLUF(opus/weftwise-parallel-dev): Weftwise's `scripts/worktree.sh` gains a `dev` subcommand and the project adopts the portless container feature; lace runs a single shared host portless on `:1355` that routes per-project to each container portless via `portless alias`.
+> Browser reaches each worktree at `http://{branch}.{project}.localhost:1355/` concurrently, multi-project safe under one shared port.
+> Port-80 binding (and the sysctl/setcap surface it entails) plus HTTPS via `portless trust` are deferred to the follow-up RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`.
+
+> NOTE(opus/weftwise-parallel-dev): An earlier round-7-accepted iteration scoped per-project host portless instances with per-project host port allocations (URLs like `http://main.weftwise.localhost:22435/`).
+> That broke the "single shared URL space" utility of portless: each project carried a distinct port suffix in its bookmarks.
+> The design absorbs the host-portless lifecycle work previously scoped to `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`, using port 1355 instead of 80 to sidestep sysctl/unprivileged-port concerns.
+> The truly-portless-portless RFP narrows to port-80 binding specifically.
 
 ## Overview
 
-Three things change to deliver parallel-worktree dev (with port-suffix URLs in v1):
+Five things change to deliver parallel-worktree dev under one shared host port:
 
 1. Weftwise's `scripts/worktree.sh` gains a `dev` subcommand: install-on-missing, derive branch from `$PWD`, exec `portless {branch}.weftwise.localhost pnpm dev`.
 2. Weftwise adds portless to top-level `features` (one-line `devcontainer.json` change). The container portless does intra-container Host-header demux.
-3. Lace adds a `portlessAlias?: boolean` port-metadata flag and extends `validate` to check host-port availability and print an informational message when the active config carries that flag. No new commands; no sudo; no durable host state.
+3. Lace adds a `portlessAlias?: boolean` port-metadata flag. Its presence on a port declaration drives the host-side alias shellout.
+4. Lace bundles `portless` as a runtime dependency and owns the host portless lifecycle: probe, spawn-if-absent, reuse across `lace up` runs, teardown.
+5. Lace `validate` runs a generic host-port-availability check on the allocated host port plus port 1355, and reports the URL pattern users should expect.
 
-URL pattern in v1: `http://{branch}.{project}.localhost:<host-port>/`, where `<host-port>` is the lace-allocated port for that project's container portless (22425-22499).
-The pattern is forward-compatible with the future clean-URL work: dropping the `<host-port>` suffix is purely a host-side routing change.
+URL pattern: `http://{branch}.{project}.localhost:1355/`.
+The host portless on `:1355` demuxes by the `{project}` segment to the project's container portless, which demuxes by the `{branch}` segment to the worktree's dev server.
 
 ## Objective
 
 1. **Parallel worktrees work.** N concurrent dev servers in the single container, each reachable from the host browser at a distinct stable URL.
 2. **New worktrees just work.** `git worktree add` then `scripts/worktree.sh dev` is the entire ceremony.
-3. **Multi-project safe.** Two projects up at the same time produce two distinct host-port URLs; no collision and no manual coordination.
-4. **Zero durable host state.** No sudo prompts, no systemd units, no global npm installs, no sysctl drop-ins. All host-side complexity is deferred to the follow-up RFP.
+3. **Single shared URL space across projects.** Every project's URLs live under `:1355`; bookmarks never carry a project-specific port suffix.
+4. **Multi-project safe.** Two projects up at the same time route correctly without collision or manual coordination.
+5. **No sysadmin coupling.** Port 1355 is unprivileged on every supported host; no sysctl drop-in, no setcap, no `sudo`. Port-80 binding lives in the follow-up RFP.
 
-Clean URLs (no port suffix) are explicitly out of scope; they are the deliverable of the follow-up RFP.
+Clean URLs on port 80 (no port suffix at all) are explicitly out of scope; that is the deliverable of the follow-up RFP.
 
 ## Background
 
 Companion documents:
 
-- `cdocs/reports/2026-05-13-worktree-portless-parallel-dev-prior-work.md` — design-space survey.
-- `cdocs/reports/2026-05-13-clean-portless-urls-fresh-eyes.md` — clean-URL approaches (relevant to the follow-up RFP).
-- `cdocs/reports/2026-05-13-weftwise-parallel-dev-decisions.md` — supplemental design decisions (D1-D12). Decisions D1-D5, D7, D11 apply to v1. Decisions D6, D8, D9, D10, D12 apply to the follow-up RFP.
-- `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md` — follow-up RFP for clean URLs via host-side portless.
+- `cdocs/reports/2026-05-13-worktree-portless-parallel-dev-prior-work.md`: design-space survey.
+- `cdocs/reports/2026-05-13-clean-portless-urls-fresh-eyes.md`: clean-URL approaches (relevant to the follow-up RFP).
+- `cdocs/reports/2026-05-13-weftwise-parallel-dev-decisions.md`: supplemental design decisions (D1-D12). Decisions D1-D5, D7, D8, D9, D11 apply to v1. Decisions D6, D10, D12 apply to the follow-up RFP.
+- `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`: follow-up RFP for port-80 binding.
 
 Load-bearing facts:
 
@@ -71,15 +74,12 @@ Load-bearing facts:
 | `extractLaceCustomizations` | `packages/lace/src/lib/feature-metadata.ts:641-689` | Extended to round-trip `portlessAlias`. |
 | Weftwise `scripts/worktree.sh` | weftwise's repo | Existing `add`/`list`/`remove`/`status` subcommands; extended with `dev`. |
 
-### What is explicitly NOT being built in v1
+### What is explicitly NOT being built in this proposal
 
-- No host-side portless lifecycle (deferred to the follow-up RFP).
-- No `portless alias` shellout from lace (deferred).
-- No port-80 binding (deferred).
-- No sysctl handling, in any form (deferred).
-- No HTTPS (deferred).
-- No bundled portless dependency in lace's `package.json` (deferred to follow-up; v1 only consumes the container's portless).
-- No new lace subcommand (`doctor` / `setup` etc.); the `validate` command is extended in place.
+- No port-80 binding (deferred to the follow-up RFP).
+- No sysctl handling, in any form (deferred; port 1355 is unprivileged).
+- No setcap, no rootful podman, no other privilege-elevation paths.
+- No HTTPS via `portless trust` (separately tracked).
 - No string mode for `portlessAlias` (boolean only; future RFP may extend).
 - No `installDeps` flag, no `mergePostCreateCommand` extension, no pnpm-store bind mount, no vite config relaxation (all dropped from prior drafts).
 - No fix for the `sshPort` phantom-option bug (separately tracked).
@@ -89,38 +89,46 @@ Load-bearing facts:
 ```mermaid
 flowchart LR
   subgraph Host
-    Browser[Browser<br/>http://main.weftwise.localhost:22435/]
+    Browser[Browser<br/>http://main.weftwise.localhost:1355/<br/>http://main.whelm.localhost:1355/]
+    HP[host portless on :1355<br/>aliases:<br/>- weftwise -> :22435<br/>- whelm -> :22436]
   end
-  subgraph Container [weftwise container]
-    C_P[portless on :1355<br/>routes:<br/>- main.weftwise.localhost<br/>- feature-x.weftwise.localhost]
+  subgraph WW [weftwise container]
+    C_PW[portless on :1355<br/>routes:<br/>- main.weftwise.localhost<br/>- feature-x.weftwise.localhost]
     V_M[vite :4000 main]
     V_F[vite :4001 feature-x]
   end
-  Browser -- :22435 --> C_P
-  C_P --> V_M
-  C_P --> V_F
+  subgraph WH [whelm container]
+    C_PH[portless on :1355<br/>routes:<br/>- main.whelm.localhost]
+    V_W[vite :4000 main]
+  end
+  Browser --> HP
+  HP -- :22435 --> C_PW
+  HP -- :22436 --> C_PH
+  C_PW --> V_M
+  C_PW --> V_F
+  C_PH --> V_W
 ```
 
-The flow has three pieces. Each is detailed in Implementation Phases.
+The flow has four pieces. Each is detailed in Implementation Phases.
 
-**1. Weftwise `scripts/worktree.sh dev`** — install-on-missing + container-portless launch with the full per-branch host name.
+**1. Weftwise `scripts/worktree.sh dev`**: install-on-missing + container-portless launch with the full per-branch host name.
 
-**2. Container portless** — adopted via top-level `features`; demuxes by Host header inside the container.
+**2. Container portless**: adopted via top-level `features`; demuxes by Host header inside the container.
 
-**3. Lace `portlessAlias` metadata + `validate` extension** — schema-and-extractor widening plus a `validate` step that runs a generic host-port-availability check and prints a forward-looking informational message.
+**3. Lace `portlessAlias` metadata**: schema-and-extractor widening; the flag drives the host-side alias shellout.
 
-### `portlessAlias` v1 semantics
+**4. Lace-owned host portless on `:1355`**: bundled binary, probe-and-spawn lifecycle, `portless alias <project> <host-port>` after the container is healthy.
 
-The flag's v1 role is **marker for future tooling**.
-Its presence on a port declaration:
+### `portlessAlias` semantics
 
-- Triggers `validate` to run a generic host-port-availability check against that port's lace-allocated host port.
-- Triggers `validate` to print a one-line informational pointer to the follow-up RFP, in case the user expected clean URLs and got port-suffix ones.
+The flag's presence on a port declaration triggers two host-side behaviours during `lace up` for the project that declares it:
 
-The flag has NO `lace up` runtime effect in v1.
-Container-side behaviour is identical whether the flag is set or not (the URL is the same `http://{branch}.{project}.localhost:<host-port>/` either way).
+- Lace ensures a host portless process is running on `:1355` (spawn-if-absent, reuse otherwise).
+- After the container is healthy, lace shells out `portless alias <project> <host-allocated-port>` to register the route, where `<project>` is `deriveProjectName()` and `<host-allocated-port>` is the port lace mapped container `:1355` to.
 
-The flag is added to the portless feature manifest in v1 so the follow-up RFP doesn't have to re-touch the feature; the follow-up adds the host-side consumer.
+`validate` additionally consumes the flag for informational reporting and a host-port-availability probe (see Phase 3c).
+
+The flag is portless-coupled by name (D11); future features that want host-side aliasing via a different mechanism declare a different metadata key.
 
 ## Implementation Phases
 
@@ -130,7 +138,7 @@ Four phases. Phases 1-3 are largely independent. Phase 4 is end-to-end validatio
 flowchart LR
   P1[Phase 1<br/>weftwise dev script]
   P2[Phase 2<br/>weftwise container adoption]
-  P3[Phase 3<br/>lace portlessAlias + validate]
+  P3[Phase 3<br/>lace portlessAlias metadata,<br/>host portless lifecycle,<br/>alias shellout, validate]
   P4[Phase 4<br/>e2e validation]
   P1 --> P4
   P2 --> P4
@@ -167,8 +175,7 @@ cmd_dev() {
   fi
 
   local route="${branch}.weftwise.localhost"
-  log_info "Starting dev server: http://${route}:<host-port>/"
-  log_info "(host-port from podman port weftwise; lace allocates 22425-22499)"
+  log_info "Starting dev server: http://${route}:1355/"
   exec portless "${route}" pnpm dev
 }
 ```
@@ -193,7 +200,7 @@ esac
 - `node_modules` present: install skipped, dev exec.
 - `portless` not on PATH: clean error.
 
-**Acceptance.** `./scripts/worktree.sh dev` from any worktree's package root reaches the dev server at `http://{branch}.weftwise.localhost:<host-port>/`, where `<host-port>` is visible via `podman port weftwise`.
+**Acceptance.** `./scripts/worktree.sh dev` from any worktree's package root, with Phase 3's host portless running, reaches the dev server at `http://{branch}.weftwise.localhost:1355/`.
 
 ### Phase 2: Adopt portless in the weftwise container
 
@@ -217,19 +224,19 @@ During lace local development before the portless feature is published, use the 
 - `lace up --rebuild` succeeds (rebuild required per E5).
 - `podman port weftwise` shows `<22425-22499>:1355` and NO `3000:3000`.
 - `podman exec weftwise portless --version` succeeds.
-- `lace validate` (after Phase 3) reports the `portlessAlias` informational message.
+- After Phase 3: the host portless is running on `:1355`; `portless alias` lists `weftwise -> <22425-22499>`; `lace validate` reports the `portlessAlias` informational message.
 
 **Acceptance.** The container portless is reachable on its lace-allocated host port; the renderer port 3000 is no longer published.
 
-### Phase 3: Lace `portlessAlias` metadata + `validate` extension
+### Phase 3: Lace `portlessAlias` metadata, host portless lifecycle, alias shellout, validate
 
-Two file targets in lace, one in the portless feature.
+Seven sub-phases. 3a/3b/3c remain the schema/manifest/validate trio; 3d/3e/3f/3g add the host-side surface.
 
 #### 3a: Schema widening
 
 **File.** `packages/lace/src/lib/feature-metadata.ts`.
 
-**Step 1 — Interface widening (lines 47-57).**
+**Step 1: Interface widening (lines 47-57).**
 
 ```ts
 export interface LacePortDeclaration {
@@ -237,11 +244,11 @@ export interface LacePortDeclaration {
   requireLocalPort?: boolean;
   onAutoForward?: string;
   protocol?: "http" | "https";
-  portlessAlias?: boolean;     // ← new (v1: boolean only)
+  portlessAlias?: boolean;     // boolean-only per D11
 }
 ```
 
-**Step 2 — Extractor widening (lines 660-673 within `extractLaceCustomizations`).**
+**Step 2: Extractor widening (lines 660-673 within `extractLaceCustomizations`).**
 
 The extractor enumerates known fields; any field not listed is silently dropped. Add the `portlessAlias` branch:
 
@@ -251,11 +258,11 @@ validatedPorts[key] = {
   onAutoForward: isValidAutoForward(entry.onAutoForward) ? entry.onAutoForward : undefined,
   requireLocalPort: typeof entry.requireLocalPort === "boolean" ? entry.requireLocalPort : undefined,
   protocol: isValidProtocol(entry.protocol) ? entry.protocol : undefined,
-  portlessAlias: typeof entry.portlessAlias === "boolean" ? entry.portlessAlias : undefined,   // ← new
+  portlessAlias: typeof entry.portlessAlias === "boolean" ? entry.portlessAlias : undefined,
 };
 ```
 
-Without Step 2, the `portlessAlias: true` from the feature manifest is silently dropped before the `validate` extension sees it.
+Without Step 2, the `portlessAlias: true` from the feature manifest is silently dropped before the host-portless and validate consumers see it.
 
 **Tests.**
 
@@ -284,7 +291,7 @@ Without Step 2, the `portlessAlias: true` from the feature manifest is silently 
    }
 ```
 
-The flag is forward-looking; v1 consumers are limited to the `validate` extension (3c).
+The flag is consumed by 3c (validate), 3e (host portless lifecycle), and 3f (alias shellout).
 
 #### 3c: `validate` command extension
 
@@ -292,22 +299,24 @@ The flag is forward-looking; v1 consumers are limited to the `validate` extensio
 
 After the existing validation passes (or alongside them, scoped to a new sub-check), iterate the resolved config's port allocations and per-port metadata. For each allocation whose port declaration has `portlessAlias === true`:
 
-1. **Generic host-port availability check.** Probe whether `allocation.port` is bound by something other than the project's own running container. The probe is the same shape `PortAllocator` already uses (`isPortAvailable` at `packages/lace/src/lib/port-allocator.ts:19-44`); reuse it.
-   - If the port is free or held by the project's own container: pass silently.
-   - If held by an unrelated process: warn (not error) and print the offending hint.
+1. **Generic host-port availability check.** Probe whether `allocation.port` and host port `1355` are bound by something other than the project's own running container or the lace-owned host portless. The probe is the same shape `PortAllocator` already uses (`isPortAvailable` at `packages/lace/src/lib/port-allocator.ts:19-44`); reuse it.
+   - If both ports are free or held by lace-owned processes: pass silently.
+   - If port 1355 is held by an unrelated process: warn (not error) and print the offending hint.
+   - If the allocated host port is held by an unrelated process: warn; lace's `PortAllocator` will re-allocate on `lace up`.
 2. **Informational message.** Print a one-line pointer:
 
    ```
-   info: portless feature detected (alias=<project>); URLs include the host port suffix in v1.
-   info: see cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md for clean-URL routing.
+   info: portless feature detected (alias=<project>); URLs at http://{branch}.<project>.localhost:1355/.
+   info: port-80 binding is tracked in cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md.
    ```
 
-The check is automatic — driven by `portlessAlias` presence in the config, not by a flag the user passes.
+The check is automatic, driven by `portlessAlias` presence in the config, not by a flag the user passes.
 
-**Generic-not-sysctl-coupled framing.** The host-port-availability check is the foundational primitive; in v1 it works against ports 22425-22499. The follow-up RFP reuses the same primitive against port 80 (or 443) plus environment-specific remediation hints (sysctl is one example; setcap is another; rootful podman is another). Lace itself stays out of the sysadmin business: any required system change is printed to stdout for the user to evaluate and apply, not auto-applied.
+**Generic-not-sysctl-coupled framing.** The host-port-availability check is the foundational primitive; here it works against the lace-allocated host port (22425-22499) and port 1355. The follow-up RFP reuses the same primitive against port 80 (or 443) plus environment-specific remediation hints (sysctl is one example; setcap is another; rootful podman is another). Lace itself stays out of the sysadmin business: any required system change is printed to stdout for the user to evaluate and apply, not auto-applied.
 
 > NOTE(opus/weftwise-parallel-dev): The "auto-apply sysctl" path explored in earlier drafts is explicitly OUT of scope.
 > Lace prints; the user applies. This keeps lace environment-portable (NixOS, immutable distros, container hosts, CI runners) and avoids taking on sysadmin responsibility.
+> Port 1355 is unprivileged on every supported host, so the entire sysctl surface is irrelevant to this proposal.
 
 **Tests.**
 
@@ -321,6 +330,79 @@ The check is automatic — driven by `portlessAlias` presence in the config, not
 - `lace validate` for a project with portless in `features` prints the informational message and the port-availability result.
 - `lace validate` for a project without portless is unaffected.
 - Neither path makes any system change.
+
+#### 3d: Bundle portless as a lace dependency
+
+**File.** `packages/lace/package.json`.
+
+Add `portless` to `dependencies`. Resolve the binary at runtime via `require.resolve("portless/dist/cli.js")` (or the equivalent Node API for the published shape of portless's bin entry; verify against `node_modules/portless/package.json` after install).
+
+Upgrading portless becomes a lace dependency bump, not a separate user action. No global install, no clutter on the user's PATH. See D9.
+
+**Tests.**
+
+- Unit: the resolved binary path exists and is executable.
+- Smoke: `node <resolved-path> --version` returns a sane version string.
+
+#### 3e: Host portless lifecycle module
+
+**File.** New module at `packages/lace/src/lib/host-portless.ts` (or similar; final location subject to existing file-organization conventions).
+
+Responsibilities:
+
+- **Probe.** On `lace up` for any project carrying a `portlessAlias: true` port, probe whether a host portless process is already listening on `:1355` (reuse `isPortAvailable` semantics: bound by lace-owned PID is "running"; bound by an unrelated process is a warning surface for validate).
+- **Spawn.** If absent, spawn via `child_process.spawn(node, [portlessCliPath, '--wildcard'], { detached: true, stdio: 'ignore' })`, then `unref()`. The `--wildcard` flag enables suffix matching so `*.weftwise.localhost` matches a single registered alias for `weftwise`.
+- **Persist.** Record `{ pid, startedAt, port: 1355, portlessVersion }` to `~/.config/lace/portless-runtime.json`.
+- **Reuse.** Subsequent `lace up` invocations read the runtime file and reuse a still-living process; stale entries (PID not running) are replaced.
+
+> NOTE(opus/weftwise-parallel-dev): `--wildcard` semantics must be re-verified against the bundled portless version's source.
+> The previous round's source-read against an earlier upstream confirmed the flag; the bundled version may differ.
+
+**Tests.**
+
+- Unit: probe correctly distinguishes "lace-owned portless" from "unrelated process" using the persisted PID.
+- Unit: spawn writes the runtime file; reuse path reads it and skips spawning.
+- Unit: stale PID in the runtime file is detected and replaced.
+
+#### 3f: `portless alias` shellout from `lace up`
+
+**File.** `packages/lace/src/lib/up.ts` (extension point; final integration site depends on existing health-check / post-up hooks).
+
+After the container is healthy and Phase 3e has ensured the host portless is running, lace shells out:
+
+```
+portless alias <project> <host-allocated-port>
+```
+
+where `<project>` is `deriveProjectName()` (existing helper at `packages/lace/src/lib/project-name.ts`) and `<host-allocated-port>` is the lace-allocated host port mapped to container `:1355`.
+
+The alias call is idempotent: re-registering an existing alias updates the target port without error. See D7 (lace owns the alias call, not weftwise scripts) and D11 (alias name is the project name).
+
+**Tests.**
+
+- Unit: the shellout is constructed with the correct project name and port.
+- Unit: re-running `lace up` updates the alias without error.
+- Integration: against a running host portless, `portless alias` registration succeeds and the route resolves.
+
+#### 3g: Teardown surface
+
+**File.** Existing `lace doctor` command (or the nearest natural fit; verify the command surface before introducing a new subcommand).
+
+Add a `--reset` mode that:
+
+- Sends `SIGTERM` to the host portless PID recorded in `~/.config/lace/portless-runtime.json`.
+- Removes the runtime state file.
+
+The teardown is best-effort: a missing file or already-dead PID is a no-op, not an error.
+
+> NOTE(opus/weftwise-parallel-dev): Stale-alias cleanup remains tracked at `cdocs/proposals/2026-05-13-rfp-lace-stale-portless-alias-cleanup.md`.
+> Out of scope for this proposal; teardown here resets the daemon, not its registered aliases.
+
+**Tests.**
+
+- Unit: `--reset` with no runtime file is a no-op.
+- Unit: `--reset` with a live PID sends SIGTERM and removes the file.
+- Unit: `--reset` with a stale PID still removes the file.
 
 ### Phase 4: End-to-end validation
 
@@ -336,22 +418,25 @@ Captured to a devlog at `cdocs/devlogs/<date>-weftwise-parallel-dev-validation.m
 
 | Step | Command | Expected |
 |---|---|---|
-| 1 | `lace validate` in weftwise/main | Prints "portless feature detected" info + port-availability result. No system changes. |
-| 2 | `lace up --rebuild` in weftwise/main | Container builds; `podman port weftwise` shows `<22425-22499>:1355` and NO `3000:3000`; `podman exec weftwise portless --version` succeeds. |
-| 3 | `./scripts/worktree.sh dev` in `main` (inside container) | Vite starts on a 4xxx port (portless auto-injects `--port`); `http://main.weftwise.localhost:<host-port>/` returns HTTP 200 from the host browser. |
-| 4 | `./scripts/worktree.sh dev` in `feature-x` (concurrent, separate pane) | Vite starts on a different 4xxx; `http://feature-x.weftwise.localhost:<host-port>/` returns HTTP 200; `main` still serving. |
-| 5 | `./scripts/worktree.sh dev` in `loro_migration` (concurrent) | Three concurrent dev servers; three URLs serving HTTP 200. |
+| 1 | `lace validate` in weftwise/main | Prints "portless feature detected" info + port-availability result (host port + `:1355`). No system changes. |
+| 2 | `lace up --rebuild` in weftwise/main | Container builds; `podman port weftwise` shows `<22425-22499>:1355` and NO `3000:3000`; `podman exec weftwise portless --version` succeeds; host portless on `:1355` is running (PID recorded in `~/.config/lace/portless-runtime.json`); `portless alias` lists `weftwise -> <host-port>`. |
+| 3 | `./scripts/worktree.sh dev` in `main` (inside container) | Vite starts on a 4xxx port (portless auto-injects `--port`); `http://main.weftwise.localhost:1355/` returns HTTP 200 from the host browser. |
+| 4 | `./scripts/worktree.sh dev` in `feature-x` (concurrent, separate pane) | Vite starts on a different 4xxx; `http://feature-x.weftwise.localhost:1355/` returns HTTP 200; `main` still serving. |
+| 5 | `./scripts/worktree.sh dev` in `loro_migration` (concurrent) | Three concurrent dev servers; three URLs serving HTTP 200 on `:1355`. |
 | 6 | Inside container: `pnpm --version` from the dev-script context | The `pnpm install` invoked by the dev script routes through corepack (per `packageManager: pnpm@10.26.2`), not the login-shell nvm `pnpm@11.1.1`; electron postinstall does not break (verification devlog Finding 4). |
 | 7 | Add a new worktree on the host: `git worktree add ../feature-y`; verify with `ls /workspaces/weftwise/` inside the container | `feature-y/` appears in the listing. |
-| 8 | `./scripts/worktree.sh dev` in `feature-y` | Install runs (2.5s, baked store); dev starts; `http://feature-y.weftwise.localhost:<host-port>/` returns HTTP 200. |
-| 9 | `lace up` for a second project (e.g., whelm) with portless in features | Second project gets its own lace-allocated host port; `http://main.whelm.localhost:<other-host-port>/` reachable; weftwise URLs unaffected. (Precondition: whelm has adopted portless and a dev-script convention.) |
+| 8 | `./scripts/worktree.sh dev` in `feature-y` | Install runs (2.5s, baked store); dev starts; `http://feature-y.weftwise.localhost:1355/` returns HTTP 200. |
+| 9 | `lace up` for a second project (e.g., whelm) with portless in features | Host portless on `:1355` is reused (same PID); `portless alias` lists `weftwise -> <port-a>` and `whelm -> <port-b>`; `http://main.whelm.localhost:1355/` reachable concurrently with `http://main.weftwise.localhost:1355/`. (Precondition: whelm has adopted portless and a dev-script convention.) |
+| 10 | `lace doctor --reset` | Host portless terminated; `~/.config/lace/portless-runtime.json` removed; subsequent `lace up` re-spawns cleanly. |
 
 **Success criteria.**
 
-- All three weftwise URLs return HTTP 200 simultaneously.
-- Multi-project step 9 reaches both projects' URLs concurrently at distinct host ports.
+- All three weftwise URLs return HTTP 200 simultaneously on `:1355`.
+- Multi-project step 9 reaches both projects' URLs concurrently on a single shared `:1355`, demonstrating the host portless routes by `{project}` segment. This step is load-bearing.
 - `worktree.sh dev` in a fresh worktree completes under 5s on warm caches.
 - `lace validate` runs the new sub-check automatically when `portlessAlias` is present and is silent otherwise.
+- `lace up` is idempotent: re-running on a healthy project reuses the host portless and updates the alias without error.
+- `lace doctor --reset` cleanly terminates the host portless and removes runtime state.
 - No system changes by lace (no sudo, no sysctl, no systemd, no /etc/ writes).
 
 If any step fails, the proposal returns to `status: wip` with a deviation NOTE.
@@ -360,16 +445,20 @@ If any step fails, the proposal returns to `status: wip` with a deviation NOTE.
 
 ### Unit (lace TypeScript)
 
-- `feature-metadata.test.ts` — `LacePortDeclaration` schema accepts `portlessAlias: true/false/undefined`; `extractLaceCustomizations` round-trips booleans and coerces non-booleans to undefined.
-- `validate.test.ts` — `portlessAlias: true` triggers the port-availability check + info message; `portlessAlias: false` / absent is a no-op for the sub-check.
+- `feature-metadata.test.ts`: `LacePortDeclaration` schema accepts `portlessAlias: true/false/undefined`; `extractLaceCustomizations` round-trips booleans and coerces non-booleans to undefined.
+- `validate.test.ts`: `portlessAlias: true` triggers the port-availability check + info message; `portlessAlias: false` / absent is a no-op for the sub-check.
+- `host-portless.test.ts`: probe distinguishes lace-owned vs unrelated processes; spawn writes the runtime file; reuse path reads it; stale PIDs are replaced.
+- `up.test.ts` (extension): the alias shellout is constructed with the correct project name and port; re-running is idempotent.
+- `doctor.test.ts` (extension): `--reset` is a no-op when no runtime file exists; with a live PID it sends SIGTERM and removes the file; with a stale PID it still removes the file.
 
 ### Integration (lace)
 
-- `portless-validate-integration.test.ts` — fixture devcontainer.json with portless in `features`; running `lace validate` against it exercises the full extractor → validate path and produces the expected stdout.
+- `portless-validate-integration.test.ts`: fixture devcontainer.json with portless in `features`; running `lace validate` against it exercises the full extractor -> validate path and produces the expected stdout.
+- `host-portless-integration.test.ts`: against a real spawned host portless, the alias registration succeeds and the route resolves.
 
 ### End-to-end
 
-Phase 4's 9-step matrix.
+Phase 4's 10-step matrix.
 
 ### Weftwise smoke
 
@@ -389,9 +478,12 @@ Truncated container ID. Cosmetic; orthogonal to URL routing (container portless 
 
 Handled by the dev script's install-on-missing path. No `lace up` re-run, no manual install.
 
-### E4: Wildcard alias matching is NOT applicable in v1
+### E4: Wildcard alias matching on the host portless
 
-v1 does not run host portless, so the `--wildcard` flag question (relevant only to the follow-up RFP) is irrelevant here. Each browser request hits the container portless directly via the published host port; container portless does exact-hostname matching against routes registered by the dev script.
+The host portless spawns with `--wildcard` so a single alias `weftwise -> <host-port>` matches every `*.weftwise.localhost` request (including `main.weftwise.localhost`, `feature-x.weftwise.localhost`, etc.). The container portless then does exact-hostname matching against routes registered by the dev script.
+
+> NOTE(opus/weftwise-parallel-dev): The `--wildcard` flag semantics must be re-verified empirically against the bundled portless version (D11 already flags this).
+> Falsified-wildcard behaviour falls back to per-route alias registration from the dev script, which is a worse but workable degraded mode.
 
 ### E5: pnpm version split-brain
 
@@ -403,59 +495,64 @@ If weftwise later needs to expose multiple services per worktree (e.g., sync-ser
 
 ### E7: Multiple projects on the same host
 
-Each project gets its own container portless with its own lace-allocated host port. URLs disambiguate by port (e.g., `main.weftwise.localhost:22435` vs `main.whelm.localhost:22436`). Forward-compatible with the follow-up RFP, which collapses the port-disambiguation onto host-side routing.
+Each project gets its own container portless on its own lace-allocated host port. The single shared host portless on `:1355` aliases each project name to its host port, so URLs disambiguate by the `{project}` segment under a single shared port: `main.weftwise.localhost:1355` and `main.whelm.localhost:1355`.
+
+Forward-compatible with the follow-up RFP, which drops the `:1355` suffix once port-80 binding is in place.
 
 ## Open Questions
 
-- **Q. Should `lace validate` warn or error when `portlessAlias` is present but the port-availability probe finds the port held by something else?**
-  Warn, not error. The check is informational; the actual port allocation runs at `lace up` time and `PortAllocator` handles re-allocation if needed (`port-allocator.ts:141-160`). The validate-time warning helps the user diagnose surprising states early.
+- **Q. Should `lace validate` warn or error when `portlessAlias` is present but the port-availability probe finds `:1355` or the allocated host port held by something else?**
+  Warn, not error. The check is informational; the actual port allocation runs at `lace up` time and `PortAllocator` handles re-allocation for the project port (`port-allocator.ts:141-160`). For `:1355` specifically, a collision with an unrelated process means the user has to free the port or accept that the host portless cannot start.
 
 - **Q. Should `portlessAlias` be visible to projects that aren't using the portless feature?**
   Yes; the metadata key is generic-looking but its name (`portlessAlias`) communicates that it is tied to the portless feature's intent. Future features that want host-side aliasing without going through portless should declare a different metadata key.
 
 - **Q. What happens after the follow-up RFP lands?**
-  The same `portlessAlias: true` triggers two new behaviours: lace spawns/manages host portless, and `lace up` calls `portless alias <project> <host-port>` after the container is healthy. The v1 informational message disappears (replaced by clean URLs). No re-touching of feature manifests required; the schema already carries `portlessAlias: true`.
+  The same `portlessAlias: true` keeps triggering the same lifecycle, except the host portless binds `:80` instead of `:1355` (subject to the sysctl/setcap remediation the follow-up scopes). URLs lose the `:1355` suffix. No re-touching of feature manifests required.
 
-- **Q. What does the v1 user experience look like with port-suffix URLs?**
-  Browser bookmarks include the port (e.g., `http://main.weftwise.localhost:22435/`). Stable across `lace up` runs because `PortAllocator` persists allocations in `.lace/port-assignments.json`. Bookmark migration after the follow-up lands is a one-time edit.
+- **Q. What does the user experience look like with `:1355` URLs?**
+  Browser bookmarks include the `:1355` suffix (e.g., `http://main.weftwise.localhost:1355/`). Stable across `lace up` runs because `PortAllocator` persists allocations in `.lace/port-assignments.json` and the host portless is reused. Bookmark migration after the follow-up lands is a one-time strip-the-suffix edit.
+
+- **Q. What if `:1355` is already held by another lace install or unrelated process?**
+  `validate` warns; `lace up` aborts with a clear error pointing at the offending PID. No fallback port: the entire design rests on a single shared port, and silently relocating it would undermine that property. The user resolves the conflict explicitly.
 
 ## Summary
 
-v1 ships the dev-script + container-portless path with minimum new lace surface area:
+This proposal ships the parallel-worktree dev path with the single-shared-port URL space:
 
 - One weftwise script subcommand.
 - One weftwise devcontainer.json edit.
 - One lace metadata field (`portlessAlias?: boolean`) with two-step widening (interface + extractor).
 - One portless feature manifest one-line change.
 - One `validate` sub-check.
+- One bundled portless dependency.
+- One host portless lifecycle module (probe / spawn / persist / reuse / teardown).
+- One alias shellout from `lace up`.
 
-Zero durable host state, zero sudo prompts, zero new lace subcommands.
+The only durable host state is `~/.config/lace/portless-runtime.json` (lace-owned, removed by `lace doctor --reset`). No sudo prompts, no sysctl, no setcap, no systemd, no global npm installs.
 
 Deferred to the follow-up RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`:
 
-- Clean URLs (no port suffix).
-- Host portless lifecycle.
-- `portless alias` shellout.
-- sysctl / setcap / port-80 binding considerations.
+- Port-80 binding specifically (the sysctl / setcap / rootful-podman surface).
 - HTTPS via `portless trust`.
 - Stale-alias cleanup (already had its own RFP at `cdocs/proposals/2026-05-13-rfp-lace-stale-portless-alias-cleanup.md`; remains relevant for the follow-up).
 
-The v1 design is forward-compatible: the metadata flag is in place, the feature manifest is in place, the URL pattern only loses its port suffix. No re-architecture between v1 and the follow-up.
+The design is forward-compatible with the follow-up: the lifecycle module's bind port is the only thing that changes from `:1355` to `:80`, gated on the remediation the follow-up scopes.
 
 ## References
 
 ### Supporting documents
 
-- Design decisions supplemental (v1 scope: D1-D5, D7, D11): `cdocs/reports/2026-05-13-weftwise-parallel-dev-decisions.md`.
+- Design decisions supplemental (scope: D1-D5, D7, D8, D9, D11): `cdocs/reports/2026-05-13-weftwise-parallel-dev-decisions.md`.
 - Companion design-space survey: `cdocs/reports/2026-05-13-worktree-portless-parallel-dev-prior-work.md`.
 - Clean-URL fresh-eyes report (informs the follow-up RFP): `cdocs/reports/2026-05-13-clean-portless-urls-fresh-eyes.md`.
 - Verification devlog: `cdocs/devlogs/2026-05-13-verify-weftwise-migration.md`.
 
 ### Follow-up RFPs
 
-- Clean URLs via host-side portless: `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`.
-- Stale-alias cleanup (becomes relevant when the follow-up lands): `cdocs/proposals/2026-05-13-rfp-lace-stale-portless-alias-cleanup.md`.
-- HTTPS via `portless trust` (further-future): `cdocs/proposals/2026-05-13-rfp-portless-https-via-trust.md`.
+- Port-80 binding: `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`.
+- Stale-alias cleanup: `cdocs/proposals/2026-05-13-rfp-lace-stale-portless-alias-cleanup.md`.
+- HTTPS via `portless trust`: `cdocs/proposals/2026-05-13-rfp-portless-https-via-trust.md`.
 
 ### Lace source (Phase 3 targets)
 
@@ -463,10 +560,15 @@ The v1 design is forward-compatible: the metadata flag is in place, the feature 
 - `packages/lace/src/lib/feature-metadata.ts:660-673` (extractor widening).
 - `packages/lace/src/commands/validate.ts` (sub-check addition).
 - `packages/lace/src/lib/port-allocator.ts:19-44` (`isPortAvailable`, reused for the probe).
+- `packages/lace/src/lib/host-portless.ts` (new; lifecycle module per 3e).
+- `packages/lace/src/lib/up.ts` (alias shellout integration per 3f).
+- `packages/lace/src/lib/project-name.ts` (existing `deriveProjectName()` helper, consumed by 3f).
+- `packages/lace/package.json` (`portless` dependency per 3d).
+- `packages/lace/src/commands/doctor.ts` (or nearest fit; `--reset` mode per 3g).
 
 ### Feature source (Phase 3 target)
 
-- `devcontainers/features/src/portless/devcontainer-feature.json` — add `portlessAlias: true`.
+- `devcontainers/features/src/portless/devcontainer-feature.json`: add `portlessAlias: true`.
 
 ### Weftwise host artefacts
 
@@ -475,4 +577,4 @@ The v1 design is forward-compatible: the metadata flag is in place, the feature 
 
 ### Superseded
 
-- `cdocs/proposals/2026-02-26-host-proxy-project-domain-routing.md` — `state: archived, status: evolved`, now pointing at the follow-up RFP (not this v1).
+- `cdocs/proposals/2026-02-26-host-proxy-project-domain-routing.md`: `state: archived, status: evolved`, now pointing at this proposal (the host portless surface lives here).

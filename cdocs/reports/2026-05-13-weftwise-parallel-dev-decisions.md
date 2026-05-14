@@ -12,8 +12,8 @@ tags: [portless, parallel-development, weftwise, design-decisions, supplemental]
 # Weftwise Parallel-Dev: Design Decisions Supplemental
 
 > BLUF: Twelve design decisions back the parallel-dev workstream.
-> v1 (the proposal at `cdocs/proposals/2026-05-13-rfp-weftwise-parallel-feature-development.md`) scopes to D1-D5, D7, D11: multi-project (D1), portless adopted in the container (D2), URL pattern (D3), dev script not lace seeds installs (D4), no pnpm-store mount (D5), lace owns the `portlessAlias` shellout when it lands (D7), generic feature-port metadata (D11).
-> The follow-up RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md` consumes D6, D8, D9, D10, D12: HTTPS deferral (D6), lace-owned host portless lifecycle (D8), bundled portless dependency (D9), auto-reversible sysctl drop-in (D10), HTTPS as priority follow-up (D12).
+> The parent proposal at `cdocs/proposals/2026-05-13-rfp-weftwise-parallel-feature-development.md` scopes to D1-D5, D7, D8, D9, D11: multi-project (D1), portless adopted in the container (D2), URL pattern (D3), dev script not lace seeds installs (D4), no pnpm-store mount (D5), lace owns the `portless alias` shellout (D7), lace owns the host portless lifecycle (D8), lace bundles portless via pnpm (D9), portless-coupled feature-port metadata with boolean semantics (D11).
+> The follow-up RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md` consumes D6, D10, D12: HTTPS deferral (D6), auto-reversible sysctl drop-in for `:80` binding (D10), HTTPS as priority follow-up (D12).
 > Decision details below apply to whichever workstream owns them; cross-references identify the scope.
 
 ## D1: Multi-project is the load-bearing case
@@ -62,7 +62,7 @@ No host-side mount earns its complexity (E5 permission risk under rootless podma
 ## D6: HTTP-only in initial scope; HTTPS is a follow-up (see D12 for priority)
 
 `portless trust` adds a local CA and gives `https://main.weftwise.localhost/` for free, but the trust install is a system-CA modification and benefits from being a deliberate opt-in.
-Initial scope ships HTTP on :80; HTTPS is tracked as `cdocs/proposals/2026-05-13-rfp-portless-https-via-trust.md` and prioritized per D12.
+Initial scope ships HTTP (on `:1355` per the parent proposal, graduating to `:80` per the truly-portless-portless RFP); HTTPS is tracked as `cdocs/proposals/2026-05-13-rfp-portless-https-via-trust.md` and prioritized per D12.
 
 ## D7: Lace owns `portless alias` lifecycle, not weftwise scripts
 
@@ -112,11 +112,11 @@ Reversibility is fully automatic:
 
 This is the only piece of host state lace cannot avoid; all other host config is either lace-owned runtime state or lives in the user's home directory.
 
-## D11: `portlessAlias` is portless-coupled feature-port metadata, boolean-only in v1
+## D11: `portlessAlias` is portless-coupled feature-port metadata, boolean-only
 
 The lace metadata flag is `customizations.lace.ports.<option>.portlessAlias: boolean`:
 
-- `true`: declares that this port participates in the portless host-aliasing flow. In v1 this is consumed only by `lace validate` (informational + generic host-port-availability check). In the follow-up RFP, it triggers the host-side `portless alias` shellout, with the alias name derived from `deriveProjectName()`.
+- `true`: declares that this port participates in the portless host-aliasing flow. Consumed by `lace validate` (informational + generic host-port-availability check) and by the `lace up` pipeline (host portless lifecycle + `portless alias <project> <host-port>` shellout, with the alias name derived from `deriveProjectName()`).
 - `false` / absent: no host alias behaviour.
 
 Portless-coupled over generic reasoning:
@@ -125,13 +125,13 @@ Portless-coupled over generic reasoning:
 - Future features that want host-side aliasing through a different mechanism (Caddy, nginx, a custom router) should declare a different metadata key with its own semantics.
 - Keeping the name portless-specific avoids the maintenance trap of a "generic" schema that ends up encoding portless-specific assumptions anyway.
 
-Boolean-only in v1 (no string override):
+Boolean-only (no string override) in the initial scope:
 
 - Simpler schema; one field, two states.
-- Alias name is unambiguously the project name (= `deriveProjectName()`, = container name); no override mechanism for v1.
+- Alias name is unambiguously the project name (= `deriveProjectName()`, = container name); no override mechanism in the initial scope.
 - A future RFP may extend to `boolean | string` if a real use case for an explicit alias name appears.
 
-Cost: a project that wants a non-project-name alias has no override. Acceptable for v1's single-developer scope.
+Cost: a project that wants a non-project-name alias has no override. Acceptable for single-developer scope.
 
 ## D12: Prioritize HTTPS follow-up given port-80 security considerations
 

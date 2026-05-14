@@ -252,7 +252,7 @@ An SSH probe (`ssh -p $port $user@localhost "readlink /proc/$(pgrep -n claude)/c
 ### Recommendation
 
 Defer SSH probe to a future enhancement.
-The prefix-matching heuristic covers the common case (single worktree per container, or most-recently-active worktree).
+The prefix-matching heuristic covers the common case (a single active worktree in the container, or the most-recently-active worktree among several siblings).
 If users report resolution failures, SSH probe can be added as a targeted fallback without architectural changes.
 
 ## Schema Changes

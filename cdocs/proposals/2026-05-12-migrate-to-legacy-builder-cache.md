@@ -27,6 +27,11 @@ tags: [prebuild, migration, legacy_builder, podman, validated, lace_prebuild_del
 > - Options report: [`cdocs/reports/2026-05-05-prebuild-cache-system-options.md`](../reports/2026-05-05-prebuild-cache-system-options.md) (this proposal effectively chooses Bundle P6 sharpened against the legacy builder)
 > - Source-analysis report: [`cdocs/reports/2026-05-06-prebuildfeatures-removal-impact-analysis.md`](../reports/2026-05-06-prebuildfeatures-removal-impact-analysis.md)
 
+> NOTE(opus/prebuild/legacy-builder-migration/initial-scoping): Phase 1 (asymmetric `appPort` injection fix) is moot post `wezterm-server` feature deletion from lace's tree.
+> Initial migration scope narrows to weftwise cleanups plus the `prebuildFeatures` -> `features` flip.
+> A follow-up workstream owns portless integration and host-SSH replacement.
+> See [`cdocs/reports/2026-05-13-initial-migration-scoping.md`](../reports/2026-05-13-initial-migration-scoping.md).
+
 ## Objective
 
 Remove `lace prebuild` as a phase, subcommand, and configuration concept from lace.

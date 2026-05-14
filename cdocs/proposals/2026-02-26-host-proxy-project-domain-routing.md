@@ -4,9 +4,9 @@ first_authored:
   at: 2026-02-26T22:00:00-06:00
 task_list: lace/portless
 type: proposal
-state: live
-status: review_ready
-tags: [proxy, host-side, domain-routing, portless, networking, lace-core]
+state: archived
+status: evolved
+tags: [proxy, host-side, domain-routing, portless, networking, lace-core, superseded]
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-6"
@@ -16,9 +16,15 @@ related_to:
   - cdocs/proposals/2026-02-26-portless-devcontainer-feature.md
   - cdocs/reports/2026-02-25-worktree-domain-routing-architecture.md
   - cdocs/reports/2026-02-26-portless-integration-design-rationale.md
+  - cdocs/proposals/2026-05-13-rfp-weftwise-parallel-feature-development.md
 ---
 
 # Host-Side Lace Proxy for Port-Free Project Domain Routing
+
+> NOTE(opus/weftwise-parallel-dev): This proposal is superseded by `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`, which adopts the lighter approach of running upstream portless on the host as well as in the container.
+> Two instances of one mature tool replace the ~200-300 line bespoke Node.js daemon proposed here.
+> The fresh-eyes survey at `cdocs/reports/2026-05-13-clean-portless-urls-fresh-eyes.md` justifies the choice: host portless natively provides HTTP/80 binding, HTTPS via `portless trust`, and Host-header routing via `portless alias`, none of which the bespoke daemon would have shipped without extra work.
+> Status is `evolved`; design retained for historical context.
 
 > **BLUF:** Add a host-side HTTP reverse proxy to lace that routes `{route}.{project}.localhost` on port 80 to the correct container's portless proxy, eliminating port numbers from developer URLs.
 > The proxy is a lightweight Node.js daemon (~200-300 lines) auto-managed by `lace up`, reading project-to-port mappings from `~/.config/lace/proxy-state.json`.

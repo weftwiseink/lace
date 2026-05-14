@@ -70,6 +70,8 @@ The container's portless host port is allocated by lace.
 Pushing alias management into a weftwise-side script means weftwise has to learn that port at runtime (via `.lace/devcontainer.json` parsing) and shell out to the host from inside the container — awkward.
 Lace already knows the port and already runs on the host; the alias call is a natural extension of the `lace up` pipeline.
 
+Under the v1 design, the host portless is a cross-project singleton: one process bound to the shared `:1355` serves alias registrations for every project on the host, not a per-project process spawned by each project's `lace up`.
+
 ## D8: Lace owns host portless lifecycle (no systemd unit, no user-managed daemon)
 
 The earlier draft asked the user to run `portless service install` to register a systemd-user unit.

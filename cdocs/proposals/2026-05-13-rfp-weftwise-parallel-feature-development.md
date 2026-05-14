@@ -37,6 +37,7 @@ Five things change to deliver parallel-worktree dev under one shared host port:
 
 URL pattern: `http://{branch}.{project}.localhost:1355/`.
 The host portless on `:1355` demuxes by the `{project}` segment to the project's container portless, which demuxes by the `{branch}` segment to the worktree's dev server.
+The two layers are asymmetric: the host portless registers a wildcard project alias per project (one alias matches `*.{project}.localhost`), while the container portless registers full branch-qualified routes (one route per worktree).
 
 ## Objective
 
@@ -400,6 +401,8 @@ Add a `--reset` mode that:
 
 The teardown is best-effort: a missing file or already-dead PID is a no-op, not an error.
 
+Aliases persist on the host portless across container restarts (intended for reuse on the next `lace up`); after `lace down` removes a project's container, the alias points at a now-unbacked host port until the project is brought back up or `lace doctor --reset` nukes the whole daemon, which is the only built-in way to clear stale aliases in v1.
+
 > NOTE(opus/weftwise-parallel-dev): Stale-alias cleanup remains tracked at `cdocs/proposals/2026-05-13-rfp-lace-stale-portless-alias-cleanup.md`.
 > Out of scope for this proposal; teardown here resets the daemon, not its registered aliases.
 
@@ -551,7 +554,7 @@ The design is forward-compatible with the follow-up: the lifecycle module's bind
 - Design decisions supplemental (scope: D1-D5, D7, D8, D9, D11): `cdocs/reports/2026-05-13-weftwise-parallel-dev-decisions.md`.
 - Companion design-space survey: `cdocs/reports/2026-05-13-worktree-portless-parallel-dev-prior-work.md`.
 - Clean-URL fresh-eyes report (informs the follow-up RFP): `cdocs/reports/2026-05-13-clean-portless-urls-fresh-eyes.md`.
-- Verification devlog: `cdocs/devlogs/2026-05-13-verify-weftwise-migration.md`.
+- Verification devlog: `cdocs/devlogs/2026-05-13-verify-weftwise-migration.md` (round-7 baseline; findings on install perf and pnpm split-brain remain valid).
 
 ### Follow-up RFPs
 

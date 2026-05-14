@@ -1,14 +1,14 @@
 {
     "name": "Portless",
     "id": "portless",
-    "version": "0.1.0",
-    "description": "Installs portless for localhost subdomain routing. Declares a lace-managed proxy port with asymmetric mapping to portless's default port 1355.",
+    "version": "1.0.0",
+    "description": "Installs portless for localhost subdomain routing. Runs portless in-container on the proxyPort to demux per-branch routes by Host header. With lace, declares portlessAlias=true so the project participates in lace's shared host-portless-on-:1355 routing.",
     "entrypoint": "/usr/local/share/portless-feature/entrypoint.sh",
     "options": {
         "proxyPort": {
             "type": "string",
             "default": "1355",
-            "description": "Container-internal portless proxy port. With lace, this default is used as the container side of an asymmetric port mapping (e.g., 22435:1355). Not used by install.sh."
+            "description": "Container-internal portless proxy port. Bound by the feature's entrypoint via `portless proxy start --port $PROXY_PORT --no-tls`. Lace maps this to a host-allocated port (22425-22499) and registers it as an alias on the shared host portless."
         },
         "version": {
             "type": "string",

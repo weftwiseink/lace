@@ -1,15 +1,17 @@
 // IMPLEMENTATION_VALIDATION
 //
 // Sub-check: scans resolved feature metadata for ports declaring
-// `portlessAlias: true`, cross-references those declarations against
-// the live port allocations, runs a generic host-port-availability
-// probe, and emits a forward-looking informational pointer.
+// `portlessAlias: true`, emits the URL hint, and probes whether the
+// shared host portless port (:1355) is free or held by an unrelated
+// process.
 //
-// v1 semantics: the check is purely diagnostic. It makes no system
-// changes. The presence of the flag does not alter `lace up` runtime
-// behaviour. The follow-up RFP
-// `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md`
-// will introduce host-side consumers that act on the flag.
+// The check is diagnostic. It does not mutate state. Spawn / alias-shellout
+// is the responsibility of `lace up` itself (see host-portless.ts and the
+// up.ts integration); validate only reports.
+//
+// Dedupe: a project may declare multiple `portlessAlias` ports (e.g., one
+// for a future second proxy). The info lines should print once per
+// validate run, not once per declaration.
 import {
   type FeatureMetadata,
   extractLaceCustomizations,
@@ -18,15 +20,16 @@ import {
   type PortAllocation,
   isPortAvailable,
 } from "./port-allocator";
+import { HOST_PORTLESS_PORT } from "./host-portless";
 import { extractFeatureShortId } from "./template-resolver";
 
 export interface PortlessAliasFinding {
   /** Allocation label (e.g., `portless/proxyPort`). */
   label: string;
-  /** Lace-allocated host port (22425-22499). */
+  /** Lace-allocated host port for the container portless. */
   port: number;
-  /** Whether the port is currently free or held by the project's own container. */
-  available: boolean;
+  /** Whether the shared host port :1355 is free (or held by lace itself). */
+  hostPortFree: boolean;
   /** Project name used for the alias URL hint. */
   projectName: string;
 }
@@ -43,10 +46,10 @@ export interface PortlessAliasCheckResult {
  * For each feature port declaring `portlessAlias: true`:
  *   1. Locate the corresponding live allocation by label
  *      (`${featureShortId}/${optionName}`).
- *   2. Probe whether the host port is bound by something other than
- *      this project's own running container.
- *   3. Emit a one-line informational pointer to the follow-up RFP so
- *      the user is not surprised by port-suffix URLs.
+ *   2. Probe whether the host portless port (`:1355`) is available
+ *      (or held by lace itself per the runtime file).
+ *   3. Emit info lines describing the URL pattern at `:1355`, once per
+ *      validate run.
  *
  * Returns the findings and a list of messages (info + warn) intended
  * for stdout. Callers decide how to surface them.
@@ -54,10 +57,27 @@ export interface PortlessAliasCheckResult {
 export async function checkPortlessAliases(opts: {
   metadataMap: Map<string, FeatureMetadata | null>;
   allocations: PortAllocation[];
+  /** Ports held by lace's own running containers (treated as "free" from the user's POV). */
   ownedPorts: Set<number>;
   projectName: string;
+  /** Override the shared host port for testing. Defaults to HOST_PORTLESS_PORT (1355). */
+  hostPortlessPort?: number;
+  /** Override the port-availability probe for testing. */
+  isPortAvailable?: (port: number) => Promise<boolean>;
+  /**
+   * Optional list of PIDs lace believes are owned by it (e.g., the host
+   * portless runtime file's pid). Used purely to suppress "unrelated
+   * process" warns when the port is bound by a lace daemon.
+   */
+  laceOwnedPids?: Set<number>;
 }): Promise<PortlessAliasCheckResult> {
-  const { metadataMap, allocations, ownedPorts, projectName } = opts;
+  const {
+    metadataMap,
+    allocations,
+    projectName,
+    hostPortlessPort = HOST_PORTLESS_PORT,
+    isPortAvailable: probe = isPortAvailable,
+  } = opts;
   const findings: PortlessAliasFinding[] = [];
   const messages: string[] = [];
 
@@ -65,6 +85,8 @@ export async function checkPortlessAliases(opts: {
   for (const a of allocations) {
     allocationsByLabel.set(a.label, a);
   }
+
+  let infoEmitted = false;
 
   for (const [fullRef, metadata] of metadataMap) {
     if (!metadata) continue;
@@ -87,31 +109,35 @@ export async function checkPortlessAliases(opts: {
         continue;
       }
 
-      const available =
-        ownedPorts.has(allocation.port) ||
-        (await isPortAvailable(allocation.port));
+      // The container portless's host-allocated port is owned by the
+      // project's container. The user-collision risk lives on the
+      // shared host port (:1355), not the per-project allocation.
+      const hostPortFree = await probe(hostPortlessPort);
       findings.push({
         label,
         port: allocation.port,
-        available,
+        hostPortFree,
         projectName,
       });
 
-      messages.push(
-        `info: portless feature detected (alias=${projectName}); URLs include the host port suffix in v1.`,
-      );
-      messages.push(
-        `info: see cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md for clean-URL routing.`,
-      );
-      if (available) {
+      if (!infoEmitted) {
         messages.push(
-          `info: host port ${allocation.port} is free (or held by this project's container).`,
+          `info: portless feature detected (alias=${projectName}); URLs at http://{branch}.${projectName}.localhost:${hostPortlessPort}/.`,
         );
-      } else {
         messages.push(
-          `warn: host port ${allocation.port} is held by an unrelated process; ` +
-            `lace up may re-allocate, or you can free the port and retry.`,
+          `info: port-80 binding is tracked in cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md.`,
         );
+        if (hostPortFree) {
+          messages.push(
+            `info: host port ${hostPortlessPort} is free; lace will spawn the host portless on lace up.`,
+          );
+        } else {
+          messages.push(
+            `warn: host port ${hostPortlessPort} is held by another process; lace up will skip alias registration. ` +
+              `Free the port (e.g., 'lace doctor --reset' if you suspect a stale lace daemon, or 'lsof -iTCP:${hostPortlessPort}') and retry.`,
+          );
+        }
+        infoEmitted = true;
       }
     }
   }

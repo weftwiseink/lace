@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from "citty";
+import { doctorCommand } from "@/commands/doctor";
 import { prebuildCommand } from "@/commands/prebuild";
 import { resolveMountsCommand } from "@/commands/resolve-mounts";
 import { restoreCommand } from "@/commands/restore";
@@ -14,6 +15,7 @@ const main = defineCommand({
     description: "Devcontainer orchestration CLI",
   },
   subCommands: {
+    doctor: doctorCommand,
     prebuild: prebuildCommand,
     "resolve-mounts": resolveMountsCommand,
     restore: restoreCommand,

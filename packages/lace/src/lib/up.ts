@@ -21,9 +21,16 @@ import {
   MetadataFetchError,
   type FeatureMetadata,
 } from "./feature-metadata";
-import { PortAllocator } from "./port-allocator";
+import { PortAllocator, isPortAvailable } from "./port-allocator";
 import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
 import { checkPortlessAliases } from "./portless-alias-check";
+import {
+  defaultHostPortlessIO,
+  ensureHostPortless,
+  registerHostPortlessAlias,
+  type HostPortlessRuntime,
+} from "./host-portless";
+import { extractLaceCustomizations } from "./feature-metadata";
 import {
   autoInjectPortTemplates,
   autoInjectMountTemplates,
@@ -63,6 +70,26 @@ import {
 } from "./config-drift";
 import { getPodmanCommand } from "./container-runtime";
 import { RunLog } from "./run-log";
+
+/**
+ * Wait up to `timeoutMs` for the given port to start accepting TCP connections.
+ * Returns true if the port was bound within the timeout, false otherwise.
+ *
+ * Used to give a freshly-spawned host portless daemon a moment to bind
+ * before shelling out alias commands against it.
+ */
+async function waitForPortBound(
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const free = await isPortAvailable(port, 50);
+    if (!free) return true; // port is bound
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
 
 /**
  * Query the container runtime for host ports held by this workspace's running container.
@@ -1156,12 +1183,133 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
+  // ── Phase: Host portless lifecycle + alias shellout ──
+  // For each port whose feature declaration sets `portlessAlias: true`,
+  // ensure the host portless on :1355 is running, then register
+  // `portless alias <project> <hostAllocatedPort>` against it. The host
+  // portless aliases route to the project's container portless host-side
+  // mapping, which routes by Host header to per-worktree dev servers.
+  //
+  // Best-effort: any failure here is surfaced as a warning, not a hard
+  // failure, since the container itself is healthy and the user can
+  // still reach the dev servers at `localhost:<allocated-port>` if they
+  // need to bypass portless routing.
+  if (templateResult && templateResult.allocations.length > 0) {
+    const aliasingAllocations: PortAllocation[] = [];
+    for (const allocation of templateResult.allocations) {
+      const [shortId, optionName] = allocation.label.split("/");
+      if (!shortId || !optionName) continue;
+      for (const [fullRef, metadata] of metadataMap) {
+        if (!metadata) continue;
+        if (extractFeatureShortId(fullRef) !== shortId) continue;
+        const lace = extractLaceCustomizations(metadata);
+        const portDecl = lace?.ports?.[optionName];
+        if (portDecl?.portlessAlias === true) {
+          aliasingAllocations.push(allocation);
+        }
+      }
+    }
+    if (aliasingAllocations.length > 0) {
+      try {
+        const io = defaultHostPortlessIO();
+        const ensured = await ensureHostPortless(io);
+        for (const msg of ensured.messages) {
+          if (msg.startsWith("warn:")) console.warn(msg);
+          else console.log(msg);
+        }
+        if (ensured.ready) {
+          let runtime: HostPortlessRuntime | undefined = ensured.runtime;
+          // If we spawned, give the daemon a moment to bind before
+          // shelling out the alias command. This is a coarse-grained
+          // wait; the alias CLI itself contacts the daemon's local
+          // socket, which is created at startup.
+          if (ensured.state.kind !== "lace-owned-alive") {
+            await waitForPortBound(runtime?.port ?? 1355, 3000);
+          }
+          for (const allocation of aliasingAllocations) {
+            const result = registerHostPortlessAlias(
+              io,
+              projectName,
+              allocation.port,
+            );
+            if (result.ok) {
+              console.log(
+                `info: registered portless alias ${projectName} -> :${allocation.port}.`,
+              );
+            } else {
+              console.warn(
+                `Warning: portless alias registration failed for ${projectName} -> :${allocation.port} (exit ${result.exitCode}):\n${result.output}`,
+              );
+            }
+          }
+        } else {
+          console.warn(
+            `Warning: skipping portless alias registration; host portless is not ready.`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `Warning: host portless lifecycle failed (continuing): ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+
   result.message = "lace up completed successfully";
   return result;
 
   } finally {
     finalizeLog();
   }
+}
+
+/**
+ * Rewrite relative local feature references so they remain valid when resolved
+ * from `.lace/devcontainer.json` rather than the original
+ * `.devcontainer/devcontainer.json`.
+ *
+ * The devcontainer CLI:
+ *   1. Resolves a feature ref `./foo` relative to the *config file's*
+ *      directory: `dirname(.lace/devcontainer.json) + ./foo = .lace/foo`.
+ *   2. Requires the resolved absolute path to be a child of
+ *      `<workspaceFolder>/.devcontainer/` (no `..` in the relative
+ *      distance).
+ *
+ * For a ref originally written as `./features/portless` (relative to
+ * `.devcontainer/devcontainer.json`), the equivalent from the
+ * `.lace/devcontainer.json` viewpoint is `../.devcontainer/features/portless`,
+ * which resolves back into the real `.devcontainer/` tree and satisfies the
+ * CLI's child-of-.devcontainer constraint.
+ *
+ * Absolute-path features (used by integration tests) and registry refs
+ * (ghcr.io/...) pass through unchanged.
+ *
+ * Returns the same object reference when no rewrites are needed (caller can
+ * use referential equality to detect that no replacement is necessary).
+ */
+export function rewriteLocalFeatureRefs(
+  features: Record<string, unknown>,
+  devcontainerDir: string,
+  laceDir: string,
+): Record<string, unknown> {
+  const rewritten: Record<string, unknown> = {};
+  let didRewrite = false;
+  for (const [featureRef, opts] of Object.entries(features)) {
+    if (!featureRef.startsWith("./") && !featureRef.startsWith("../")) {
+      rewritten[featureRef] = opts;
+      continue;
+    }
+    const sourcePath = resolve(devcontainerDir, featureRef);
+    if (!existsSync(sourcePath)) {
+      // Leave invalid refs alone so the CLI surfaces its own error.
+      rewritten[featureRef] = opts;
+      continue;
+    }
+    const newRef = "./" + relative(laceDir, sourcePath);
+    rewritten[newRef] = opts;
+    didRewrite = true;
+  }
+  return didRewrite ? rewritten : features;
 }
 
 interface GenerateExtendedConfigOptions {
@@ -1249,24 +1397,8 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
   // (ghcr.io/...) are not local paths.
   {
     const features = (extended.features ?? {}) as Record<string, unknown>;
-    const rewritten: Record<string, unknown> = {};
-    let didRewrite = false;
-    for (const [featureRef, opts] of Object.entries(features)) {
-      if (!featureRef.startsWith("./") && !featureRef.startsWith("../")) {
-        rewritten[featureRef] = opts;
-        continue;
-      }
-      const sourcePath = resolve(devcontainerDir, featureRef);
-      if (!existsSync(sourcePath)) {
-        // Leave invalid refs alone so the CLI surfaces its own error.
-        rewritten[featureRef] = opts;
-        continue;
-      }
-      const newRef = "./" + relative(laceDir, sourcePath);
-      rewritten[newRef] = opts;
-      didRewrite = true;
-    }
-    if (didRewrite) {
+    const rewritten = rewriteLocalFeatureRefs(features, devcontainerDir, laceDir);
+    if (rewritten !== features) {
       extended.features = rewritten;
     }
   }

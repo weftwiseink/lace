@@ -23,6 +23,7 @@ import {
 } from "./feature-metadata";
 import { PortAllocator } from "./port-allocator";
 import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
+import { checkPortlessAliases } from "./portless-alias-check";
 import {
   autoInjectPortTemplates,
   autoInjectMountTemplates,
@@ -883,6 +884,35 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // Build feature port metadata for enriching portsAttributes labels
   featurePortMetadata = buildFeaturePortMetadata(metadataMap);
 
+  // ── Sub-check: portlessAlias diagnostic ──
+  // Driven entirely by the `portlessAlias: true` flag in feature port metadata.
+  // Pure diagnostic: probes host-port availability and emits a forward-looking
+  // pointer to the clean-URL follow-up RFP. No system changes; no effect on
+  // `lace up` runtime in v1.
+  if (templateResult && templateResult.allocations.length > 0) {
+    try {
+      const ownedPortsForCheck = getContainerHostPorts(workspaceFolder, subprocess);
+      const aliasResult = await checkPortlessAliases({
+        metadataMap,
+        allocations: templateResult.allocations,
+        ownedPorts: ownedPortsForCheck,
+        projectName,
+      });
+      for (const message of aliasResult.messages) {
+        if (message.startsWith("warn:")) {
+          console.warn(message);
+        } else {
+          console.log(message);
+        }
+      }
+    } catch (err) {
+      // The diagnostic must never break the pipeline.
+      console.warn(
+        `Warning: portlessAlias sub-check failed (continuing): ${(err as Error).message}`,
+      );
+    }
+  }
+
   // Only read full config (with Dockerfile) if we need prebuild
   let config;
   if (hasPrebuildFeatures) {
@@ -1193,6 +1223,52 @@ function generateExtendedConfig(options: GenerateExtendedConfigOptions): void {
     const originalContextPath = resolve(devcontainerDir, build.context);
     build.context = relative(laceDir, originalContextPath);
     extended.build = build;
+  }
+
+  // Rewrite *relative* local feature references so they remain valid when
+  // resolved from `.lace/devcontainer.json` rather than the original
+  // `.devcontainer/devcontainer.json`.
+  //
+  // The devcontainer CLI:
+  //   1. Resolves a feature ref `./foo` relative to the *config file's*
+  //      directory: `dirname(.lace/devcontainer.json) + ./foo = .lace/foo`.
+  //   2. Requires the resolved absolute path to be a child of
+  //      `<workspaceFolder>/.devcontainer/` (no `..` in the relative
+  //      distance). See cli/dist/spec-node/devContainersSpecCLI.js:
+  //      "Local file path parse error. Resolved path must be a child of
+  //      the .devcontainer/ folder."
+  //
+  // For a ref originally written as `./features/portless` (relative to
+  // `.devcontainer/devcontainer.json`), the equivalent from the
+  // `.lace/devcontainer.json` viewpoint is `../.devcontainer/features/portless`,
+  // which resolves back into the real `.devcontainer/` tree and satisfies
+  // the CLI's child-of-.devcontainer constraint.
+  //
+  // Absolute-path features (used by integration tests) need no rewriting:
+  // they bypass the relative-resolution step entirely. Registry refs
+  // (ghcr.io/...) are not local paths.
+  {
+    const features = (extended.features ?? {}) as Record<string, unknown>;
+    const rewritten: Record<string, unknown> = {};
+    let didRewrite = false;
+    for (const [featureRef, opts] of Object.entries(features)) {
+      if (!featureRef.startsWith("./") && !featureRef.startsWith("../")) {
+        rewritten[featureRef] = opts;
+        continue;
+      }
+      const sourcePath = resolve(devcontainerDir, featureRef);
+      if (!existsSync(sourcePath)) {
+        // Leave invalid refs alone so the CLI surfaces its own error.
+        rewritten[featureRef] = opts;
+        continue;
+      }
+      const newRef = "./" + relative(laceDir, sourcePath);
+      rewritten[newRef] = opts;
+      didRewrite = true;
+    }
+    if (didRewrite) {
+      extended.features = rewritten;
+    }
   }
 
   // Auto-generate port entries and merge them

@@ -419,6 +419,7 @@ describe("extractLaceCustomizations", () => {
           onAutoForward: "silent",
           requireLocalPort: undefined,
           protocol: undefined,
+          portlessAlias: undefined,
         },
       },
     });
@@ -715,6 +716,34 @@ describe("extractLaceCustomizations", () => {
     expect(
       extractLaceCustomizations(makeMetadata("yes"))?.ports?.p
         ?.requireLocalPort,
+    ).toBeUndefined();
+  });
+
+  // Additional: portlessAlias boolean round-trip
+  it("accepts boolean portlessAlias and coerces non-booleans to undefined", () => {
+    const makeMetadata = (portlessAlias: unknown): FeatureMetadata => ({
+      id: "portless",
+      version: "0.1.0",
+      customizations: {
+        lace: { ports: { proxyPort: { portlessAlias } } },
+      },
+    });
+
+    expect(
+      extractLaceCustomizations(makeMetadata(true))?.ports?.proxyPort
+        ?.portlessAlias,
+    ).toBe(true);
+    expect(
+      extractLaceCustomizations(makeMetadata(false))?.ports?.proxyPort
+        ?.portlessAlias,
+    ).toBe(false);
+    expect(
+      extractLaceCustomizations(makeMetadata("yes"))?.ports?.proxyPort
+        ?.portlessAlias,
+    ).toBeUndefined();
+    expect(
+      extractLaceCustomizations(makeMetadata(undefined))?.ports?.proxyPort
+        ?.portlessAlias,
     ).toBeUndefined();
   });
 

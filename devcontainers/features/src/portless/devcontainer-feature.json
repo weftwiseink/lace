@@ -25,7 +25,8 @@
                 "proxyPort": {
                     "label": "portless proxy",
                     "onAutoForward": "silent",
-                    "requireLocalPort": true
+                    "requireLocalPort": true,
+                    "portlessAlias": true
                 }
             }
         }

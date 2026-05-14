@@ -54,6 +54,15 @@ export interface LacePortDeclaration {
     | "ignore";
   requireLocalPort?: boolean;
   protocol?: "http" | "https";
+  /**
+   * Marks this port as the entry point for a portless-style hostname alias.
+   * v1: presence triggers `lace validate` to run a generic host-port-availability
+   * check and emit an informational pointer toward the future clean-URL routing.
+   * No effect on `lace up` runtime in v1.
+   * Future RFP `cdocs/proposals/2026-05-13-rfp-truly-portless-portless.md` will
+   * extend this flag to drive host-side portless lifecycle and clean URLs.
+   */
+  portlessAlias?: boolean;
 }
 
 export interface LaceMountDeclaration {
@@ -669,6 +678,10 @@ export function extractLaceCustomizations(
             ? entry.requireLocalPort
             : undefined,
         protocol: isValidProtocol(entry.protocol) ? entry.protocol : undefined,
+        portlessAlias:
+          typeof entry.portlessAlias === "boolean"
+            ? entry.portlessAlias
+            : undefined,
       };
     }
   }

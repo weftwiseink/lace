@@ -5,7 +5,7 @@ first_authored:
 task_list: weftwise/parallel-feature-development
 type: devlog
 state: live
-status: review_ready
+status: done
 tags: [validation, weftwise, portless, parallel-development, e2e, host-portless]
 ---
 

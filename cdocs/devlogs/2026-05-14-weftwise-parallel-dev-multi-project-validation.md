@@ -5,7 +5,7 @@ first_authored:
 task_list: weftwise/parallel-feature-development/multi-project-verification
 type: devlog
 state: live
-status: review_ready
+status: done
 tags: [portless, multi-project, weftwise, whelm, validation]
 ---
 

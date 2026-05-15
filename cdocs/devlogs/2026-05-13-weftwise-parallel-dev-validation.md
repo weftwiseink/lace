@@ -4,9 +4,9 @@ first_authored:
   at: 2026-05-14T11:30:00-07:00
 task_list: weftwise/parallel-feature-development
 type: devlog
-state: live
-status: wip
-tags: [validation, weftwise, portless, parallel-development, e2e]
+state: archived
+status: done
+tags: [validation, weftwise, portless, parallel-development, e2e, round-7-baseline]
 ---
 
 # Weftwise Parallel-Dev: Empirical Validation

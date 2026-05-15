@@ -5,7 +5,7 @@ first_authored:
 task_list: weftwise/parallel-feature-development/design-decisions
 type: report
 state: live
-status: review_ready
+status: done
 tags: [portless, parallel-development, weftwise, design-decisions, supplemental]
 ---
 

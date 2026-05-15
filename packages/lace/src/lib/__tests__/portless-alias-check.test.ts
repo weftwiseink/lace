@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { checkPortlessAliases } from "@/lib/portless-alias-check";
 import type { FeatureMetadata } from "@/lib/feature-metadata";
 import type { PortAllocation } from "@/lib/port-allocator";
+import type { HostPortlessState } from "@/lib/host-portless";
+
+// Helper: build a constant-state probe for injection.
+function probe(state: HostPortlessState): () => Promise<HostPortlessState> {
+  return async () => state;
+}
+const FREE: HostPortlessState = { kind: "free" };
+const FOREIGN: HostPortlessState = {
+  kind: "foreign-bound",
+  reason: "port 1355 is bound but no lace runtime file is present",
+};
 
 function makeMetadata(
   portlessAlias: boolean | undefined,
@@ -50,7 +61,7 @@ describe("checkPortlessAliases", () => {
       allocations: [makeAlloc("portless/proxyPort", 22435)],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => true,
+      probeHostPortless: probe(FREE),
     });
 
     expect(result.findings).toHaveLength(1);
@@ -58,6 +69,7 @@ describe("checkPortlessAliases", () => {
       label: "portless/proxyPort",
       port: 22435,
       hostPortFree: true,
+      hostPortlessState: "free",
       projectName: "weftwise",
     });
     expect(
@@ -81,7 +93,7 @@ describe("checkPortlessAliases", () => {
     ).toBe(false);
   });
 
-  it("warns when the host portless port (:1355) is held by an unrelated process", async () => {
+  it("warns when the host portless port (:1355) is held by an unrelated process (no runtime file)", async () => {
     const result = await checkPortlessAliases({
       metadataMap: new Map([
         ["./devcontainers/features/src/portless", makeMetadata(true)],
@@ -89,17 +101,82 @@ describe("checkPortlessAliases", () => {
       allocations: [makeAlloc("portless/proxyPort", 22440)],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => false,
+      probeHostPortless: probe(FOREIGN),
     });
 
     expect(result.findings[0]).toMatchObject({
       port: 22440,
       hostPortFree: false,
+      hostPortlessState: "foreign-bound",
     });
     const warn = result.messages.find((m) => m.startsWith("warn:"));
     expect(warn).toBeDefined();
     expect(warn).toContain("host port 1355");
+    expect(warn).toContain("non-lace process");
     expect(warn).toContain("lace doctor --reset");
+  });
+
+  it("emits info (not warn) when lace's own host portless is alive on :1355", async () => {
+    const aliveState: HostPortlessState = {
+      kind: "lace-owned-alive",
+      runtime: {
+        pid: 1950137,
+        port: 1355,
+        startedAt: "2026-05-14T10:00:00.000Z",
+        portlessVersion: "0.13.0",
+      },
+    };
+    const result = await checkPortlessAliases({
+      metadataMap: new Map([
+        ["./devcontainers/features/src/portless", makeMetadata(true)],
+      ]),
+      allocations: [makeAlloc("portless/proxyPort", 22440)],
+      ownedPorts: new Set(),
+      projectName: "weftwise",
+      probeHostPortless: probe(aliveState),
+    });
+
+    expect(result.findings[0]).toMatchObject({
+      port: 22440,
+      hostPortFree: true,
+      hostPortlessState: "lace-owned-alive",
+    });
+    expect(result.messages.some((m) => m.startsWith("warn:"))).toBe(false);
+    const info = result.messages.find((m) =>
+      m.includes("lace's host portless is alive on :1355"),
+    );
+    expect(info).toBeDefined();
+    expect(info).toContain("pid 1950137");
+    expect(info).toContain("reuse");
+  });
+
+  it("warns when the runtime record is stale (recorded PID is dead)", async () => {
+    const staleState: HostPortlessState = {
+      kind: "stale-record",
+      staleRuntime: {
+        pid: 999999,
+        port: 1355,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+    const result = await checkPortlessAliases({
+      metadataMap: new Map([
+        ["./devcontainers/features/src/portless", makeMetadata(true)],
+      ]),
+      allocations: [makeAlloc("portless/proxyPort", 22440)],
+      ownedPorts: new Set(),
+      projectName: "weftwise",
+      probeHostPortless: probe(staleState),
+    });
+
+    expect(result.findings[0]).toMatchObject({
+      hostPortFree: false,
+      hostPortlessState: "stale-record",
+    });
+    const warn = result.messages.find((m) => m.startsWith("warn:"));
+    expect(warn).toBeDefined();
+    expect(warn).toContain("stale lace runtime record");
+    expect(warn).toContain("pid 999999");
   });
 
   it("dedupes the info lines across multiple portlessAlias declarations", async () => {
@@ -131,7 +208,7 @@ describe("checkPortlessAliases", () => {
       ],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => true,
+      probeHostPortless: probe(FREE),
     });
 
     expect(result.findings).toHaveLength(2);
@@ -155,7 +232,7 @@ describe("checkPortlessAliases", () => {
       allocations: [makeAlloc("portless/proxyPort", 22435)],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => true,
+      probeHostPortless: probe(FREE),
     });
 
     expect(result.findings).toHaveLength(0);
@@ -170,7 +247,7 @@ describe("checkPortlessAliases", () => {
       allocations: [],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => true,
+      probeHostPortless: probe(FREE),
     });
 
     expect(result.findings).toHaveLength(0);
@@ -184,7 +261,7 @@ describe("checkPortlessAliases", () => {
       allocations: [makeAlloc("portless/proxyPort", 22435)],
       ownedPorts: new Set(),
       projectName: "weftwise",
-      isPortAvailable: async () => true,
+      probeHostPortless: probe(FREE),
     });
 
     expect(result.findings).toHaveLength(0);
@@ -200,7 +277,7 @@ describe("checkPortlessAliases", () => {
       ownedPorts: new Set(),
       projectName: "weftwise",
       hostPortlessPort: 9999,
-      isPortAvailable: async (port) => port === 9999,
+      probeHostPortless: probe(FREE),
     });
     expect(
       result.messages.some((m) =>

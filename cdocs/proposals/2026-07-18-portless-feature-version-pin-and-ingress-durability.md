@@ -154,6 +154,10 @@ The weftwise handoff asked lace to bridge an interface-to-loopback gap; the inve
 The durability additions (canary, loopback-scoped publish, discoverable origins) each retire a specific documented pain: undiagnosable white screens, LAN exposure of dev servers, and consumers hardcoding `:1355`.
 The maintainer's open options from the review (pin target, host-tier fate, LAN posture) are carried as review Q1-Q3; this proposal assumes the recommended answers and marks the divergence points where a different answer would change a phase.
 
+> NOTE(fable/portless/ingress-durability): Phases 1 and 1b are implemented: pin value 0.15.3 (smoke test passed, fallback unused), feature 1.0.1 published to ghcr (<https://github.com/weftwiseink/lace/actions/runs/29693044839>), weftwise main carries the option override and a lock refreshed to the 1.0.1 digest via `devcontainer upgrade`.
+> The running weftwise container is not yet rebuilt, so the relay-free host `200` acceptance test is pending the maintainer's rebuild; phases 2-6 are outstanding.
+> Implementation devlog: [`2026-07-19-portless-pin-implementation.md`](../devlogs/2026-07-19-portless-pin-implementation.md).
+
 > NOTE(fable/portless/ingress-durability): Round-1 review ([`2026-07-18-review-of-portless-feature-version-pin-and-ingress-durability.md`](../reviews/2026-07-18-review-of-portless-feature-version-pin-and-ingress-durability.md)) found the original draft had no working delivery path: the feature ships as a digest-locked published artifact, so a source-only pin never reached consumers.
 > The current phasing (consumer option override first, republish plus lock refresh second) is the response.
 > Its remaining maintainer questions: whether the option override stays as defense in depth after the lock refresh (assumed: drop it once Phase 1b verifies), feature version bump granularity (assumed: patch bump), and whether the canary ships with the pin or after (assumed: after; the pin does not wait for it).

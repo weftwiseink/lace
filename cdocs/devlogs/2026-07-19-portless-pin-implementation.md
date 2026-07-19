@@ -9,12 +9,12 @@ status: done
 tags: [portless, devcontainer, networking, dependency_pinning, dev-infra]
 ---
 
-# Portless Pin Implementation (Phases 1 and 1b)
+# Portless Pin Implementation (Phases 1, 1b, and 6)
 
-> BLUF: Phases 1 and 1b of the [pin proposal](../proposals/2026-07-18-portless-feature-version-pin-and-ingress-durability.md) are implemented and published.
+> BLUF: Phases 1, 1b, and 6 of the [pin proposal](../proposals/2026-07-18-portless-feature-version-pin-and-ingress-durability.md) are implemented and verified.
 > The pin value is 0.15.3: it passed the scratch-container smoke test (wide `::` bind, Host-header routing, exact version report), so the 0.13.0 fallback was not needed.
 > Feature 1.0.1 is live on ghcr; weftwise main carries the option override and a refreshed lock.
-> Nothing about the running weftwise container changed: rebuild, verification, and relay cleanup (phase 6) remain for the maintainer's chosen time.
+> Phase 6 (maintainer-authorized, 2026-07-19): the weftwise container was rebuilt via `lace up --rebuild`, the hand relay and host tunnel were killed and deleted, and the acceptance test passed end to end: relay-free host `HTTP 200` on both origins, in-container portless 0.15.3 on a wide `::` bind, alias registered by `lace up` itself.
 
 ## Phase 1: pin value smoke test (0.15.3)
 
@@ -77,15 +77,63 @@ Weftwise main (`/var/home/mjr/code/weft/weftwise/main`):
 
 The generated `.lace/devcontainer.json` and `.lace/devcontainer-lock.json` were not hand-edited; `lace up` regenerates them, and the prebuild path re-seeds from the refreshed consumer lock (`extractPrebuiltEntries`), so the new digest propagates.
 
+## Phase 6: rebuild, verification, and runtime-drift cleanup (2026-07-19)
+
+The maintainer directly authorized tearing down the dirty runtime state ("nuke the current dirty state and verify everything lines up"), so the cleanup ran with the ordering inverted from the handback sequence: relay killed first to prove the `502` baseline, then rebuild, then verification.
+Nothing was running in the container at the time.
+
+Before-state (`ps` on the host):
+
+```
+mjr  482722  ... node -e ...listen(22427,"192.168.0.65",...)                # hand relay (container pid 179360)
+mjr 1833217  ... node /var/home/mjr/.cache/weft-portless-bridge.mjs         # host tunnel
+```
+
+In-container portless was 0.15.4, bound loopback-only (`/proc/net/tcp` `0100007F:579B`).
+
+1. **Teardown.** Relay and tunnel killed; `~/.cache/weft-portless-bridge.mjs` deleted. Host baseline confirmed broken:
+
+   ```
+   $ curl -sI http://mirror-rearch.weftwise.localhost:1355/
+   HTTP/1.1 502 Bad Gateway
+   X-Portless: 1
+   ```
+
+2. **Rebuild.** `lace up --rebuild` from `/var/home/mjr/code/weft/weftwise/main` (fresh `--no-cache` prebuild, container recreated):
+
+   ```
+   info: reusing host portless on :1355 (pid 3030001).
+   info: registered portless alias weftwise -> :22427.
+   lace up completed successfully
+   ```
+
+3. **Pin verification** in the rebuilt container:
+
+   ```
+   $ podman exec weftwise sh -lc 'portless --version'
+   0.15.3
+   /proc/net/tcp6: 00000000000000000000000000000000:579B ... 0A   # :: wildcard LISTEN, wide bind
+   ```
+
+4. **Relay-free host `200` on both origins**, with `pnpm wt-dev` serving the weftwise `main` worktree (vite :4252) in the container:
+
+   ```
+   $ curl -sI http://main.weftwise.localhost:1355/
+   HTTP/1.1 200 OK
+   x-portless: 1
+   $ curl -sI http://main.weftwise.localhost:22427/
+   HTTP/1.1 200 OK
+   X-Portless: 1
+   ```
+
+5. **No forwarders anywhere.** Host `ps` has no relay/tunnel/`node -e` matches, the bridge file is gone, and the container's only 22427 listener is the feature entrypoint's `portless proxy start --foreground --port 22427`.
+
+Deviation of record: the weftwise `mirror-rearch` worktree named in the proposal's verification methodology no longer exists on the host (only `main` remains), so the two-origin acceptance test ran against `main`. The weftwise `qa-up` probes target that missing worktree and were not re-run.
+
+The weftwise-side verification record lives in the weftwise repo: `cdocs/reports/2026-07-19-portless-pin-handback.md`.
+
 ## Deliberately not done
 
-- No rebuild, restart, or stop of the running weftwise container: its hand-started relay is load-bearing for active work.
-- The in-container relay and host `~/.cache/weft-portless-bridge.mjs` were NOT deleted (phase 6 is gated on a verified rebuild at the maintainer's chosen time).
 - No upstream issue filed against vercel-labs/portless (draft text delivered in the weftwise handback report, awaiting maintainer go-ahead; phase 5).
-- No bridge/forwarder process added anywhere.
-- Phases 2 (doctor canary), 3 (loopback-scoped publish), 4 (origin discoverability), 5 (upstream issue), and 6 (cleanup) remain outstanding.
-- The proposal's success criteria (relay-free host `200` on a rebuilt container) are therefore NOT yet verified end to end; the smoke test verifies the pin value's bind behavior, and the rebuild verification is handed to weftwise.
-
-## Handback
-
-Weftwise-side rebuild/cleanup sequencing and the upstream issue draft: `cdocs/reports/2026-07-19-portless-pin-handback.md` in the weftwise repo.
+- No bridge/forwarder process added anywhere; the temporary-relay contingency was not needed.
+- Phases 2 (doctor canary), 3 (loopback-scoped publish), 4 (origin discoverability), and 5 (upstream issue) remain outstanding.

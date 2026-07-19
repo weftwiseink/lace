@@ -1,7 +1,7 @@
 {
     "name": "Portless",
     "id": "portless",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Installs portless for localhost subdomain routing. Runs portless in-container on the proxyPort to demux per-branch routes by Host header. With lace, declares portlessAlias=true so the project participates in lace's shared host-portless-on-:1355 routing.",
     "entrypoint": "/usr/local/share/portless-feature/entrypoint.sh",
     "options": {
@@ -12,8 +12,8 @@
         },
         "version": {
             "type": "string",
-            "default": "latest",
-            "description": "Portless version to install (npm version specifier)."
+            "default": "0.15.3",
+            "description": "Portless version to install (npm version specifier). Pinned to 0.15.3: portless 0.15.4 binds the proxy loopback-only, which breaks host ingress on rootless podman/pasta. Unpin when upstream ships an opt-in bind flag decoupled from LAN mode."
         }
     },
     "dependsOn": {

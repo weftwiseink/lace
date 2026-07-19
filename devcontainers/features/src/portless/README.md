@@ -1,7 +1,16 @@
 # Portless (portless)
 
-Installs [portless](https://github.com/nicobrinkkemper/portless) for localhost subdomain routing.
+Installs [portless](https://github.com/vercel-labs/portless) for localhost subdomain routing.
 Declares a lace-managed proxy port with asymmetric mapping to portless's default port 1355.
+
+## Version pin
+
+The `version` option defaults to `0.15.3`, not `latest`.
+portless 0.15.4 (published 2026-07-16) changed the proxy to bind loopback only, which breaks host ingress on rootless podman/pasta hosts: pasta delivers published ports to the container's interface address, which a loopback-only proxy never sees.
+Versions 0.13.0 through 0.15.3 bind all interfaces, so the pinned proxy is reachable with no bridge process.
+See [the pin proposal](https://github.com/weftwiseink/lace/blob/main/cdocs/proposals/2026-07-18-portless-feature-version-pin-and-ingress-durability.md) for the full diagnosis.
+
+Unpin condition: upstream ships an opt-in bind-address flag (or env var) decoupled from LAN/mDNS mode; then bump the pin and pass the flag explicitly.
 
 ## Usage
 
@@ -32,7 +41,7 @@ Pin a specific version:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `proxyPort` | string | `1355` | Container-internal portless proxy port. With lace, used as the container side of an asymmetric port mapping. |
-| `version` | string | `latest` | Portless version to install (npm version specifier). |
+| `version` | string | `0.15.3` | Portless version to install (npm version specifier). Pinned; see "Version pin" above. |
 
 ## Dependencies
 

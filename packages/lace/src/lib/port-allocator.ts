@@ -97,6 +97,18 @@ export class PortAllocator {
   private assignments: Map<string, PortAllocation> = new Map();
   private persistPath: string;
   private readonly ownedPorts: Set<number>;
+  /**
+   * Serializes allocate() calls. allocate() is an async check-then-act
+   * (findAvailablePort reads this.assignments, then a later tick writes it),
+   * so concurrent callers -- e.g. sibling appPort templates resolved through
+   * Promise.all in template-resolver.ts -- would each observe the same free
+   * port before either committed its assignment, handing one host port to two
+   * labels (sshd :2222 and the portless proxy :1355 both grabbing 22426, which
+   * pasta then rejects with a Forwarding configuration conflict). Chaining every
+   * call onto this promise guarantees _allocate runs to completion, assignment
+   * written, before the next begins, regardless of caller concurrency.
+   */
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private workspaceFolder: string, ownedPorts?: Set<number>) {
     this.ownedPorts = ownedPorts ?? new Set();
@@ -137,8 +149,23 @@ export class PortAllocator {
     );
   }
 
-  /** Allocate a port for a label. Reuses existing assignment if port is available. */
+  /**
+   * Allocate a port for a label. Reuses existing assignment if port is available.
+   * Serialized through {@link queue} so concurrent callers can never race on the
+   * same free port; see the field comment for the double-forward failure it prevents.
+   */
   async allocate(label: string): Promise<PortAllocation> {
+    const run = this.queue.then(() => this._allocate(label));
+    // Keep the chain alive even if this call rejects, so one failure does not
+    // wedge every subsequent allocate().
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async _allocate(label: string): Promise<PortAllocation> {
     const existing = this.assignments.get(label);
     if (existing && (this.ownedPorts.has(existing.port) || await isPortAvailable(existing.port))) {
       return existing;

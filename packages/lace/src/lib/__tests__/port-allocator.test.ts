@@ -112,6 +112,34 @@ describe("PortAllocator", () => {
     expect(alloc2.label).toBe("debug-proxy/debugPort");
   });
 
+  // Scenario 4b: Concurrent allocations get distinct ports (regression)
+  // sshd and the portless proxy resolve their host ports concurrently via
+  // Promise.all in template-resolver; before allocate() was serialized both
+  // observed the same free port and grabbed it, so pasta rejected the resulting
+  // double-forward and podman run failed. Scenario 4 only awaited sequentially,
+  // which is why the race shipped. This drives the concurrent path directly.
+  it("allocates distinct ports for labels resolved concurrently", async () => {
+    const allocator = new PortAllocator(workspaceRoot);
+    const [a, b] = await Promise.all([
+      allocator.allocate("lace-fundamentals/sshPort"),
+      allocator.allocate("portless/proxyPort"),
+    ]);
+
+    expect(a.port).not.toBe(b.port);
+    expect(a.label).toBe("lace-fundamentals/sshPort");
+    expect(b.label).toBe("portless/proxyPort");
+  });
+
+  // Scenario 4c: A larger concurrent burst still yields all-distinct ports.
+  it("allocates all-distinct ports for many concurrent labels", async () => {
+    const allocator = new PortAllocator(workspaceRoot);
+    const labels = Array.from({ length: 8 }, (_, i) => `feature-${i}/port`);
+    const allocs = await Promise.all(labels.map((l) => allocator.allocate(l)));
+
+    const ports = allocs.map((a) => a.port);
+    expect(new Set(ports).size).toBe(ports.length);
+  });
+
   // Scenario 5: Same label always returns same port
   it("returns the same port for the same label on repeated calls", async () => {
     const allocator = new PortAllocator(workspaceRoot);

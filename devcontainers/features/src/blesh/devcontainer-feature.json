@@ -1,0 +1,17 @@
+{
+    "id": "blesh",
+    "version": "1.0.0",
+    "name": "ble.sh (Bash Line Editor)",
+    "description": "Installs ble.sh for the remote user at ~/.local/share/blesh so interactive bash (via dotfiles) loads it. Pins a prebuilt ble.sh release tarball for reproducible, cached installs; falls back to build-from-source.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/blesh",
+    "options": {
+        "version": {
+            "type": "string",
+            "default": "0.4.0-devel3",
+            "description": "ble.sh release version to install (matches the akinomyoga/ble.sh release tag without the leading 'v', e.g. 0.4.0-devel3). Used to fetch the prebuilt ble-<version>.tar.xz release asset."
+        }
+    },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils"
+    ]
+}

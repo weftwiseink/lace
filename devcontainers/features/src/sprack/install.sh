@@ -54,21 +54,6 @@ if [ -n "${BASH_VERSION:-}" ]; then
 fi
 PROFILE_EOF
 
-    # Nushell integration: env file that adds a pre_prompt hook.
-    # Nushell does not source /etc/profile.d/ scripts, so a separate .nu file is needed.
-    # The user's nushell config must source this file (typically via chezmoi dotfiles).
-    mkdir -p /etc/nushell
-    cat > /etc/nushell/sprack-hooks.nu << 'NU_EOF'
-# Sprack metadata writer hook for nushell.
-# Source this file from your nushell env.nu or config.nu:
-#   source /etc/nushell/sprack-hooks.nu
-$env.config.hooks.pre_prompt = ($env.config.hooks.pre_prompt | default [] | append {||
-    if ("/mnt/sprack/metadata" | path exists) {
-        ^sprack-metadata-writer
-    }
-})
-NU_EOF
-
     echo "Sprack integration installed (mount dirs + hook bridge + metadata writer)."
 else
     echo "Sprack integration installed (mount dirs + hook bridge, metadata writer disabled)."

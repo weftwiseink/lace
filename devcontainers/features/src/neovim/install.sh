@@ -49,7 +49,7 @@ if [ -x /usr/local/cargo/bin/cargo ] || command -v cargo >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y -qq libclang-dev 2>/dev/null && rm -rf /var/lib/apt/lists/* || true
     fi
-    # Source cargo env explicitly (su - may start nushell which won't load .cargo/env).
+    # Source cargo env explicitly (a non-login/non-interactive shell won't load .cargo/env).
     # Install globally so tree-sitter lands in /usr/local/cargo/bin/ (on PATH for all users).
     . /usr/local/cargo/env 2>/dev/null || true
     cargo install tree-sitter-cli --locked 2>&1 || {

@@ -83,7 +83,7 @@ describe("readUserConfig", () => {
           name: "Jane Developer",
           email: "jane@example.com",
         },
-        defaultShell: "/usr/bin/nu",
+        defaultShell: "/usr/bin/bash",
         containerEnv: {
           EDITOR: "nvim",
         },
@@ -97,7 +97,7 @@ describe("readUserConfig", () => {
     expect(result.features).toBeDefined();
     expect(result.git?.name).toBe("Jane Developer");
     expect(result.git?.email).toBe("jane@example.com");
-    expect(result.defaultShell).toBe("/usr/bin/nu");
+    expect(result.defaultShell).toBe("/usr/bin/bash");
     expect(result.containerEnv?.EDITOR).toBe("nvim");
   });
 

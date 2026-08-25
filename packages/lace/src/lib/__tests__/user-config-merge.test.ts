@@ -215,7 +215,7 @@ describe("applyUserConfig", () => {
         "ghcr.io/devcontainers-extra/features/neovim-homebrew:1": {},
       },
       git: { name: "Jane", email: "jane@example.com" },
-      defaultShell: "/usr/bin/nu",
+      defaultShell: "/usr/bin/bash",
       containerEnv: { EDITOR: "nvim" },
     };
 
@@ -240,7 +240,7 @@ describe("applyUserConfig", () => {
     expect(result.mergedContainerEnv.LACE_GIT_EMAIL).toBe("jane@example.com");
 
     // Default shell
-    expect(result.defaultShell).toBe("/usr/bin/nu");
+    expect(result.defaultShell).toBe("/usr/bin/bash");
 
     // No warnings
     expect(result.warnings).toHaveLength(0);

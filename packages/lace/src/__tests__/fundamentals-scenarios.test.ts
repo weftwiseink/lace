@@ -87,7 +87,7 @@ describe("Scenario F1: fundamentals with user.json", () => {
         name: "Test User",
         email: "test@example.com",
       },
-      defaultShell: "/usr/bin/nu",
+      defaultShell: "/usr/bin/bash",
     });
 
     const config = {
@@ -118,7 +118,7 @@ describe("Scenario F1: fundamentals with user.json", () => {
     // Verify feature is present with defaultShell injected
     const features = extended.features as Record<string, Record<string, unknown>>;
     expect(features[featurePath]).toBeDefined();
-    expect(features[featurePath].defaultShell).toBe("/usr/bin/nu");
+    expect(features[featurePath].defaultShell).toBe("/usr/bin/bash");
 
   });
 });

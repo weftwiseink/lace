@@ -9,15 +9,12 @@
         "defaultShell": {
             "type": "string",
             "default": "",
-            "description": "Absolute path to the default login shell (e.g., /usr/bin/nu). Empty string means no shell change. Typically populated from user.json defaultShell."
+            "description": "Absolute path to the default login shell (e.g., /usr/bin/bash). Empty string means no shell change. Typically populated from user.json defaultShell."
         }
     },
     "dependsOn": {
         "ghcr.io/devcontainers/features/git:1": {}
     },
-    "installsAfter": [
-        "ghcr.io/eitsupi/devcontainer-features/nushell"
-    ],
     "customizations": {
         "lace": {
             "mounts": {

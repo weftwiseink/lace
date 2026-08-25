@@ -29,7 +29,7 @@ When using `lace up`, the init script injection is automatic: lace detects the f
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultShell` | string | `""` | Absolute path to the default login shell (e.g., `/usr/bin/nu`). Empty string means no shell change. Typically populated from `user.json` `defaultShell`. |
+| `defaultShell` | string | `""` | Absolute path to the default login shell (e.g., `/usr/bin/bash`). Empty string means no shell change. Typically populated from `user.json` `defaultShell`. |
 
 ## Dependencies
 

@@ -16,6 +16,10 @@ set -eu
 # unavailable.
 
 VERSION="${VERSION:-0.4.0-devel3}"
+# Optional fzf install so ble.sh's fzf-completion / fzf-key-bindings integration
+# works (otherwise ble emits `"fzf" not found` on every prompt).
+INSTALL_FZF="${INSTALLFZF:-true}"
+FZF_VERSION="${FZFVERSION:-0.74.3}"
 
 _REMOTE_USER="${_REMOTE_USER:-root}"
 if [ "$_REMOTE_USER" = "root" ]; then
@@ -25,13 +29,6 @@ else
 fi
 
 BLESH_DIR="${USER_HOME}/.local/share/blesh"
-
-# Idempotency: if ble.sh is already present (e.g. a re-run or a base image that
-# baked it), do nothing.
-if [ -f "${BLESH_DIR}/ble.sh" ]; then
-    echo "blesh: ble.sh already present at ${BLESH_DIR}/ble.sh; skipping."
-    exit 0
-fi
 
 mkdir -p "${BLESH_DIR}"
 
@@ -81,7 +78,64 @@ install_from_source() {
     [ -f "${BLESH_DIR}/ble.sh" ]
 }
 
-if install_from_release; then
+install_fzf() {
+    command -v curl >/dev/null 2>&1 || { echo "blesh: curl not available for fzf."; return 1; }
+
+    # 1. fzf binary -> ~/.local/bin/fzf (idempotent).
+    if command -v fzf >/dev/null 2>&1 || [ -x "${USER_HOME}/.local/bin/fzf" ]; then
+        echo "blesh: fzf binary already present; skipping binary."
+    else
+        command -v tar >/dev/null 2>&1 || { echo "blesh: tar not available for fzf."; return 1; }
+        arch="$(uname -m)"
+        case "${arch}" in
+            x86_64 | amd64) fzf_arch="amd64" ;;
+            aarch64 | arm64) fzf_arch="arm64" ;;
+            armv7l) fzf_arch="armv7" ;;
+            *) echo "blesh: unsupported arch '${arch}' for fzf; skipping."; return 1 ;;
+        esac
+        url="https://github.com/junegunn/fzf/releases/download/v${FZF_VERSION}/fzf-${FZF_VERSION}-linux_${fzf_arch}.tar.gz"
+        tmp="$(mktemp -d)"
+        echo "blesh: fetching fzf ${FZF_VERSION} (${fzf_arch}) from ${url}"
+        if ! curl -fsSL -o "${tmp}/fzf.tar.gz" "${url}"; then
+            echo "blesh: fzf download failed."
+            rm -rf "${tmp}"
+            return 1
+        fi
+        mkdir -p "${USER_HOME}/.local/bin"
+        tar -xzf "${tmp}/fzf.tar.gz" -C "${USER_HOME}/.local/bin" fzf
+        chmod +x "${USER_HOME}/.local/bin/fzf"
+        rm -rf "${tmp}"
+    fi
+
+    # 2. fzf shell integration files. The binary-only tarball ships neither
+    # completion.bash nor key-bindings.bash, but ble.sh's fzf integration sources
+    # them from a detected base dir. Placing them at ~/.local/share/fzf/ matches
+    # ble's fzf-initialize auto-detection (ret/share/fzf/key-bindings.bash), so
+    # _fzf_complete / fzf key-bindings load and ble stops erroring.
+    fzf_share="${USER_HOME}/.local/share/fzf"
+    mkdir -p "${fzf_share}"
+    for f in completion.bash key-bindings.bash; do
+        if [ ! -s "${fzf_share}/${f}" ]; then
+            curl -fsSL -o "${fzf_share}/${f}" \
+                "https://raw.githubusercontent.com/junegunn/fzf/v${FZF_VERSION}/shell/${f}" \
+                || echo "blesh: WARNING: fzf ${f} not fetched; ble fzf-${f%.bash} integration inactive." >&2
+        fi
+    done
+
+    if [ "$_REMOTE_USER" != "root" ]; then
+        chown "${_REMOTE_USER}:${_REMOTE_USER}" "${USER_HOME}/.local" "${USER_HOME}/.local/bin" "${USER_HOME}/.local/share" 2>/dev/null || true
+        [ -e "${USER_HOME}/.local/bin/fzf" ] && chown "${_REMOTE_USER}:${_REMOTE_USER}" "${USER_HOME}/.local/bin/fzf" 2>/dev/null || true
+        chown -R "${_REMOTE_USER}:${_REMOTE_USER}" "${fzf_share}" 2>/dev/null || true
+    fi
+
+    command -v fzf >/dev/null 2>&1 || [ -x "${USER_HOME}/.local/bin/fzf" ]
+}
+
+# Idempotency: skip the ble.sh install when it is already present (a re-run or a
+# base image that baked it), but still fall through to the fzf install below.
+if [ -f "${BLESH_DIR}/ble.sh" ]; then
+    echo "blesh: ble.sh already present at ${BLESH_DIR}/ble.sh; skipping ble.sh install."
+elif install_from_release; then
     echo "blesh: installed prebuilt ble.sh ${VERSION} to ${BLESH_DIR}."
 elif install_from_source; then
     echo "blesh: installed ble.sh from source to ${BLESH_DIR}."
@@ -93,6 +147,16 @@ fi
 # Ensure the remote user owns the whole tree (feature install runs as root).
 if [ "$_REMOTE_USER" != "root" ]; then
     chown -R "${_REMOTE_USER}:${_REMOTE_USER}" "${USER_HOME}/.local/share/blesh" 2>/dev/null || true
+fi
+
+# fzf is optional and non-fatal: ble.sh is the primary deliverable, and the
+# dotfiles blerc guards its fzf integration on `command -v fzf`.
+if [ "${INSTALL_FZF}" = "true" ]; then
+    if install_fzf; then
+        echo "blesh: fzf ${FZF_VERSION} installed to ${USER_HOME}/.local/bin/fzf."
+    else
+        echo "blesh: WARNING: fzf not installed; ble.sh fzf integration stays inactive (blerc guards it)." >&2
+    fi
 fi
 
 echo "blesh: install complete."

@@ -1,14 +1,24 @@
 {
     "id": "blesh",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "name": "ble.sh (Bash Line Editor)",
-    "description": "Installs ble.sh for the remote user at ~/.local/share/blesh so interactive bash (via dotfiles) loads it. Pins a prebuilt ble.sh release tarball for reproducible, cached installs; falls back to build-from-source.",
+    "description": "Installs ble.sh for the remote user at ~/.local/share/blesh so interactive bash (via dotfiles) loads it. Pins a prebuilt ble.sh release tarball for reproducible, cached installs; falls back to build-from-source. Optionally installs a pinned fzf binary so ble.sh's fzf integration works.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/blesh",
     "options": {
         "version": {
             "type": "string",
             "default": "0.4.0-devel3",
             "description": "ble.sh release version to install (matches the akinomyoga/ble.sh release tag without the leading 'v', e.g. 0.4.0-devel3). Used to fetch the prebuilt ble-<version>.tar.xz release asset."
+        },
+        "installFzf": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also install a pinned fzf binary into the remote user's ~/.local/bin so ble.sh's fzf-completion / fzf-key-bindings integration works. Without fzf, ble emits '\"fzf\" not found' errors on every prompt."
+        },
+        "fzfVersion": {
+            "type": "string",
+            "default": "0.74.3",
+            "description": "fzf release version to install when installFzf is true (junegunn/fzf release tag without the leading 'v')."
         }
     },
     "installsAfter": [

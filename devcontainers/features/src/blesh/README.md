@@ -18,12 +18,21 @@ vi keybindings, etc.).
 - Is a no-op if `~/.local/share/blesh/ble.sh` already exists, so it coordinates with
   the dotfiles `run_once_before_20-install-blesh.sh` installer (whichever runs first
   wins; the other short-circuits).
+- Optionally installs **fzf** (`installFzf`, default true): a pinned fzf binary to
+  `~/.local/bin/fzf` plus its `completion.bash` / `key-bindings.bash` shell files to
+  `~/.local/share/fzf/`. ble.sh's fzf integration auto-detects that base directory, so
+  `fzf-completion` and `fzf-key-bindings` work. Without fzf, ble emits
+  `"fzf" not found` / `_fzf_complete is not a function` on every prompt. The fzf
+  binary-only release tarball ships neither shell file, so the feature fetches them
+  from the fzf repo at the pinned tag. fzf install is best-effort and non-fatal.
 
 ## Options
 
-| Option    | Type   | Default        | Description |
-|-----------|--------|----------------|-------------|
-| `version` | string | `0.4.0-devel3` | ble.sh release version (the `akinomyoga/ble.sh` release tag without the leading `v`). Fetches `ble-<version>.tar.xz`. |
+| Option       | Type    | Default        | Description |
+|--------------|---------|----------------|-------------|
+| `version`    | string  | `0.4.0-devel3` | ble.sh release version (the `akinomyoga/ble.sh` release tag without the leading `v`). Fetches `ble-<version>.tar.xz`. |
+| `installFzf` | boolean | `true`         | Also install a pinned fzf binary + shell integration files so ble.sh's fzf integration works. |
+| `fzfVersion` | string  | `0.74.3`       | fzf release version to install when `installFzf` is true (`junegunn/fzf` tag without the leading `v`). |
 
 ## Usage
 

@@ -1,0 +1,26 @@
+{
+    "id": "bash-history",
+    "version": "1.0.0",
+    "name": "Persistent Bash History",
+    "description": "Declares the per-project /bash-history bind mount and points HISTFILE at it for persistent, per-project, endless, timestamped bash history. Installs no binary; a one-time login-shell migration preserves any history left at the old /commandhistory target.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/bash-history",
+    "options": {},
+    "containerEnv": {
+        "HISTFILE": "/bash-history/.bash_history"
+    },
+    "customizations": {
+        "lace": {
+            "mounts": {
+                "history": {
+                    "target": "/bash-history",
+                    "description": "Persistent per-project bash history"
+                }
+            }
+        }
+    },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils",
+        "ghcr.io/weftwiseink/devcontainer-features/blesh",
+        "ghcr.io/weftwiseink/devcontainer-features/lace-fundamentals"
+    ]
+}

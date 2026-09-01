@@ -4,8 +4,23 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Runtime-affecting config properties that require container recreation
- * when changed. Excluded properties:
+ * Config properties whose change requires recreating (and, for image-affecting
+ * keys, rebuilding) the container. The fingerprint over this subset is the
+ * "recreation fingerprint."
+ *
+ * The set covers both runtime-affecting keys (containerEnv, mounts, ...) and
+ * image-affecting keys (`features`, `build`). On the `lace up` path a detected
+ * change recreates the container via `--remove-existing-container`, which, with
+ * the retained BuildKit-never cleanup, also rebuilds the image, so a single
+ * fingerprint is behaviorally sufficient for both today.
+ *
+ * NOTE(claude-opus-4-8/lace/up-path-fixes): If lace ever wants a lighter
+ * recreate that skips the image rebuild, split this into a runtime subset and a
+ * separate BUILD_KEYS = ["features", "build"] with its own fingerprint, so the
+ * code can distinguish "recreate container" from "rebuild image." The file and
+ * function names retain "runtime" to avoid churn; read them as "recreation."
+ *
+ * Excluded properties:
  * - postStartCommand, postAttachCommand: run on every container start,
  *   no recreation needed.
  * - forwardPorts, appPort: managed by the port allocator via its own
@@ -22,6 +37,8 @@ const RUNTIME_KEYS = [
   "runArgs",
   "remoteUser",
   "postCreateCommand",
+  "features",
+  "build",
 ] as const;
 
 const FINGERPRINT_FILE = "runtime-fingerprint";
@@ -36,10 +53,11 @@ export function sortedStringify(obj: unknown): string {
 }
 
 /**
- * Compute a SHA-256 fingerprint of the runtime-affecting properties in a
- * devcontainer config. Only properties that require container recreation
- * are included; changes to other properties (features, build, etc.) do
- * not trigger drift warnings.
+ * Compute a SHA-256 fingerprint of the recreation-affecting properties in a
+ * devcontainer config (RUNTIME_KEYS, which now includes `features` and
+ * `build`). Only properties that require container recreation or image rebuild
+ * are included; derived state such as forwardPorts/appPort is excluded so port
+ * reallocation does not spuriously trigger drift.
  */
 export function computeRuntimeFingerprint(
   config: Record<string, unknown>,

@@ -93,7 +93,7 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp1).not.toBe(fp2);
   });
 
-  it("produces same hash for configs differing only in non-runtime properties", () => {
+  it("produces different hashes for configs differing only in features", () => {
     const fp1 = computeRuntimeFingerprint({
       workspaceFolder: "/workspace",
       features: { "ghcr.io/foo/bar:1": {} },
@@ -102,10 +102,12 @@ describe("computeRuntimeFingerprint", () => {
       workspaceFolder: "/workspace",
       features: { "ghcr.io/foo/bar:2": {} },
     });
-    expect(fp1).toBe(fp2);
+    // features is now part of the recreation fingerprint: a features change
+    // must flip the hash so `lace up` no longer silently reuses a stale image.
+    expect(fp1).not.toBe(fp2);
   });
 
-  it("produces same hash for configs with build-only differences", () => {
+  it("produces different hashes for build-only differences", () => {
     const fp1 = computeRuntimeFingerprint({
       workspaceFolder: "/workspace",
       build: { dockerfile: "Dockerfile" },
@@ -114,7 +116,8 @@ describe("computeRuntimeFingerprint", () => {
       workspaceFolder: "/workspace",
       build: { dockerfile: "Dockerfile.dev" },
     });
-    expect(fp1).toBe(fp2);
+    // build (Dockerfile / FROM / args) is now part of the recreation fingerprint.
+    expect(fp1).not.toBe(fp2);
   });
 
   it("produces same hash regardless of key insertion order (deterministic serialization)", () => {
@@ -133,13 +136,20 @@ describe("computeRuntimeFingerprint", () => {
     );
   });
 
-  it("produces same hash for empty config and config with only non-runtime keys", () => {
+  it("empty config and features-only config produce different hashes", () => {
     const fp1 = computeRuntimeFingerprint({});
     const fp2 = computeRuntimeFingerprint({
       features: { "ghcr.io/foo/bar:1": {} },
+    });
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it("empty config and build-only config produce different hashes", () => {
+    const fp1 = computeRuntimeFingerprint({});
+    const fp2 = computeRuntimeFingerprint({
       build: { dockerfile: "Dockerfile" },
     });
-    expect(fp1).toBe(fp2);
+    expect(fp1).not.toBe(fp2);
   });
 
   it("treats null RUNTIME_KEY value differently from absent key", () => {
@@ -172,7 +182,7 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp3).toBe(fp4);
   });
 
-  it("detects changes to each RUNTIME_KEYS property", () => {
+  it("detects changes to each RUNTIME_KEYS property (now including features and build)", () => {
     const base = computeRuntimeFingerprint({});
     const runtimeKeys = [
       "containerEnv",
@@ -182,6 +192,8 @@ describe("computeRuntimeFingerprint", () => {
       "runArgs",
       "remoteUser",
       "postCreateCommand",
+      "features",
+      "build",
     ];
     for (const key of runtimeKeys) {
       const config: Record<string, unknown> = { [key]: "test-value" };
@@ -258,13 +270,69 @@ describe("checkConfigDrift", () => {
     expect(drift.drifted).toBe(true);
   });
 
-  it("does not report drift for non-runtime property changes", () => {
+  it("reports drift when features change (features-only drift)", () => {
+    const oldConfig = {
+      workspaceFolder: "/workspace",
+      features: { "ghcr.io/foo:1": {} },
+    };
+    writeRuntimeFingerprint(tempDir, computeRuntimeFingerprint(oldConfig));
+
+    // Bumping a feature version must now trigger drift.
+    const drift = checkConfigDrift(
+      { workspaceFolder: "/workspace", features: { "ghcr.io/foo:2": {} } },
+      tempDir,
+    );
+    expect(drift.drifted).toBe(true);
+  });
+
+  it("reports drift when adding features to a previously feature-less config", () => {
     const config = { workspaceFolder: "/workspace" };
     writeRuntimeFingerprint(tempDir, computeRuntimeFingerprint(config));
 
-    // Adding features should not trigger drift
     const drift = checkConfigDrift(
       { workspaceFolder: "/workspace", features: { "ghcr.io/foo:1": {} } },
+      tempDir,
+    );
+    expect(drift.drifted).toBe(true);
+  });
+
+  it("reports drift when build/FROM changes (build-only drift)", () => {
+    const oldConfig = {
+      workspaceFolder: "/workspace",
+      build: { dockerfile: "Dockerfile" },
+    };
+    writeRuntimeFingerprint(tempDir, computeRuntimeFingerprint(oldConfig));
+
+    // A Dockerfile swap (FROM change proxy) must trigger drift.
+    const driftDockerfile = checkConfigDrift(
+      { workspaceFolder: "/workspace", build: { dockerfile: "Dockerfile.dev" } },
+      tempDir,
+    );
+    expect(driftDockerfile.drifted).toBe(true);
+
+    // A build.args change (Dockerfile-content proxy) must also trigger drift.
+    writeRuntimeFingerprint(tempDir, computeRuntimeFingerprint(oldConfig));
+    const driftArgs = checkConfigDrift(
+      {
+        workspaceFolder: "/workspace",
+        build: { dockerfile: "Dockerfile", args: { NODE_VERSION: "24" } },
+      },
+      tempDir,
+    );
+    expect(driftArgs.drifted).toBe(true);
+  });
+
+  it("does not report drift for port-derived-state changes (forwardPorts/appPort)", () => {
+    const config = {
+      workspaceFolder: "/workspace",
+      forwardPorts: [22425],
+      appPort: [8080],
+    };
+    writeRuntimeFingerprint(tempDir, computeRuntimeFingerprint(config));
+
+    // Port reallocation is derived state and must NOT trigger a rebuild.
+    const drift = checkConfigDrift(
+      { workspaceFolder: "/workspace", forwardPorts: [22427], appPort: [9090] },
       tempDir,
     );
     expect(drift.drifted).toBe(false);

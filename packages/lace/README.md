@@ -1,6 +1,6 @@
 # lace
 
-Devcontainer orchestration CLI. Manages port allocation, feature prebuilds, repo mounts, template resolution, workspace layout detection, and host-side validation on top of the standard `devcontainer` CLI.
+Devcontainer orchestration CLI. Manages port allocation, features, repo mounts, template resolution, workspace layout detection, and host-side validation on top of the standard `devcontainer` CLI.
 
 ## Install
 
@@ -16,7 +16,7 @@ npm install lace
 lace up --workspace-folder .
 ```
 
-`lace up` reads `.devcontainer/devcontainer.json`, resolves templates, allocates ports, runs prebuilds and repo mounts if configured, generates an extended config at `.lace/devcontainer.json`, and invokes `devcontainer up` with it.
+`lace up` reads `.devcontainer/devcontainer.json`, resolves templates, allocates ports, resolves repo mounts if configured, generates an extended config at `.lace/devcontainer.json`, and invokes `devcontainer up` with it.
 
 ## Commands
 
@@ -34,10 +34,9 @@ The main command. Runs the full orchestration pipeline:
 8. Resolve all templates (port allocation, mount path resolution)
 9. Warn about bind-mount sources that do not exist on the host
 10. Emit guided configuration for unconfigured mounts
-11. Prebuild features (if `prebuildFeatures` configured)
-12. Resolve repo mounts (if `repoMounts` configured)
-13. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
-14. Invoke `devcontainer up`
+11. Resolve repo mounts (if `repoMounts` configured)
+12. Generate `.lace/devcontainer.json` with resolved ports, mounts, and symlinks
+13. Invoke `devcontainer up --buildkit never`
 
 ```sh
 lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation] [--skip-validation]
@@ -52,34 +51,9 @@ lace up [--workspace-folder <path>] [--no-cache] [--skip-metadata-validation] [-
 
 Any unrecognized flags are passed through to `devcontainer up`.
 
-### `lace prebuild`
-
-Pre-bake features onto the base image. Supports both Dockerfile-based and image-based configs.
-
-```sh
-lace prebuild [--dry-run] [--force]
-```
-
-| Flag | Effect |
-|------|--------|
-| `--dry-run` | Show planned actions without building or modifying files. |
-| `--force` | Bypass cache and force a full rebuild. |
-
-### `lace restore`
-
-Undo the prebuild rewrite, restoring the original Dockerfile FROM or devcontainer.json `image` field. The `.lace/prebuild/` cache is preserved for future reactivation.
-
-```sh
-lace restore
-```
-
-### `lace status`
-
-Show current prebuild state: active, cached, or inactive. Reports the original image reference, prebuild tag, build timestamp, and whether the config has changed since the last build.
-
-```sh
-lace status
-```
+> Earlier versions had `lace prebuild`, `lace restore`, and `lace status` subcommands plus a `customizations.lace.prebuildFeatures` config key.
+> These are removed: list every feature under the top-level `features` map and warm builds are served by the legacy builder's local layer cache.
+> See [docs/prebuild.md](docs/prebuild.md) for the migration.
 
 ### `lace resolve-mounts`
 
@@ -229,7 +203,7 @@ Declaration fields:
 
 Declared mounts are auto-injected into the `mounts` array as `${lace.mount(ns/label)}` entries. If a declaration's label already appears in the mounts array in any accessor form, injection is suppressed — the user's explicit entry controls placement.
 
-Both regular features and prebuild features participate in auto-injection. Mounts are runtime config (`docker run` flags), so there is no build/runtime lifecycle asymmetry as there is with ports.
+Mounts declared by project config and by feature metadata both participate in auto-injection.
 
 ### Validated mounts
 
@@ -377,34 +351,29 @@ Lace fetches `devcontainer-feature.json` metadata from OCI registries (via `devc
 
 Metadata is cached at `~/.config/lace/cache/features/`. Pinned versions (exact semver, digest refs) are cached permanently. Floating tags (major-only, `latest`) expire after 24 hours.
 
-## Prebuilds
+## Features and warm builds
 
-Features listed under `customizations.lace.prebuildFeatures` are pre-built into a cached local image before container creation:
+List every feature under the top-level `features` map:
 
 ```jsonc
 {
   "build": { "dockerfile": "Dockerfile" },
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {},
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
-      }
-    }
-  },
   "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
     "ghcr.io/devcontainers/features/sshd:1": {}
   }
 }
 ```
 
-Rules:
-- A feature cannot appear in both `prebuildFeatures` and `features` (overlap detection is version-insensitive).
-- Both Dockerfile-based and image-based configs are supported.
-- Set `prebuildFeatures` to `null` to silently skip, or `{}` to skip with a message.
-- `${lace.port()}` expressions in `prebuildFeatures` are **not** resolved (a warning is emitted). Prebuild features use their default option values.
+`lace up` invokes `devcontainer up --buildkit never`.
+The legacy builder produces a local layer cache in the container runtime's normal storage, so subsequent runs reuse cached feature-install layers automatically (no lace-side cache management).
 
-The prebuild image is tagged `lace.local/<base-image>` and stored in the local Docker daemon only. After building, lace rewrites the Dockerfile FROM or `image` field to point at it. Use `lace restore` before committing to revert the rewrite.
+Features install *after* your Dockerfile's `ENV` and `RUN` directives.
+If a Dockerfile `ENV` affects tooling a feature installs (e.g., `NPM_CONFIG_PREFIX` versus a transitively-pulled `node` feature), see [docs/troubleshooting.md](docs/troubleshooting.md#3-feature-install-env-order-conflicts).
+
+> Earlier versions pre-baked a `customizations.lace.prebuildFeatures` block into a `lace.local/*` image via `lace prebuild`.
+> That subcommand and config key are removed; see [docs/prebuild.md](docs/prebuild.md) for the migration.
 
 ## Portless (localhost subdomain routing)
 
@@ -412,7 +381,7 @@ The portless devcontainer feature gives each dev server a stable `{name}.localho
 
 ### Setup
 
-Add portless to `prebuildFeatures` in your devcontainer.json:
+Add portless to the top-level `features` map in your devcontainer.json:
 
 ```jsonc
 {
@@ -423,16 +392,16 @@ Add portless to `prebuildFeatures` in your devcontainer.json:
   },
   "customizations": {
     "lace": {
-      "workspace": { "layout": "bare-worktree" },
-      "prebuildFeatures": {
-        "ghcr.io/weft/devcontainer-features/portless:0": {}
-      }
+      "workspace": { "layout": "bare-worktree" }
     }
+  },
+  "features": {
+    "ghcr.io/weft/devcontainer-features/portless:0": {}
   }
 }
 ```
 
-Lace allocates a host port and maps asymmetrically to portless's default port 1355 inside the container (e.g., `22435:1355`).
+Portless declares its `proxyPort` option in lace port metadata, so lace allocates a host port and injects it symmetrically: the proxy listens on that port inside the container and the host maps it one-to-one (e.g., `22435:22435`).
 
 ### Usage
 
@@ -465,15 +434,15 @@ For single-service worktrees, the service prefix can be omitted: just `{worktree
 
 | Setup | URL pattern | Requirements |
 |-------|-------------|--------------|
-| Feature + lace | `http://web.main.localhost:22435` | Add the feature to prebuildFeatures |
+| Feature + lace | `http://web.main.localhost:22435` | Add the feature to `features` |
 | Feature, no lace | `http://web.main.localhost:1355` | Manual port forwarding for 1355 |
 | No feature | `http://localhost:3000` | Raw dev server (port conflicts across worktrees) |
 
 ### How it works
 
-Portless runs its proxy on port 1355 (default) inside the container. Lace allocates a host port from the 22425-22499 range and creates an asymmetric Docker mapping (e.g., `22435:1355`). The `*.localhost` domain resolves to `127.0.0.1` via RFC 6761 / nss-myhostname on Linux.
+Lace allocates a host port from the 22425-22499 range and injects it as portless's `proxyPort`, so the proxy listens on that port inside the container and the host maps it symmetrically (e.g., `22435:22435`). The `*.localhost` domain resolves to `127.0.0.1` via RFC 6761 / nss-myhostname on Linux.
 
-No lace core changes are needed -- the existing prebuild features pipeline handles asymmetric port injection automatically.
+No lace core changes are needed -- the feature port auto-injection pipeline handles this from the `features` map.
 
 ### Troubleshooting
 
@@ -729,7 +698,7 @@ Two approaches:
 
 ## .gitignore
 
-Add `.lace/` to your `.gitignore`. It contains machine-specific artifacts (port assignments, prebuild cache, generated configs):
+Add `.lace/` to your `.gitignore`. It contains machine-specific artifacts (port assignments, mount assignments, generated configs):
 
 ```
 .lace/
@@ -738,25 +707,17 @@ Add `.lace/` to your `.gitignore`. It contains machine-specific artifacts (port 
 ## Workflow
 
 ```sh
-# Normal development
+# Normal development: builds, or reuses the legacy builder's warm layer cache
 lace up
 
-# Before committing (if using prebuilds)
-lace restore
-git add . && git commit
-lace prebuild   # instant re-activation from cache
-
-# Check prebuild state
-lace status
-
-# Force rebuild after changing prebuild features
-lace prebuild --force
+# Force a full rebuild (recreate the container from scratch)
+lace up --rebuild
 ```
 
 ## User-level data
 > NOTE: Updated 2026-02-14
 
-Lace stores data in three locations: a per-project `.lace/` directory, a user-level `~/.config/lace/` tree, and the local Docker daemon.
+Lace stores data in two locations: a per-project `.lace/` directory and a user-level `~/.config/lace/` tree. Warm-build layers live in the container runtime's own storage, managed by the runtime, not by lace.
 
 ### File layout
 
@@ -773,20 +734,10 @@ Lace stores data in three locations: a per-project `.lace/` directory, a user-le
   port-assignments.json                  # Persisted port allocations
   mount-assignments.json                 # Persisted mount path assignments
   resolved-mounts.json                   # Resolved repo mount specs
-  prebuild.lock                          # flock(1) exclusion file
-  prebuild/
-    Dockerfile, devcontainer.json        # Temp prebuild context
-    devcontainer-lock.json               # Seeded lock for version pinning
-    metadata.json                        # Prebuild state (original image, tag, timestamp)
-
-Docker images: lace.local/<image>:<tag>  # Local-only prebuild images
 ```
 
-Lace also modifies `.devcontainer/Dockerfile` (the FROM line) and `.devcontainer/devcontainer.json` (the `image` field) during prebuild; `lace restore` reverts these.
-
 > NOTE(mjr): original design goal was for lace to be very minimalist/lightweight,
-> thus the efforts to maintain devcontainer spec compliance,
-> but the surface area for preprocessing/prebuilds has grown such that it may no longer be sensible.
+> thus the efforts to maintain devcontainer spec compliance.
 
 ### Configuration
 
@@ -809,7 +760,6 @@ Values that are fixed today but could become user-configurable:
 | Git clone depth | `repo-clones.ts` | `--depth 1` |
 | Container mount prefix (repo mounts) | `mounts.ts` | `/mnt/lace/repos` |
 | Default mount source dir | `mount-resolver.ts` | `~/.config/lace/<projectId>/mounts/<ns>/<label>` |
-| Docker image tag prefix | `dockerfile.ts` | `lace.local/` |
 
 Note: paths under `~/.config/lace/` do not currently honor `$XDG_CONFIG_HOME` or `$XDG_CACHE_HOME`. The cache directory is stored alongside config rather than under `$XDG_CACHE_HOME`.
 
@@ -818,5 +768,5 @@ Note: paths under `~/.config/lace/` do not currently honor `$XDG_CONFIG_HOME` or
 - [Architecture overview](docs/architecture.md) -- how `lace up` transforms your config through its pipeline
 - [Troubleshooting guide](docs/troubleshooting.md) -- common failure modes with symptoms, causes, and fixes
 - [Migration guide](docs/migration.md) -- incremental steps from `devcontainer` CLI to lace
-- [Prebuild internals](docs/prebuild.md) -- FROM rewriting, cache behavior, image tagging
+- [Removing `lace prebuild`](docs/prebuild.md) -- migrating `prebuildFeatures` into `features`
 - [Contributing guidelines](../../CONTRIBUTING.md) -- codebase idioms, testing patterns, conventions

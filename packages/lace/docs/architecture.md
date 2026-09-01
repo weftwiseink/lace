@@ -53,12 +53,6 @@ template expressions resolved to concrete values.
         |
         v
   +-------------------+
-  | Prebuilds         |  Bake slow features into cached local images
-  | (if configured)   |  (lace.local/* Docker images)
-  +-------------------+
-        |
-        v
-  +-------------------+
   | Repo Mounts       |  Clone/update repos, generate bind-mount specs
   | (if configured)   |
   +-------------------+
@@ -79,12 +73,11 @@ template expressions resolved to concrete values.
 The key insight: lace does not replace the devcontainer CLI. It
 preprocesses your config into a standard one that the devcontainer CLI
 consumes unchanged. Everything lace adds -- port allocations, mount
-resolution, prebuild images -- is expressed in standard devcontainer.json
-fields.
+resolution -- is expressed in standard devcontainer.json fields.
 
 ## Layer-to-step mapping
 
-The README documents 14 pipeline steps for `lace up`. Here is how those
+The README documents 13 pipeline steps for `lace up`. Here is how those
 steps map to the conceptual layers above. Step numbers reference the
 numbered list in the [README's `lace up` section](../README.md#lace-up).
 
@@ -96,10 +89,9 @@ numbered list in the [README's `lace up` section](../README.md#lace-up).
 | Auto-Injection          | 4-5         | Inject `${lace.port()}` and `${lace.mount()}` templates from declarations; deduplicate static mounts |
 | Mount Validation        | 6-7         | Validate mount namespaces, target conflicts, `sourceMustBe` type checks |
 | Template Resolution     | 8-10        | Resolve all templates to concrete values; allocate ports; resolve mount paths; emit guidance |
-| Prebuilds               | 11          | Build features into cached local images, rewrite Dockerfile FROM / image field |
-| Repo Mounts             | 12          | Clone/update repos, generate bind-mount specs and symlink commands |
-| Config Generation       | 13          | Generate `.lace/devcontainer.json` with all resolved values |
-| devcontainer up         | 14          | Invoke the standard CLI with the generated config |
+| Repo Mounts             | 11          | Clone/update repos, generate bind-mount specs and symlink commands |
+| Config Generation       | 12          | Generate `.lace/devcontainer.json` with all resolved values |
+| devcontainer up         | 13          | Invoke the standard CLI (`--buildkit never`) with the generated config |
 
 ## Dependency flow between layers
 
@@ -116,10 +108,6 @@ Later phases depend on earlier ones. This is why the ordering matters:
 - **Template Resolution** must run before **Config Generation** because the
   generated config needs concrete port numbers and mount paths, not
   template expressions.
-- **Prebuilds** run after template resolution because the prebuild pipeline
-  needs the resolved config to determine the base image. Note that
-  `${lace.port()}` expressions in `prebuildFeatures` are NOT resolved --
-  prebuild features use their default option values.
 
 ## Worked example: port resolution flow
 
@@ -269,8 +257,6 @@ Generated artifacts specific to one workspace:
 - `port-assignments.json` -- persisted port allocations (reused across runs)
 - `mount-assignments.json` -- persisted mount path assignments
 - `resolved-mounts.json` -- resolved repo mount specs
-- `prebuild.lock` -- flock(1) exclusion file
-- `prebuild/` -- temp build context, metadata, cached Dockerfile
 
 ### User-level: `~/.config/lace/`
 
@@ -281,9 +267,11 @@ User settings and cached data shared across projects:
 - `<projectId>/repos/` -- shallow git clones for repo mounts
 - `<projectId>/mounts/` -- default mount source directories
 
-### Docker daemon
+### Container runtime storage
 
-- `lace.local/*` images -- local-only prebuild images, never pushed to a registry
+Warm-build layers live in the container runtime's own storage, produced by
+the legacy builder (`--buildkit never`) and managed by the runtime, not by
+lace.
 
 For the complete file layout, see the [User-level data](../README.md#user-level-data)
 section of the README. For hardcoded defaults (port range, cache TTL, mount prefix),

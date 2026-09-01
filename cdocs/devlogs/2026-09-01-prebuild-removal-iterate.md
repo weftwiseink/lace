@@ -94,6 +94,18 @@ Phase 5 substep 3 (warm-vs-cold cache-timing scenario): DEFERRED to follow-up. I
 Verification-floor results (verbatim in the report). One test fails: `port-allocator.test.ts > reuses saved port when it is in ownedPorts even if port is blocked`.
 This is ENVIRONMENTAL and pre-existing, not a regression: `port-allocator.ts` and its test are byte-identical to `main` (empty `git diff main`), and the failure is an OS-level `EADDRINUSE` on `::1:22431`, a port held by `pasta.avx2` (pid 1037058), the rootless-podman networking process of one of the reboot-protected running containers. The test binds a real socket to 22431 to simulate a blocked port; the live container already owns it. It cannot be fixed without killing that container (forbidden) or editing an unrelated test (out of scope). All 881 other tests pass (3 skipped, 1 todo).
 
+### Phase 6: documentation
+
+- `docs/prebuild.md`: rewritten from a pipeline-internals reference into a "Migration: `lace prebuild` removed" note (what changed, migration steps, one-time cleanup).
+- `README.md`: dropped the `lace prebuild`/`restore`/`status` subcommand sections and the `## Prebuilds` section (replaced with `## Features and warm builds`); removed the prebuild pipeline step; retitled the workflow, file-layout, and hardcoded-defaults sections; migrated the portless section from asymmetric `prebuildFeatures` to symmetric top-level `features`. Remaining prebuild mentions are qualifying migration callouts.
+- `docs/migration.md`: Step 4 converted from "add prebuilds" to "Warm builds" plus a "Migrating off `lace prebuild` (2026-05)" subsection; fixed the "What NOT to migrate" Dockerfile-rewrite claims.
+- `docs/troubleshooting.md`: replaced the obsolete "Prebuild image missing" section with "Feature install env-order conflicts" (the env-order guidance from the proposal's Edge Cases), and removed the now-obsolete "Lock file contention" section (no flock remains in `lace up`; it lived only in the deleted subcommands). Renumbered the trailing sections.
+- `docs/architecture.md` (not enumerated in the proposal but listed in the source-analysis report's doc set): removed the Prebuilds pipeline box, the layer-to-step Prebuilds row (13 steps now), the prebuild dependency-flow bullet, and the `lace.local/*` / `.lace/prebuild` storage references.
+
+House conventions followed: history-agnostic framing (the removed approach appears only in qualifying migration callouts), colons over em-dashes, no emoji. Cross-doc anchor links to the new env-order section point at `#3-feature-install-env-order-conflicts`.
+
+Deviation note: `docs/architecture.md` and the portless docs were touched beyond the five enumerated Phase 6 substeps, because leaving them describing the deleted pipeline as current would violate history-agnostic framing. `flock.ts` is now unreferenced dead code (its only callers were the deleted subcommands); left in place since it is not on the proposal's deletion list and is harmless.
+
 ## Iteration Log
 
 | iteration | implementer | reviewer | review_verdict | review_proof | review_path | notes |

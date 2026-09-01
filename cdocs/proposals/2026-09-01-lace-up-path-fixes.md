@@ -5,7 +5,12 @@ first_authored:
 task_list: lace/up-path-fixes
 type: proposal
 state: live
-status: wip
+status: implementation_ready
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-8"
+  at: 2026-09-01T13:20:00-07:00
+  round: 1
 tags: [lace_up, bugfix, architecture]
 ---
 
@@ -141,14 +146,17 @@ Because `deriveProjectName`, the label filter, and `--workspace-folder` all read
 
 **Complementary approach (recommended, small): name-based teardown before create.**
 Because a stale container can carry a non-canonical label that no amount of our-side canonicalization will match, add a name-based removal when we intend to recreate.
-When `rebuild || recreateContainer`, before `devcontainer up`, remove any container already holding the target name:
+When `rebuild || recreateContainer`, before `devcontainer up`, remove any container already holding the target name, but only when it also carries lace's own `lace.project_name` label matching this project:
 
 ```
-podman rm -f <resolvedContainerName>   // ignore "no such container"
+# resolve the exact name via resolveContainerName(projectName, extendedConfig) (project-name.ts:61)
+# only tear down if the existing container is one lace created for THIS project
+podman ps -aq --filter name=^<resolvedContainerName>$ --filter label=lace.project_name=<projectName> \
+  | xargs -r podman rm -f
 ```
 
-using `resolveContainerName(projectName, extendedConfig)` (`project-name.ts:61`) for the exact name.
-This closes both the stale-label survivor case and the intra-run self-collision, since the name is the resource that actually collides.
+lace stamps `lace.project_name` on every container it creates (`up.ts:1362`), so this label guard loses no coverage of lace-managed containers while refusing to delete an unrelated container that merely shares the sanitized name.
+This closes the stale-label survivor case and the intra-run self-collision (the name is the resource that actually collides) without the blast radius of an unconditional `rm -f` by name.
 
 **Rejected / secondary alternatives.**
 
@@ -162,15 +170,26 @@ This closes both the stale-label survivor case and the intra-run self-collision,
   Name-based teardown is simpler and covers both.
 
 **Tradeoff.**
-Name-based `podman rm -f` is destructive by name: if a user has an unrelated container that happens to share the sanitized project name, teardown removes it.
-This only fires when lace has already decided to recreate (`rebuild || recreateContainer`), so the blast radius is bounded to the recreate path, but it is a real sharp edge worth a WARN in the implementation.
+The `lace.project_name` label guard makes teardown safe against an unrelated same-named container: lace only removes containers it created for this project.
+The residual sharp edge is narrow (a container a user manually stamped with lace's label), so a WARN in the implementation when a teardown actually fires is still warranted for traceability.
 
 ### Bug 2: include `features` and `build` in the fingerprint
 
-**Primary approach (recommended): auto-rebuild on features/build drift.**
-Add `features` and `build` to the fingerprinted subset so a change flips `drift.drifted`, which already wires through to `recreateContainer` and `--remove-existing-container`.
+**Decided approach: hybrid, warn a live session and auto-rebuild an idle one.**
+Add `features` and `build` to the fingerprinted subset so a change flips `drift.drifted`, then branch on whether the project's container is currently running:
 
-Two viable shapes:
+- **Container running:** do NOT recreate it.
+  Emit a clear warning naming features/build as the changed trigger and reuse the container, so an in-flight session is never rebuilt out from under the user.
+- **No running container (fresh, stopped, or removed):** proceed through the existing `recreateContainer` -> `--remove-existing-container` path so the change is applied automatically.
+
+Detect "running" with a name-scoped `podman ps --filter name=<resolvedContainerName> --filter status=running` (the same resolved name Bug 1's teardown targets).
+Treat any podman error conservatively as "not clearly running" and fall through to the warn path rather than rebuilding: never rebuild on an ambiguous signal.
+
+> NOTE(claude-opus-4-8/lace/up-path-fixes): This hybrid is the user's decision, chosen over both always-auto-rebuild and always-warn.
+> Rationale: the actual bug is the *silent* no-op, and the hybrid fixes the silence in both states (an idle container is corrected automatically, a live one is loudly flagged) without ever disrupting a running session.
+> `lace up --rebuild` remains the explicit override that rebuilds regardless of running state.
+
+Fingerprint shape, two options:
 
 1. Extend `RUNTIME_KEYS` with `"features"` and `"build"`.
    Simplest, but conflates "runtime-affecting" (needs only container recreate) with "image-affecting" (needs an image rebuild).
@@ -180,20 +199,7 @@ Two viable shapes:
 
 Recommendation: shape (1) for this fix (extend the hashed set), with a NOTE pointing at shape (2) as the refactor if a recreate-vs-rebuild split is ever needed.
 Rename the concept in comments from "runtime fingerprint" to "recreation fingerprint" to match the widened meaning; keep the file/function names to avoid churn, or rename with a NOTE.
-
-**Fallback (documented, not recommended as the primary): warn instead of auto-rebuild.**
-If auto-rebuild on features/build is judged too aggressive, compute the widened fingerprint but, on a features/build-only delta, emit:
-
-```
-Warning: features/build config changed since last build; run `lace up --rebuild` to apply.
-```
-
-and reuse the container.
-This is strictly worse for correctness (the user still runs a stale container until they notice the warning) but avoids surprising an in-flight session with an unrequested rebuild.
-
-Recommendation: ship the stronger auto-rebuild.
-It is the behavior users already expect from `--rebuild` and the only one that makes plain `lace up` correct.
-Guard the surprise with a clear console line (the code already logs "Runtime config changed; container will be recreated." at `up.ts:972-983`; extend the message to name features/build as the trigger).
+Extend the existing recreation log line ("Runtime config changed; container will be recreated." at `up.ts:972-983`) to name features/build as the trigger on the auto-rebuild branch, and add the distinct warn line for the running-container branch.
 
 **Risk: over-triggering rebuilds.**
 The fingerprint is computed over the *generated* `.lace/devcontainer.json`, which lace mutates every run (port allocation, mount injection, `lace.project_name` label, `CONTAINER_WORKSPACE_FOLDER`, `LACE_DOTFILES_PATH`, dockerfile/context path rewrites at `up.ts:1257-1286`).
@@ -206,14 +212,15 @@ The regression tests must pin this down (see Test Plan): a byte-identical config
 - **Canonicalize at one choke point, not per-derivation.**
   Container identity has three consumers; fixing them independently invites the next drift.
   A single `realpathSync` at `runUp` entry is the invariant.
-- **Keep the CLI's `local_folder` label as the source of truth, add a name-based safety net.**
+- **Keep the CLI's `local_folder` label as the source of truth, add a label-guarded name safety net.**
   Do not reimplement the CLI's container matching.
-  Canonicalization aligns our input to the CLI; name teardown covers what canonicalization structurally cannot (pre-existing mislabels, intra-run self-collision).
+  Canonicalization aligns our input to the CLI; the `lace.project_name`-guarded name teardown covers what canonicalization structurally cannot (pre-existing mislabels, intra-run self-collision) without deleting a container lace did not create.
 - **One fingerprint, widened.**
   Recreate already implies image rebuild on this path, so a second fingerprint is premature.
   Note the split as future work.
-- **Auto-rebuild over warn.**
-  Correctness first; the surprise is mitigated by an explicit log line, and `--rebuild` was already a rebuild-on-demand affordance users know.
+- **Hybrid drift response: warn a live session, auto-rebuild an idle one.**
+  The bug is the silent no-op; the hybrid removes the silence in both states while honoring the standing "never disrupt a live container session" constraint.
+  `--rebuild` stays the explicit override for a running container.
 
 ## Edge Cases / Challenging Scenarios
 
@@ -253,18 +260,23 @@ This isolates the invariant (aliased paths yield one identity) from the host's a
 
 Extend `config-drift.test.ts`:
 
+- **Rewrite every assertion that currently encodes the exclusion.**
+  Four sites in `config-drift.test.ts` assert today that `features`/`build` do NOT drift and will fail after the fix; all four must be inverted or removed, not just the first two: `:96-106` (features excluded), `:108-118` (build excluded), `:136-143`, and `:261-271`.
+  Audit the file for any other case asserting features/build stability before landing.
 - **features-only change marks drift.**
   Two configs identical except `features` (for example `:1` vs `:2`) must produce different fingerprints, and `checkConfigDrift` must report `drifted: true`.
-  This inverts the current `config-drift.test.ts:96-106` assertion, which must be rewritten (it currently asserts the bug).
 - **build/FROM-only change marks drift.**
   Two configs differing only in `build.dockerfile` (and separately a Dockerfile-content proxy such as `build.args`) must produce different fingerprints and `drifted: true`.
-  Inverts `config-drift.test.ts:108-118`.
-- **Determinism guard.**
-  A byte-identical generated config hashed twice yields an identical fingerprint (no spurious build-hash drift).
+- **Determinism guard against the `build` path rewrite (not just hash stability).**
+  The risk is specifically that `up.ts:1265-1286` rewrites `build.dockerfile`/`build.context` to paths relative to `.lace/` on every run.
+  The test must drive that rewrite twice from the same workspace input (absolute and relative spellings, and a symlinked path) and assert the resulting `build` object, and therefore the fingerprint, is byte-identical across runs.
+  A plain "hash the same object twice" check does not exercise the rewrite and does not pin this risk.
 - **Existing runtime-key coverage preserved.**
   The `RUNTIME_KEYS` change-detection test (`config-drift.test.ts:175-191`) still passes; add `features`/`build` to the enumerated set it iterates.
 - **Port derived-state still ignored.**
   `forwardPorts`/`appPort` remain excluded (`config-drift.test.ts:153-173`) so port reallocation does not rebuild.
+- **Hybrid branch coverage.**
+  Unit-test the running-vs-idle decision: given features/build drift, a "container running" signal yields warn-and-reuse (no `--remove-existing-container`), and a "not running" signal yields recreate. Stub the podman `ps` probe; do not touch a live container.
 
 ## Verification Methodology
 
@@ -298,9 +310,10 @@ Neither phase modifies `runDevcontainerUp`'s `--buildkit never`, the `dev_contai
 Success criteria:
 - `workspaceFolder` is realpath-canonicalized once at `runUp` entry, with a `resolve()` fallback for non-existent paths.
 - All three identity consumers (label filter at `up.ts:100`/`commands/up.ts:17`, `--workspace-folder` at `up.ts:1445`, `deriveProjectName`) read the canonical value.
-- On `rebuild || recreateContainer`, a name-based `podman rm -f <resolvedContainerName>` runs before `devcontainer up`, tolerating "no such container", targeting the `resolveContainerName` result (honoring user `--name`).
+- On `rebuild || recreateContainer`, a label-guarded name teardown runs before `devcontainer up`: it removes the container holding the `resolveContainerName` result (honoring user `--name`) only when that container also carries `label=lace.project_name=<projectName>`, and tolerates "no such container".
 - Hermetic Bug 1 identity test passes (temp-dir symlink, no dependency on the host `/home`).
-- WARN callout in code documents the name-teardown blast radius.
+- A test asserts the teardown does NOT remove a same-named container lacking the `lace.project_name` label.
+- WARN callout in code fires when a teardown actually removes a container.
 
 Dependencies: none.
 
@@ -308,10 +321,11 @@ Dependencies: none.
 
 Success criteria:
 - `features` and `build` are included in the fingerprinted subset.
-- A features-only and a build/FROM-only change each mark `drift.drifted: true` and trigger `--remove-existing-container`.
-- The recreation log line names features/build as the trigger when applicable.
-- Determinism guard test passes: identical generated config hashes identically across runs.
-- The two now-inverted `config-drift.test.ts` assertions are rewritten; `forwardPorts`/`appPort` exclusion preserved.
+- A features-only and a build/FROM-only change each mark `drift.drifted: true`.
+- Hybrid response: when features/build drift is detected, a running container is warned-and-reused (no `--remove-existing-container`) while an idle/absent one is auto-recreated; the running check is a name-scoped podman `ps` probe that fails safe to warn.
+- The recreation log line names features/build as the trigger on the auto-rebuild branch; a distinct warn line covers the running-container branch.
+- Determinism guard test passes, exercising the `build` path rewrite (not just hash stability): identical workspace input yields a byte-identical `build` object and fingerprint across runs.
+- All four exclusion-encoding `config-drift.test.ts` assertions (`:96-106`, `:108-118`, `:136-143`, `:261-271`) are rewritten; `forwardPorts`/`appPort` exclusion preserved.
 - Comment/naming updated to reflect the widened meaning (or a NOTE explaining the retained "runtime" name), with the separate-`BUILD_KEYS` split recorded as future work.
 
 Dependencies: none on Phase 1; both land together.
@@ -323,15 +337,13 @@ Dependencies: none on Phase 1; both land together.
 - Do not rebuild or `rm` weftwise, clauthier, jif, or whelm during verification; use throwaway fixtures and disposable container names only.
 - Do not reimplement the devcontainer CLI's container matching; align inputs to it and add the name-based safety net only.
 
-## Open Questions
+## Resolved Decisions (round 1 review)
 
-- **Auto-rebuild vs warn for Bug 2.**
-  This proposal recommends auto-rebuild.
-  A reviewer should weigh the risk of surprising a user mid-session with an unrequested image rebuild against the correctness cost of silently running a stale container.
-  The fallback warn-only mode is specified if the reviewer prefers it.
-- **Name-teardown blast radius.**
-  Removing by resolved container name could delete an unrelated container that coincidentally shares the sanitized project name.
-  Is the bounded (recreate-path-only) blast radius acceptable, or should teardown additionally require a matching `lace.project_name` label before removing?
-- **Intra-run CLI self-collision.**
-  If the collision originates inside the devcontainer CLI's own second `podman run`, teardown cannot interpose.
-  Is a lightweight upstream report warranted, or is the name-teardown mitigation sufficient in practice?
+- **Bug 2 drift response: hybrid (warn a live session, auto-rebuild an idle one).**
+  Decided by the user over both always-auto-rebuild and always-warn.
+  Implemented via a name-scoped running-container probe that fails safe to warn.
+- **Name-teardown blast radius: require a matching `lace.project_name` label.**
+  Adopted from the round-1 review: teardown removes only containers lace created for this project, with zero coverage loss (lace stamps that label at `up.ts:1362`).
+- **Intra-run CLI self-collision: mitigate now, report upstream as a non-blocking follow-up.**
+  The label-guarded name teardown covers the common case; where the second `podman run` originates inside the devcontainer CLI, file a lightweight upstream note for traceability.
+  This does not block the fix.

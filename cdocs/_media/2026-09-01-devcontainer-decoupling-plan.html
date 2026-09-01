@@ -1,0 +1,714 @@
+<title>Devcontainer Decoupling</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper: #f1efe8;
+    --surface: #fbfaf6;
+    --surface-2: #e9e6dc;
+    --ink: #1c2128;
+    --ink-soft: #4a5058;
+    --line: #d8d4c6;
+    --line-strong: #b9b4a2;
+    --brass: #7e5a20;
+    --brass-strong: #5f4116;
+    --brass-tint: #f0e3c8;
+    --good: #2f6b47;
+    --good-tint: #e3efe4;
+    --warn: #9a5220;
+    --warn-tint: #f5e4d3;
+    --info: #2f588a;
+    --info-tint: #e2ebf3;
+    --shadow: 0 1px 2px rgba(28,33,40,0.06), 0 8px 24px -12px rgba(28,33,40,0.18);
+    --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper: #14181d;
+      --surface: #1a1f26;
+      --surface-2: #232932;
+      --ink: #e8e6de;
+      --ink-soft: #a1a8b0;
+      --line: #323942;
+      --line-strong: #454e59;
+      --brass: #d1a24f;
+      --brass-strong: #e8bd6c;
+      --brass-tint: #382c15;
+      --good: #6fbf8b;
+      --good-tint: #1b2f22;
+      --warn: #e0965a;
+      --warn-tint: #3a2917;
+      --info: #7fabdb;
+      --info-tint: #1c2a3a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -16px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper: #14181d;
+    --surface: #1a1f26;
+    --surface-2: #232932;
+    --ink: #e8e6de;
+    --ink-soft: #a1a8b0;
+    --line: #323942;
+    --line-strong: #454e59;
+    --brass: #d1a24f;
+    --brass-strong: #e8bd6c;
+    --brass-tint: #382c15;
+    --good: #6fbf8b;
+    --good-tint: #1b2f22;
+    --warn: #e0965a;
+    --warn-tint: #3a2917;
+    --info: #7fabdb;
+    --info-tint: #1c2a3a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -16px rgba(0,0,0,0.6);
+  }
+
+  *{ box-sizing: border-box; }
+  body{
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15.5px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation: none !important; transition: none !important; }
+  }
+
+  a{ color: var(--brass-strong); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover{ color: var(--brass); }
+  a:focus-visible, button:focus-visible, summary:focus-visible{
+    outline: 2px solid var(--brass);
+    outline-offset: 2px;
+  }
+
+  .page{
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 2.75rem 1.5rem 5rem;
+  }
+
+  /* ---------- title block ---------- */
+  .titleblock{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 1.1rem;
+    margin-bottom: 0.6rem;
+  }
+  .eyebrow{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin: 0 0 0.35rem;
+  }
+  h1{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.3rem, 5vw, 3.4rem);
+    line-height: 0.95;
+    letter-spacing: 0.005em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .stamp{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    text-align: right;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0.5rem 0.7rem;
+    display: grid;
+    gap: 0.15rem;
+    background: var(--surface);
+  }
+  .stamp b{ color: var(--ink); font-weight: 600; }
+  .stitch{
+    height: 0;
+    border-top: 1.5px dashed var(--line-strong);
+    margin: 1.6rem 0;
+  }
+
+  /* ---------- BLUF ---------- */
+  .bluf{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--brass);
+    border-radius: 4px;
+    padding: 1.15rem 1.35rem;
+    box-shadow: var(--shadow);
+    margin: 1.4rem 0 2rem;
+  }
+  .bluf .eyebrow{ margin-bottom: 0.5rem; }
+  .bluf p{ margin: 0 0 0.55rem; }
+  .bluf p:last-child{ margin-bottom: 0; }
+  .bluf strong{ color: var(--ink); }
+  .sequence-line{
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed var(--line);
+  }
+  .sequence-line .step{
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0.2rem 0.55rem;
+  }
+  .sequence-line .step.key{ border-color: var(--brass); color: var(--brass-strong); font-weight: 600; }
+  .sequence-line .arrow{ color: var(--ink-soft); }
+
+  h2{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.65rem;
+    letter-spacing: 0.01em;
+    margin: 0 0 0.2rem;
+    text-wrap: balance;
+  }
+  .section-sub{
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    margin: 0 0 1.1rem;
+    max-width: 62ch;
+  }
+  section{ margin-top: 2.75rem; }
+
+  /* ---------- pills ---------- */
+  .pill{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 0.22rem 0.55rem;
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+  .pill::before{ content:""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.good{ background: var(--good-tint); color: var(--good); }
+  .pill.warn{ background: var(--warn-tint); color: var(--warn); }
+  .pill.info{ background: var(--info-tint); color: var(--info); }
+
+  /* ---------- table ---------- */
+  .table-wrap{
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+  }
+  table{
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 880px;
+    background: var(--surface);
+  }
+  thead th{
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    background: var(--surface-2);
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid var(--line-strong);
+    position: sticky;
+    top: 0;
+  }
+  tbody td{
+    padding: 0.85rem 0.85rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    font-size: 0.87rem;
+  }
+  tbody tr:last-child td{ border-bottom: none; }
+  tbody tr:hover{ background: var(--surface-2); }
+  td.ws{ font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; white-space: nowrap; }
+  td.effort{ font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.dep{ color: var(--ink-soft); font-size: 0.83rem; }
+  code{
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--surface-2);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  /* ---------- sequencing diagram ---------- */
+  .diagram{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 2.25rem 1.75rem 1.75rem;
+    box-shadow: var(--shadow);
+  }
+  .flow{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .node{
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.15rem;
+    text-align: center;
+    border: 1.5px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface-2);
+    padding: 0.75rem 1.35rem;
+    min-width: 13rem;
+  }
+  .node .tag{
+    display: block;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 0.3rem;
+  }
+  .node.keystone{
+    border-color: var(--brass);
+    background: var(--brass-tint);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 18%, transparent);
+  }
+  .node.keystone .tag{ color: var(--brass-strong); }
+  .thread-down{
+    width: 2px;
+    height: 2.25rem;
+    background: repeating-linear-gradient(to bottom, var(--brass) 0 6px, transparent 6px 11px);
+  }
+  .pair-row{
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+    max-width: 40rem;
+  }
+  .pair-branch{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .pair-connector{
+    height: 2px;
+    background: repeating-linear-gradient(to right, var(--brass) 0 6px, transparent 6px 11px);
+    align-self: flex-start;
+    margin-top: 0;
+  }
+  .pair-rule{
+    position: relative;
+    width: 100%;
+    height: 1.6rem;
+  }
+  .pair-rule::before{
+    content: "";
+    position: absolute;
+    top: 0; left: 12.5%; right: 12.5%;
+    height: 2px;
+    background: repeating-linear-gradient(to right, var(--brass) 0 6px, transparent 6px 11px);
+  }
+  .pair-rule::after{
+    content: "";
+    position: absolute;
+    top: -1px; left: 50%; transform: translateX(-50%);
+    width: 2px; height: 1.6rem;
+    background: repeating-linear-gradient(to bottom, var(--brass) 0 5px, transparent 5px 9px);
+  }
+  .tie{
+    margin-top: -0.15rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .tie .knot{
+    width: 12px; height: 12px;
+    border-radius: 2px;
+    background: var(--warn);
+    transform: rotate(45deg);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+  }
+  .tie .label{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--warn);
+    text-align: center;
+    max-width: 20rem;
+    line-height: 1.4;
+  }
+  .pair-nodes{
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    gap: 1.5rem;
+    margin-top: 1.15rem;
+  }
+  .pair-nodes .node{ min-width: 0; flex: 1; }
+  .diagram-caption{
+    margin-top: 1.75rem;
+    padding-top: 1.1rem;
+    border-top: 1px dashed var(--line);
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+    max-width: 68ch;
+  }
+  .diagram-caption strong{ color: var(--ink); }
+
+  /* ---------- workstream cards ---------- */
+  .cards{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.25rem;
+  }
+  .card{
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 1.35rem 1.4rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .card-head{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.75rem;
+  }
+  .card-head h3{
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.05;
+  }
+  .card-head .checklist{
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    margin-top: 0.3rem;
+  }
+  .verdict{
+    font-size: 0.92rem;
+    color: var(--ink-soft);
+  }
+  .verdict strong{ color: var(--ink); }
+  .phases{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.45rem;
+    font-size: 0.85rem;
+  }
+  .phases li{
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.5rem;
+    align-items: baseline;
+  }
+  .phases .n{
+    font-family: var(--font-mono);
+    color: var(--brass);
+    font-weight: 600;
+    font-size: 0.78rem;
+  }
+  .traps{
+    background: var(--warn-tint);
+    border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 5px;
+    padding: 0.75rem 0.9rem;
+    font-size: 0.83rem;
+  }
+  .traps .eyebrow{ color: var(--warn); margin-bottom: 0.4rem; }
+  .traps p{ margin: 0; color: var(--ink); }
+  .card-source{
+    margin-top: auto;
+    padding-top: 0.6rem;
+    border-top: 1px dashed var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+  }
+  .card-source code{ background: none; padding: 0; }
+
+  /* ---------- context strip ---------- */
+  .context{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem 2.5rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+  }
+  .context .stat{ display: flex; flex-direction: column; gap: 0.2rem; }
+  .context .stat b{
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    color: var(--ink);
+    font-weight: 700;
+    line-height: 1;
+  }
+  .context .stat span{ font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .context .docs{ flex: 1; min-width: 240px; }
+  .context .docs p{ margin: 0 0 0.35rem; }
+  .context .docs code{ font-size: 0.78rem; }
+
+  footer.foot{
+    margin-top: 3rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  @media (max-width: 640px){
+    .pair-nodes{ flex-direction: column; }
+    .pair-rule{ display: none; }
+    .thread-down{ height: 1.5rem; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="titleblock">
+    <div>
+      <p class="eyebrow">Lace &middot; internal planning</p>
+      <h1>Devcontainer&nbsp;Decoupling</h1>
+    </div>
+    <div class="stamp">
+      <span><b>Rev</b> 2026&#8209;09&#8209;01</span>
+      <span><b>Status</b> planning synthesis</span>
+      <span><b>Docs</b> 3 reports, 162 proposals in corpus</span>
+    </div>
+  </div>
+
+  <div class="bluf">
+    <p class="eyebrow">BLUF</p>
+    <p><strong>Lace is becoming the outer wrapper around the devcontainer CLI, not a guest nested inside <code>.devcontainer/devcontainer.json</code>.</strong> Three checklist clusters were each sent out for independent analysis; all three read as pieces of that one move.</p>
+    <p>Prebuild removal is the keystone: it deletes the two source-mutation write sites (<code>prebuild.ts</code>, <code>restore.ts</code>) that otherwise complicate both remaining workstreams, and it removes <code>prebuild.lock</code> / <code>prebuild/</code> from the <code>.lace/</code> layout question entirely. It should land first.</p>
+    <p>Config&#8209;home and <code>.lace/up</code> both then touch <code>.lace/</code> naming and both reference the generated <code>.lace/devcontainer.json</code> path &mdash; they collide if done blindly in parallel and need a coordinated call on where that file lives before either proceeds.</p>
+    <div class="sequence-line">
+      <span class="step key">1&nbsp;&middot;&nbsp;Prebuild removal</span>
+      <span class="arrow">&rarr;</span>
+      <span class="step">2&nbsp;&middot;&nbsp;.lace/up layout</span>
+      <span class="arrow">+</span>
+      <span class="step">2&nbsp;&middot;&nbsp;Config home</span>
+      <span class="arrow" style="font-family: var(--font-mono); font-size: 0.78rem;">(coordinated, not parallel-blind)</span>
+    </div>
+  </div>
+
+  <section id="summary">
+    <h2>At a glance</h2>
+    <p class="section-sub">One row per workstream. Read this table and the diagram below it, then drill into the cards for the phase-by-phase breakdown.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Workstream</th>
+            <th>Checklist item(s)</th>
+            <th>Recommendation</th>
+            <th>Effort</th>
+            <th>Key risk / trap</th>
+            <th>Depends on</th>
+            <th>Proposal / RFP status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ws">Prebuild removal</td>
+            <td>Source&#8209;mutation complaint; standing <code>rethink_prebuild</code> note</td>
+            <td><span class="pill good">remove &mdash; decided</span><br>Resume the existing accepted proposal at Phase&nbsp;3. Do not author a new one.</td>
+            <td class="effort">7 phases<br>(2 done, 5 left)</td>
+            <td>Weftwise migration never smoke&#8209;tested container SSH / tools; <code>sshd:1</code> necessity unresolved</td>
+            <td class="dep">None &mdash; this is the keystone</td>
+            <td><code>implementation_ready</code>, accepted R2. Migrated once (weftwise, 2026&#8209;05&#8209;13), stalled since.</td>
+          </tr>
+          <tr>
+            <td class="ws">.lace/up layout</td>
+            <td>Flat <code>.lace/*</code> scatter &rarr; <code>.lace/up/</code> + merged <code>lace-resolutions.json</code></td>
+            <td><span class="pill info">cleanup</span><br>Proceed as layout-only change &mdash; but design the merge&#8209;write coordination before writing code.</td>
+            <td class="effort">9 phases</td>
+            <td>Relative-path math needs +1 <code>..</code> everywhere and fails silently until a feature/Dockerfile build runs; naive merge reintroduces a blind&#8209;overwrite race across 3 writer classes</td>
+            <td class="dep">Coordinate with config&#8209;home on <code>.lace/</code> naming + the generated <code>devcontainer.json</code> path</td>
+            <td>No proposal yet &mdash; this report is the design. Sibling <code>2026-03-07-lace-up-output-organization.md</code> needs its paths reconciled.</td>
+          </tr>
+          <tr>
+            <td class="ws">Config home</td>
+            <td>Externalize <code>customizations.lace.*</code> to <code>.lace/lace.jsonc</code></td>
+            <td><span class="pill warn">needs proposal first</span><br>Proposal&#8209;worthy design decision, not a mechanical rename.</td>
+            <td class="effort">8 phases<br>(phase 1 = write the proposal)</td>
+            <td>Collides on <code>.lace/</code> naming with the existing generated, gitignored <code>.lace/devcontainer.json</code>; doesn't remove VS&nbsp;Code/CI's hard need for a real <code>.devcontainer/devcontainer.json</code>; 3 unresolved options for the <code>devcontainer</code> field; touches 9+ files</td>
+            <td class="dep">Sequenced after prebuild removal; coordinate with <code>.lace/up</code> on directory naming</td>
+            <td>None written. Related RFPs unimplemented: config-dir reorg (host-level, different scope), <code>lace init</code> (blocked on this).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="sequencing">
+    <h2>Sequencing</h2>
+    <p class="section-sub">Prebuild removal is not just first by convenience: it structurally simplifies the other two before they start. The two remaining workstreams then run against one coordinated decision, not two independent guesses.</p>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node keystone">
+          <span class="tag">Do first &middot; keystone</span>
+          Prebuild removal
+        </div>
+        <div class="thread-down"></div>
+        <div class="pair-rule"></div>
+        <div class="tie">
+          <div class="knot"></div>
+          <div class="label">coordination point: <code>.lace/</code> naming &amp; the generated <code>.lace/devcontainer.json</code> path &mdash; must be sequenced, not parallel-blind</div>
+        </div>
+        <div class="pair-nodes">
+          <div class="node">
+            <span class="tag">Then, coordinated</span>
+            .lace/up layout
+          </div>
+          <div class="node">
+            <span class="tag">Then, coordinated</span>
+            Config home
+          </div>
+        </div>
+      </div>
+      <p class="diagram-caption"><strong>Reading this:</strong> the dashed brass line is dependency, the amber knot marks the one place the two downstream workstreams touch the same file path and must agree before either lands. Neither downstream workstream blocks the other technically; they block each other on a shared naming decision.</p>
+    </div>
+  </section>
+
+  <section id="workstreams">
+    <h2>Workstreams</h2>
+    <p class="section-sub">Phase counts are carried over from each report's own work breakdown, not re-estimated here.</p>
+    <div class="cards">
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h3>Prebuild removal</h3>
+            <div class="checklist">source-mutation complaint &middot; rethink_prebuild</div>
+          </div>
+          <span class="pill good">remove</span>
+        </div>
+        <p class="verdict"><strong>Verdict:</strong> already decided by an accepted proposal the codebase never finished executing. Resume at Phase 3; a new design would duplicate work the deletion already subsumes.</p>
+        <ol class="phases">
+          <li><span class="n">00</span><span>Close the weftwise verification gap: SSH + in-container tool smoke test, resolve whether <code>sshd:1</code> is still needed</span></li>
+          <li><span class="n">03</span><span>Survey &amp; migrate remaining projects (backup, clauthier, dotfiles, whelm, lace's own devcontainer)</span></li>
+          <li><span class="n">04</span><span>Delete ~800&ndash;1000 LoC: <code>commands/{prebuild,restore,status}.ts</code>, <code>lib/{prebuild,restore,status,dockerfile,metadata,lockfile}.ts</code>, plus branches in <code>up.ts</code> and 6 other files</span></li>
+          <li><span class="n">05</span><span>Test surface update: delete 7 prebuild-only test files, trim 8 partial ones, add the cache-reuse regression scenario</span></li>
+          <li><span class="n">06</span><span>Docs: rewrite <code>docs/prebuild.md</code> as a migration note, strip README prebuild sections</span></li>
+          <li><span class="n">07</span><span>Dogfood &amp; ship: migrate lace's own devcontainer, full suite on 3 flagship projects, clean up <code>lace.local/*</code> images</span></li>
+        </ol>
+        <div class="traps">
+          <p class="eyebrow">Traps / open questions</p>
+          <p>Container-side SSH and tools were never smoke-tested on the one project actually migrated. Cache hygiene under partial edits was only measured cold-vs-warm. Empirical timing (234s/16s) hasn't been re-run since May &mdash; cheap insurance before resuming.</p>
+        </div>
+        <div class="card-source">Source: <code>cdocs/reports/2026-09-01-prebuild-rework-and-rethink.md</code></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h3>.lace/up layout</h3>
+            <div class="checklist">.lace/* scatter &rarr; .lace/up/</div>
+          </div>
+          <span class="pill info">cleanup</span>
+        </div>
+        <p class="verdict"><strong>Verdict:</strong> layout cleanup, not a behavior change &mdash; but two traps need a designed answer, not an incidental side effect of a rename.</p>
+        <ol class="phases">
+          <li><span class="n">01</span><span>Design the merge-coordination mechanism: read-merge-write vs. a shared accumulator</span></li>
+          <li><span class="n">02</span><span>Point <code>laceDir</code> at <code>.lace/up/</code>; every <code>relative()</code> rewrite gains one <code>../</code></span></li>
+          <li><span class="n">03</span><span>Merge ports, mounts, runtime fingerprint (+ resolved-mounts, pending scope) into <code>lace-resolutions.json</code></span></li>
+          <li><span class="n">04</span><span>Move <code>logs/</code> under <code>.lace/up/logs/</code></span></li>
+          <li><span class="n">05</span><span>Update <code>debug-footer.ts</code>'s printed paths</span></li>
+          <li><span class="n">06</span><span>Update <code>docs/architecture.md</code>'s settings-and-state section</span></li>
+          <li><span class="n">07</span><span>Legacy-file cleanup on first <code>up</code> after upgrade</span></li>
+          <li><span class="n">08</span><span>Update the 10 test files that reference these paths by string</span></li>
+          <li><span class="n">09</span><span>Reconcile sibling proposal <code>2026-03-07-lace-up-output-organization.md</code></span></li>
+        </ol>
+        <div class="traps">
+          <p class="eyebrow">Traps / open questions</p>
+          <p>The relativity fix is one line, but a missed call site fails silently until a local feature or custom Dockerfile build actually runs. Three independent writer classes each do a blind whole-file overwrite today; pointed at one filename without coordination, the later writer clobbers the earlier one's section on every run.</p>
+        </div>
+        <div class="card-source">Source: <code>cdocs/reports/2026-09-01-lace-up-dir-consolidation.md</code></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h3>Config home</h3>
+            <div class="checklist">customizations.lace.* &rarr; .lace/lace.jsonc</div>
+          </div>
+          <span class="pill warn">needs proposal</span>
+        </div>
+        <p class="verdict"><strong>Verdict:</strong> matches a gap the codebase already flagged (README's own "may no longer be sensible" note), but the <code>devcontainer</code> field has three candidate semantics with materially different cost, so phase one is writing the proposal, not the code.</p>
+        <ol class="phases">
+          <li><span class="n">01</span><span>Proposal: resolve the <code>devcontainer</code> field (path-reference / inline-generates-source / inline-never-writes-back) and the <code>.lace/</code> naming collision</span></li>
+          <li><span class="n">02</span><span>Centralize config-path discovery: 3 duplicated + 2 caller-supplied path sites</span></li>
+          <li><span class="n">03</span><span>Introduce <code>.lace/lace.jsonc</code> parsing, dispatch-only, no merge with the old shape</span></li>
+          <li><span class="n">04</span><span>Migrate ~15 <code>extract*()</code> call sites across 9 files to the new top-level shape</span></li>
+          <li><span class="n">05</span><span>Resolve the <code>image</code>-field rewrite write path in <code>prebuild.ts</code> / <code>restore.ts</code></span></li>
+          <li><span class="n">06</span><span>Build a <code>lace migrate-config</code> one-shot command</span></li>
+          <li><span class="n">07</span><span>Update the <code>lace init</code> RFP to target the new file</span></li>
+          <li><span class="n">08</span><span>Documentation: README config sections, <code>docs/architecture.md</code> pipeline diagram</span></li>
+        </ol>
+        <div class="traps">
+          <p class="eyebrow">Traps / open questions</p>
+          <p>A hand-authored <code>.lace/lace.jsonc</code> would sit in the same directory as the existing generated, gitignored <code>.lace/devcontainer.json</code>: a direct contradiction of what <code>.lace/</code> is documented to mean. No option removes VS Code's or CI's hard requirement for a real file at the conventional <code>.devcontainer/devcontainer.json</code> path.</p>
+        </div>
+        <div class="card-source">Source: <code>cdocs/reports/2026-09-01-config-home-lace-jsonc.md</code></div>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="context">
+    <h2>Project-state context</h2>
+    <div class="context">
+      <div class="stat"><b>162</b><span>proposals in corpus</span></div>
+      <div class="stat"><b>3</b><span>reports synthesized here</span></div>
+      <div class="stat"><b>1</b><span>keystone workstream</span></div>
+      <div class="docs">
+        <p>The two live documents this plan hangs off: <code>cdocs/proposals/2026-05-05-rfp-rethink-prebuild-cache.md</code> (the RFP that started the prebuild investigation) and <code>cdocs/proposals/2026-05-12-migrate-to-legacy-builder-cache.md</code> (<code>implementation_ready</code>, accepted R2 &mdash; the proposal Prebuild removal above resumes).</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>lace &middot; devcontainer-decoupling</span>
+    <span>synthesized 2026-09-01</span>
+  </footer>
+
+</div>

@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/prebuild-cache-rethink/legacy-builder-migration
 type: devlog
 state: live
-status: wip
+status: review_ready
 tags: [prebuild, migration, lace_prebuild_deletion, iterate]
 ---
 
@@ -105,6 +105,30 @@ This is ENVIRONMENTAL and pre-existing, not a regression: `port-allocator.ts` an
 House conventions followed: history-agnostic framing (the removed approach appears only in qualifying migration callouts), colons over em-dashes, no emoji. Cross-doc anchor links to the new env-order section point at `#3-feature-install-env-order-conflicts`.
 
 Deviation note: `docs/architecture.md` and the portless docs were touched beyond the five enumerated Phase 6 substeps, because leaving them describing the deleted pipeline as current would violate history-agnostic framing. `flock.ts` is now unreferenced dead code (its only callers were the deleted subcommands); left in place since it is not on the proposal's deletion list and is harmless.
+
+### Verification Results (final)
+
+- `pnpm --filter lace typecheck` (tsc --noEmit): exit 0, zero type errors.
+- `pnpm --filter lace build` (vite): exit 0, `dist/index.js 154.39 kB`.
+- `pnpm --filter lace test`: `Test Files 1 failed | 35 passed | 1 skipped`, `Tests 1 failed | 881 passed | 3 skipped | 1 todo`. The single failure is the environmental `port-allocator.test.ts` case (see Phase 5 note: port 22431 held by `pasta.avx2` pid 1037058, a reboot-protected running container; file byte-identical to `main`).
+- `grep -rn "prebuildFeatures" packages/lace/src`: only the fail-loud guard (`up.ts:237-249`) and its test (`validate.test.ts:110-138`).
+- `grep -rn "BUILDAH_LAYERS" packages/lace/src`: no matches (exit 1).
+- Fail-loud guard demonstration (built CLI against a fixture carrying `prebuildFeatures`, no container built):
+  ```
+  customizations.lace.prebuildFeatures is no longer supported. Move these entries into the top-level `features` map in .devcontainer/devcontainer.json. See cdocs/proposals/2026-05-12-migrate-to-legacy-builder-cache.md for the migration.
+  LACE_RESULT: {"exitCode":1,"failedPhase":"unknown","containerMayBeRunning":false}
+  GUARD_CLI_EXIT=1
+  ```
+
+### Commits (branch `prebuild-removal`)
+
+| phase | sha | subject |
+|---|---|---|
+| scaffold | 1d816ee | scaffold iterate devlog |
+| Phase 4 | 8eda854 | delete lace prebuild code and add fail-loud migration guard |
+| devcontainer flip | d4b01ae | flip own devcontainer prebuildFeatures into top-level features |
+| Phase 5 | ef9ea24 | trim prebuild test surface and add fail-loud guard test |
+| Phase 6 | 09ca47f | rewrite prebuild docs as a migration note |
 
 ## Iteration Log
 

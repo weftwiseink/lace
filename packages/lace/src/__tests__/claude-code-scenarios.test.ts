@@ -322,80 +322,9 @@ describe("Scenario C6: version pinning passes through to feature options", () =>
   });
 });
 
-// ── C7: Feature in prebuildFeatures ──
-
-/**
- * Mock subprocess that succeeds for devcontainer build (prebuild phase)
- * and docker image inspect. Writes a minimal lock file to satisfy the
- * prebuild pipeline's post-build expectations.
- */
-function createMockSubprocess(): RunSubprocess {
-  return (command, args, _opts) => {
-    if (command === "devcontainer") {
-      const wsFolderIdx = args.indexOf("--workspace-folder");
-      if (wsFolderIdx >= 0) {
-        const wsFolder = args[wsFolderIdx + 1];
-        writeFileSync(
-          join(wsFolder, "devcontainer-lock.json"),
-          JSON.stringify({ features: {} }, null, 2) + "\n",
-          "utf-8",
-        );
-      }
-      return {
-        exitCode: 0,
-        stdout: '{"imageName":["lace.local/test:latest"]}',
-        stderr: "",
-      };
-    }
-    // docker image inspect -- return success
-    return { exitCode: 0, stdout: "[{}]", stderr: "" };
-  };
-}
-
-describe("Scenario C7: claude-code in prebuildFeatures", () => {
-  it("mount still auto-injected when feature is in prebuildFeatures", async () => {
-    const featurePath = symlinkLocalFeature(ctx, "claude-code");
-
-    const claudeDir = join(ctx.workspaceRoot, ".claude-dir");
-    mkdirSync(claudeDir, { recursive: true });
-    setupScenarioSettings(ctx, {
-      mounts: {
-        "claude-code/config": { source: claudeDir },
-      },
-    });
-
-    const config = {
-      image: "node:24-bookworm",
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            [featurePath]: {},
-          },
-        },
-      },
-    };
-
-    writeDevcontainerJson(ctx, config);
-
-    const result = await runUp({
-      workspaceFolder: ctx.workspaceRoot,
-      skipDevcontainerUp: true,
-      subprocess: createMockSubprocess(),
-      cacheDir: ctx.metadataCacheDir,
-    });
-
-    expect(result.exitCode).toBe(0);
-
-    const extended = readGeneratedConfig(ctx);
-    const mounts = extended.mounts as string[];
-
-    // Mount should be auto-injected even for prebuild features
-    // (mounts are runtime config, not build-time)
-    const claudeMount = mounts?.find((m) => m.includes(".claude"));
-    expect(claudeMount).toBeDefined();
-    expect(claudeMount).toContain(`source=${claudeDir}`);
-  });
-});
+// NOTE(opus/prebuild-removal): C7 (claude-code in the removed prebuild block)
+// removed with the legacy-builder-cache migration; C1 already covers mount
+// auto-injection for a feature in top-level `features`.
 
 // ── C8: Explicit mount suppresses auto-injection ──
 

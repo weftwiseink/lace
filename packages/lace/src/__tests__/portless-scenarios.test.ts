@@ -1,12 +1,9 @@
 /**
  * Portless Feature Scenario Tests
  *
- * Integration tests that validate lace's prebuild feature port injection
- * pipeline using the portless devcontainer feature.
- *
- * Unlike wezterm-server (top-level feature with symmetric mapping), portless
- * uses prebuildFeatures with asymmetric mapping: the host port is lace-allocated
- * and maps to portless's default container port 1355.
+ * Integration tests that validate lace's feature port injection pipeline
+ * using the portless devcontainer feature declared in the top-level `features`
+ * map, which receives symmetric port mapping (same host and container port).
  *
  * All scenarios use skipDevcontainerUp: true with a mock subprocess to avoid
  * the actual devcontainer build (which rejects absolute paths for local features).
@@ -26,37 +23,24 @@ import {
   symlinkLocalFeature,
   readGeneratedConfig,
   readPortAssignments,
-  setupScenarioSettings,
   type ScenarioWorkspace,
 } from "./helpers/scenario-utils";
 
 let ctx: ScenarioWorkspace;
 
 /**
- * Mock subprocess that succeeds for devcontainer build (prebuild phase)
- * and docker image inspect. Writes a minimal lock file to satisfy the
- * prebuild pipeline's post-build expectations.
+ * Mock subprocess that succeeds for any devcontainer or container-runtime call.
  */
 function createMockSubprocess(): RunSubprocess {
-  return (command, args, _opts) => {
+  return (command, _args, _opts) => {
     if (command === "devcontainer") {
-      // Simulate successful devcontainer build with a lock file
-      const wsFolderIdx = args.indexOf("--workspace-folder");
-      if (wsFolderIdx >= 0) {
-        const wsFolder = args[wsFolderIdx + 1];
-        writeFileSync(
-          join(wsFolder, "devcontainer-lock.json"),
-          JSON.stringify({ features: {} }, null, 2) + "\n",
-          "utf-8",
-        );
-      }
       return {
         exitCode: 0,
-        stdout: '{"imageName":["lace.local/test:latest"]}',
+        stdout: '{"imageName":["test:latest"]}',
         stderr: "",
       };
     }
-    // docker image inspect — return success
+    // container-runtime calls (podman) — return success
     return { exitCode: 0, stdout: "[{}]", stderr: "" };
   };
 }
@@ -78,21 +62,17 @@ afterEach(() => {
   ctx.cleanup();
 });
 
-// ── P1: Prebuild auto-injection -- asymmetric port mapping ──
+// ── P1: Symmetric auto-injection for a port-declaring feature ──
 
-describe("Scenario P1: portless in prebuildFeatures with auto-injection", () => {
-  it("auto-injects asymmetric appPort entry and generates correct config", async () => {
+describe("Scenario P1: portless in features with auto-injection", () => {
+  it("auto-injects a symmetric port mapping and generates correct config", async () => {
     const featurePath = symlinkLocalFeature(ctx, "portless");
 
-    // Setup: portless in prebuildFeatures with default options (no explicit proxyPort)
+    // Setup: portless in top-level features with default options (no explicit proxyPort)
     const config = {
       image: "node:24-bookworm",
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            [featurePath]: {},
-          },
-        },
+      features: {
+        [featurePath]: {},
       },
     };
 
@@ -112,12 +92,9 @@ describe("Scenario P1: portless in prebuildFeatures with auto-injection", () => 
     expect(port).toBeGreaterThanOrEqual(22425);
     expect(port).toBeLessThanOrEqual(22499);
 
-    // Assert: generated config has asymmetric appPort (host:1355)
+    // Assert: generated config has a symmetric appPort (host:host)
     const extended = readGeneratedConfig(ctx);
-    expect(extended.appPort).toContain(`${port}:1355`);
-
-    // Assert: no symmetric entry alongside the asymmetric one
-    expect(extended.appPort).not.toContain(`${port}:${port}`);
+    expect(extended.appPort).toContain(`${port}:${port}`);
 
     // Assert: forwardPorts contains the host port
     expect(extended.forwardPorts).toContain(port);
@@ -145,12 +122,8 @@ describe("Scenario P2: port persistence across runs", () => {
 
     const config = {
       image: "node:24-bookworm",
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            [featurePath]: {},
-          },
-        },
+      features: {
+        [featurePath]: {},
       },
     };
 

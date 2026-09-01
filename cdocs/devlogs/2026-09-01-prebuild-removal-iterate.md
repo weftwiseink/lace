@@ -71,6 +71,29 @@ Deviations from the proposal's literal instructions:
 
 Non-test src typecheck: 0 errors after the strip (test-file errors remain until Phase 5).
 
+### Phase 5: test surface
+
+Deleted whole test files: `lib/__tests__/{lockfile,metadata,validation}.test.ts`, `commands/__tests__/{prebuild,restore,status}.integration.test.ts`, `__tests__/e2e.test.ts`.
+
+Trimmed prebuild cases from the surviving files:
+- `template-resolver.test.ts`: removed the `extractPrebuildFeaturesRaw` suite, the `injectForPrebuildBlock` T1-T5 sub-cases, the prebuild mount-declaration cases, the `resolveTemplates` T4/T5 prebuild appPort cases, and the `warnPrebuildPortTemplates` / `warnPrebuildPortFeaturesStaticPort` suites. Converted the T6 feature-ID-collision case to a collision within the `features` block (collision detection now runs on `features` only).
+- `devcontainer.test.ts`: removed the `extractPrebuildFeatures` and `generateTempDevcontainerJson` suites.
+- `user-config-merge.test.ts`: dropped the "user features go into prebuildFeatures" case, replaced it with a same-id user/project merge case, and fixed `applyUserConfig` call arity (3 args).
+- `up.integration.test.ts`: removed the prebuild-only, full-config-with-prebuild, and T9-T12 prebuild-port describes; rewrote Scenario 4 and the "no repo mounts" case to drop prebuild.
+- `dockerfile.test.ts`: reduced to the `parseDockerfileUser` suite (the only retained function).
+- `portless-scenarios.test.ts`: P1 (asymmetric) removed; P2 migrated to top-level `features` (symmetric mapping); P1 rewritten as the symmetric-injection case.
+- `claude-code-scenarios.test.ts`: removed C7.
+- `docker_smoke.test.ts`: the entire file was prebuild-lifecycle; gutted and repurposed as the home for the deferred warm-vs-cold scenario placeholder (`it.todo`, see below).
+
+Fail-loud guard test: `validate.test.ts` now asserts a config carrying `customizations.lace.prebuildFeatures` exits non-zero with a message naming `prebuildFeatures`, `features`, and the migration doc.
+
+Fixtures: deleted the four unused prebuild fixtures (`comments-and-trailing-commas`, `empty-prebuild`, `null-prebuild`, `overlap`); stripped the now-inert `customizations.lace.prebuildFeatures` block from the four still-used build-source fixtures (`standard`, `legacy-dockerfile-field`, `image-based`, `nested-build-path`).
+
+Phase 5 substep 3 (warm-vs-cold cache-timing scenario): DEFERRED to follow-up. It requires two live container builds on the legacy builder, which the reboot constraint forbids. Left as `it.todo` with a `TODO(opus/prebuild-removal)` in `docker_smoke.test.ts` (behaviour already empirically validated: 234s cold / 16s warm in the validating experiment).
+
+Verification-floor results (verbatim in the report). One test fails: `port-allocator.test.ts > reuses saved port when it is in ownedPorts even if port is blocked`.
+This is ENVIRONMENTAL and pre-existing, not a regression: `port-allocator.ts` and its test are byte-identical to `main` (empty `git diff main`), and the failure is an OS-level `EADDRINUSE` on `::1:22431`, a port held by `pasta.avx2` (pid 1037058), the rootless-podman networking process of one of the reboot-protected running containers. The test binds a real socket to 22431 to simulate a blocked port; the live container already owns it. It cannot be fixed without killing that container (forbidden) or editing an unrelated test (out of scope). All 881 other tests pass (3 skipped, 1 todo).
+
 ## Iteration Log
 
 | iteration | implementer | reviewer | review_verdict | review_proof | review_path | notes |

@@ -3,15 +3,12 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import * as jsonc from "jsonc-parser";
 import {
-  readDevcontainerConfig,
   readDevcontainerConfigMinimal,
   extractRepoMounts,
-  extractPrebuildFeatures,
   extractRemoteUser,
   DevcontainerConfigError,
 } from "./devcontainer";
 import { runResolveMounts } from "./resolve-mounts";
-import { runPrebuild } from "./prebuild";
 import type { RunSubprocess, SubprocessResult } from "./subprocess";
 import { runSubprocess as defaultRunSubprocess } from "./subprocess";
 import {
@@ -44,9 +41,6 @@ import {
   generatePortEntries,
   mergePortEntries,
   buildFeaturePortMetadata,
-  warnPrebuildPortTemplates,
-  warnPrebuildPortFeaturesStaticPort,
-  extractPrebuildFeaturesRaw,
   type TemplateResolutionResult,
 } from "./template-resolver";
 import { MountPathResolver, type ContainerVariables } from "./mount-resolver";
@@ -140,9 +134,9 @@ export interface UpOptions {
   cacheDir?: string;
   /** Skip host-side validation (downgrade errors to warnings) */
   skipValidation?: boolean;
-  /** Force rebuild of prebuild image (bypass cache) */
+  /** Force container recreation and bypass config-drift caching. */
   rebuild?: boolean;
-  /** Validate only: skip prebuild and devcontainer phases (for `lace validate`). */
+  /** Validate only: skip the devcontainer up phase (for `lace validate`). */
   validateOnly?: boolean;
 }
 
@@ -161,7 +155,6 @@ export interface UpResult {
     metadataValidation?: { exitCode: number; message: string };
     templateResolution?: { exitCode: number; message: string };
     mountValidation?: { exitCode: number; message: string };
-    prebuild?: { exitCode: number; message: string };
     resolveMounts?: { exitCode: number; message: string };
     generateConfig?: { exitCode: number; message: string };
     devcontainerUp?: { exitCode: number; stdout: string; stderr: string };
@@ -171,13 +164,12 @@ export interface UpResult {
 
 /**
  * Run the full lace up workflow:
- * 1. Read config and extract prebuild features (before template resolution)
+ * 1. Read config (before template resolution)
  * 2. Fetch feature metadata (required for auto-injection)
  * 3. Auto-inject ${lace.port()} templates + resolve all templates
- * 4. Prebuild (if prebuildFeatures configured)
- * 5. Resolve mounts (if repo mounts configured)
- * 6. Generate extended devcontainer.json (includes resolved ports + mounts)
- * 7. Invoke devcontainer up
+ * 4. Resolve mounts (if repo mounts configured)
+ * 5. Generate extended devcontainer.json (includes resolved ports + mounts)
+ * 6. Invoke devcontainer up
  */
 export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const {
@@ -240,6 +232,25 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       return result;
     }
     throw err;
+  }
+
+  // ── Fail loud on the removed `prebuildFeatures` key ──
+  // `lace prebuild` and `customizations.lace.prebuildFeatures` were removed in favour of
+  // the legacy builder's local layer cache. A config still carrying the key would silently
+  // drop those features, so surface an actionable migration error instead.
+  {
+    const customizations = configMinimal.raw.customizations as
+      | Record<string, unknown>
+      | undefined;
+    const lace = customizations?.lace as Record<string, unknown> | undefined;
+    if (lace && "prebuildFeatures" in lace) {
+      result.exitCode = 1;
+      result.message =
+        "customizations.lace.prebuildFeatures is no longer supported. " +
+        "Move these entries into the top-level `features` map in .devcontainer/devcontainer.json. " +
+        "See cdocs/proposals/2026-05-12-migrate-to-legacy-builder-cache.md for the migration.";
+      return result;
+    }
   }
 
   // ── Phase 0a: Workspace layout detection + auto-configuration ──
@@ -354,31 +365,22 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
           }
         }
 
-        // Extract project features and prebuild features for merging
+        // Extract project features for merging
         const projectFeatures = (configMinimal.raw.features ?? {}) as Record<
           string,
           Record<string, unknown>
         >;
-        const projectPrebuild = extractPrebuildFeaturesRaw(configMinimal.raw);
         const projectContainerEnv = (configMinimal.raw.containerEnv ?? {}) as Record<string, string>;
 
         // Apply all merges
         const mergeResult = applyUserConfig(
           userConfig,
           projectFeatures,
-          projectPrebuild,
           projectContainerEnv,
         );
 
         // Apply merged features back to config
         configMinimal.raw.features = mergeResult.mergedFeatures;
-        if (Object.keys(mergeResult.mergedPrebuildFeatures).length > 0) {
-          const customizations = (configMinimal.raw.customizations ?? {}) as Record<string, unknown>;
-          const lace = (customizations.lace ?? {}) as Record<string, unknown>;
-          lace.prebuildFeatures = mergeResult.mergedPrebuildFeatures;
-          customizations.lace = lace;
-          configMinimal.raw.customizations = customizations;
-        }
 
         // Apply merged containerEnv
         configMinimal.raw.containerEnv = mergeResult.mergedContainerEnv;
@@ -418,8 +420,6 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
-  const hasPrebuildFeatures =
-    extractPrebuildFeatures(configMinimal.raw).kind === "features";
   const repoMountsResult = extractRepoMounts(configMinimal.raw);
   const hasRepoMounts = repoMountsResult.kind === "repoMounts";
 
@@ -428,13 +428,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     string,
     Record<string, unknown>
   >;
-
-  // Also collect prebuild features for port pipeline processing
-  const rawPrebuildFeatures = extractPrebuildFeaturesRaw(configMinimal.raw);
-
-  // Unified feature set for the port pipeline (metadata + auto-injection + resolution)
-  const allRawFeatures = { ...rawFeatures, ...rawPrebuildFeatures };
-  const allFeatureIds = Object.keys(allRawFeatures);
+  const allFeatureIds = Object.keys(rawFeatures);
 
   // ── Phase: Metadata fetch + validation + auto-injection + template resolution ──
   // This replaces the old hardcoded port assignment phase.
@@ -461,7 +455,7 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
         // Validate user-provided options exist in schema
         const optionResult = validateFeatureOptions(
           featureId,
-          allRawFeatures[featureId] ?? {},
+          rawFeatures[featureId] ?? {},
           metadata,
         );
         if (!optionResult.valid) {
@@ -506,12 +500,6 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       }
       throw err;
     }
-  }
-
-  // Step 2: Warn about ${lace.port()} in prebuildFeatures
-  const prebuildWarnings = warnPrebuildPortTemplates(configMinimal.raw);
-  for (const warning of prebuildWarnings) {
-    console.warn(`Warning: ${warning}`);
   }
 
   // Step 3: Auto-inject ${lace.port()} templates for declared port options
@@ -571,9 +559,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   if (Object.keys(mountDeclarations).length > 0) {
     // Build set of known feature short IDs for namespace validation
     const features = (configForResolution.features ?? {}) as Record<string, unknown>;
-    const prebuildFeatures = extractPrebuildFeaturesRaw(configForResolution);
     const featureShortIds = new Set<string>();
-    for (const ref of [...Object.keys(features), ...Object.keys(prebuildFeatures)]) {
+    for (const ref of Object.keys(features)) {
       featureShortIds.add(extractFeatureShortId(ref));
     }
     try {
@@ -601,16 +588,6 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       };
       return result;
     }
-  }
-
-  // Step 6: Warn about prebuild features with static port values and no appPort
-  const staticPortWarnings = warnPrebuildPortFeaturesStaticPort(
-    configForResolution,
-    metadataMap,
-    injected,
-  );
-  for (const warning of staticPortWarnings) {
-    console.warn(`Warning: ${warning}`);
   }
 
   // Step 7: Create mount path resolver for ${lace.mount()} resolution
@@ -822,10 +799,9 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // Detect lace-fundamentals and apply user config to its options.
   {
     const resolvedConfig = templateResult?.resolvedConfig ?? configForResolution;
-    const allFeatureRefs = [
-      ...Object.keys((resolvedConfig.features ?? {}) as Record<string, unknown>),
-      ...Object.keys(extractPrebuildFeaturesRaw(resolvedConfig)),
-    ];
+    const allFeatureRefs = Object.keys(
+      (resolvedConfig.features ?? {}) as Record<string, unknown>,
+    );
 
     const fundamentalsRef = allFeatureRefs.find((ref) =>
       extractFeatureShortId(ref) === "lace-fundamentals",
@@ -835,31 +811,10 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       // Inject defaultShell option from user config
       if (userConfigDefaultShell) {
         const features = (resolvedConfig.features ?? {}) as Record<string, Record<string, unknown>>;
-        const prebuildFeatures = extractPrebuildFeaturesRaw(resolvedConfig);
 
         if (features[fundamentalsRef]) {
           if (!features[fundamentalsRef].defaultShell) {
             features[fundamentalsRef].defaultShell = userConfigDefaultShell;
-          }
-        } else if (prebuildFeatures[fundamentalsRef]) {
-          if (!prebuildFeatures[fundamentalsRef].defaultShell) {
-            prebuildFeatures[fundamentalsRef].defaultShell = userConfigDefaultShell;
-            // Write back to resolvedConfig
-            const customizations = (resolvedConfig.customizations ?? {}) as Record<string, unknown>;
-            const lace = (customizations.lace ?? {}) as Record<string, unknown>;
-            lace.prebuildFeatures = prebuildFeatures;
-            customizations.lace = lace;
-            resolvedConfig.customizations = customizations;
-            // Also propagate to configMinimal.raw so prebuild picks it up.
-            // NOTE: This relies on shared object references through the extraction chain.
-            // If configMinimal.raw is ever deep-cloned before this point, this mutation
-            // would silently stop working. A refactor to pass options explicitly would be safer.
-            const minCustomizations = (configMinimal.raw.customizations ?? {}) as Record<string, unknown>;
-            const minLace = (minCustomizations.lace ?? {}) as Record<string, unknown>;
-            const minPrebuild = (minLace.prebuildFeatures ?? {}) as Record<string, Record<string, unknown>>;
-            if (minPrebuild[fundamentalsRef]) {
-              minPrebuild[fundamentalsRef].defaultShell = userConfigDefaultShell;
-            }
           }
         }
         console.log(`Injected defaultShell="${userConfigDefaultShell}" into lace-fundamentals`);
@@ -940,48 +895,6 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     }
   }
 
-  // Only read full config (with Dockerfile) if we need prebuild
-  let config;
-  if (hasPrebuildFeatures) {
-    try {
-      config = readDevcontainerConfig(devcontainerPath);
-    } catch (err) {
-      if (err instanceof DevcontainerConfigError) {
-        result.exitCode = 1;
-        result.message = err.message;
-        return result;
-      }
-      throw err;
-    }
-  }
-
-  // Phase: Prebuild (if configured, skipped in validateOnly mode)
-  if (hasPrebuildFeatures && !validateOnly) {
-    console.log("Running prebuild...");
-    // Pass merged prebuild features (includes user features) to avoid re-reading source file
-    const mergedPrebuild = extractPrebuildFeatures(configMinimal.raw);
-    const prebuildResult = runPrebuild({
-      workspaceRoot: workspaceFolder,
-      subprocess,
-      force: rebuild,
-      prebuildFeatures: mergedPrebuild.kind === "features" ? mergedPrebuild.features : undefined,
-    });
-    result.phases.prebuild = {
-      exitCode: prebuildResult.exitCode,
-      message: prebuildResult.message,
-    };
-
-    if (prebuildResult.exitCode !== 0) {
-      result.exitCode = prebuildResult.exitCode;
-      result.message = `Prebuild failed: ${prebuildResult.message}`;
-      return result;
-    }
-
-    if (prebuildResult.message) {
-      console.log(prebuildResult.message);
-    }
-  }
-
   // Phase: Resolve mounts (if configured)
   let mountSpecs: string[] = [];
   let symlinkCommand: string | null = null;
@@ -1038,8 +951,8 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   // Read the generated extended config and compare its runtime fingerprint
   // against the previous run. When drift is detected, auto-recreate the
   // container so runtime config changes (mounts, env, workspace paths) take
-  // effect without requiring the heavier --rebuild (which also forces a
-  // prebuild image rebuild with --no-cache).
+  // effect without requiring the heavier --rebuild (which recreates the
+  // container from scratch).
   let currentFingerprint: string | undefined;
   let recreateContainer = false;
   {
@@ -1120,7 +1033,6 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
 
   // ── Phase: Post-container verification ──
   // Runs after devcontainer up on the running container.
-  // Covers all configs (prebuild and non-prebuild) uniformly.
   {
     const classResult = classifyWorkspace(workspaceFolder);
     const extensions = getDetectedExtensions(classResult, workspaceFolder);

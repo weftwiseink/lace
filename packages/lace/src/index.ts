@@ -1,10 +1,7 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from "citty";
 import { doctorCommand } from "@/commands/doctor";
-import { prebuildCommand } from "@/commands/prebuild";
 import { resolveMountsCommand } from "@/commands/resolve-mounts";
-import { restoreCommand } from "@/commands/restore";
-import { statusCommand } from "@/commands/status";
 import { upCommand } from "@/commands/up";
 import { validateCommand } from "@/commands/validate";
 
@@ -16,10 +13,7 @@ const main = defineCommand({
   },
   subCommands: {
     doctor: doctorCommand,
-    prebuild: prebuildCommand,
     "resolve-mounts": resolveMountsCommand,
-    restore: restoreCommand,
-    status: statusCommand,
     up: upCommand,
     validate: validateCommand,
   },

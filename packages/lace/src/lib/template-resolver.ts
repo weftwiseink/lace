@@ -45,39 +45,6 @@ const LACE_UNKNOWN_PATTERN = /\$\{lace\.(?!port\(|mount\()([^}]+)\}/;
 // Documented in CONTRIBUTING.md -- update if changing this pattern
 const LACE_PORT_FULL_MATCH = /^\$\{lace\.port\(([^)]+)\)\}$/;
 
-// ── Prebuild features raw access ──
-
-/**
- * Extract a direct reference to the prebuildFeatures object from a config.
- * Returns the live object for in-place mutation, or an empty object if absent/null/empty.
- * This is a lightweight accessor -- use extractPrebuildFeatures() from devcontainer.ts
- * for discriminated-union handling in the prebuild pipeline.
- */
-export function extractPrebuildFeaturesRaw(
-  config: Record<string, unknown>,
-): Record<string, Record<string, unknown>> {
-  const customizations = config.customizations as
-    | Record<string, unknown>
-    | undefined;
-  if (!customizations) return {};
-
-  const lace = customizations.lace as Record<string, unknown> | undefined;
-  if (!lace) return {};
-
-  if (!("prebuildFeatures" in lace)) return {};
-
-  const prebuildFeatures = lace.prebuildFeatures;
-  if (prebuildFeatures === null) return {};
-  if (
-    typeof prebuildFeatures !== "object" ||
-    Object.keys(prebuildFeatures as object).length === 0
-  ) {
-    return {};
-  }
-
-  return prebuildFeatures as Record<string, Record<string, unknown>>;
-}
-
 // ── Project mount declarations ──
 
 /**
@@ -153,11 +120,10 @@ export function buildFeatureIdMap(
  * customizations.lace.ports metadata. Only injects for options the user
  * has NOT explicitly set.
  *
- * For top-level features: symmetric injection into the feature option value.
- * For prebuild features: asymmetric injection into appPort (host:defaultContainerPort).
+ * Symmetric injection into the feature option value (same host and container port).
  *
  * Modifies the config in-place before template resolution.
- * Returns the list of labels that were auto-injected (e.g., "wezterm-server/hostSshPort").
+ * Returns the list of labels that were auto-injected (e.g., "portless/proxyPort").
  */
 export function autoInjectPortTemplates(
   config: Record<string, unknown>,
@@ -167,22 +133,14 @@ export function autoInjectPortTemplates(
     string,
     Record<string, unknown>
   >;
-  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
 
-  if (
-    Object.keys(features).length === 0 &&
-    Object.keys(prebuildFeatures).length === 0
-  ) {
+  if (Object.keys(features).length === 0) {
     return [];
   }
 
   const injected: string[] = [];
 
-  // Process top-level features: symmetric injection into feature options (existing behavior)
   injectForBlock(features, metadataMap, injected);
-
-  // Process prebuild features: asymmetric injection into appPort
-  injectForPrebuildBlock(config, prebuildFeatures, metadataMap, injected);
 
   return injected;
 }
@@ -222,70 +180,23 @@ function injectForBlock(
   }
 }
 
-/** Asymmetric injection for prebuild features. Injects appPort entries, not feature options. */
-function injectForPrebuildBlock(
-  config: Record<string, unknown>,
-  block: Record<string, Record<string, unknown>>,
-  metadataMap: Map<string, FeatureMetadata | null>,
-  injected: string[],
-): void {
-  for (const [fullRef, featureOptions] of Object.entries(block)) {
-    const shortId = extractFeatureShortId(fullRef);
-    const metadata = metadataMap.get(fullRef);
-    if (!metadata) continue;
-
-    const laceCustom = extractLaceCustomizations(metadata);
-    if (!laceCustom?.ports) continue;
-
-    for (const optionName of Object.keys(laceCustom.ports)) {
-      // Skip if user has provided an explicit value for this option
-      if (
-        featureOptions &&
-        typeof featureOptions === "object" &&
-        optionName in featureOptions
-      ) {
-        continue;
-      }
-
-      // Get the feature's default port value from metadata
-      const defaultPort = metadata.options?.[optionName]?.default;
-      if (!defaultPort) continue; // Cannot generate asymmetric mapping without default
-
-      // Inject asymmetric appPort entry: ${lace.port(...)}:DEFAULT_PORT
-      const appPort = (config.appPort ?? []) as (string | number)[];
-      const portLabel = `\${lace.port(${shortId}/${optionName})}`;
-      // Skip if user already has an appPort entry referencing this port label
-      if (appPort.some((entry) => String(entry).includes(portLabel))) {
-        continue;
-      }
-      const template = `${portLabel}:${defaultPort}`;
-      appPort.push(template);
-      config.appPort = appPort;
-
-      injected.push(`${shortId}/${optionName}`);
-    }
-  }
-}
-
 /** Result of auto-injecting mount templates. */
 export interface MountAutoInjectionResult {
   /** Labels that were auto-injected into the mounts array. */
   injected: string[];
-  /** Unified declarations map (project + feature + prebuild feature). */
+  /** Unified declarations map (project + feature). */
   declarations: Record<string, LaceMountDeclaration>;
 }
 
 /**
- * Build a unified mount declarations map from project-level, feature-level,
- * and prebuild feature-level declarations.
+ * Build a unified mount declarations map from project-level and
+ * feature-level declarations.
  *
  * Project declarations come from `customizations.lace.mounts` in the devcontainer config.
- * Feature/prebuild feature declarations come from feature metadata's `customizations.lace.mounts`.
+ * Feature declarations come from feature metadata's `customizations.lace.mounts`.
  *
  * Project declarations are prefixed with "project/".
  * Feature declarations are prefixed with "<shortId>/".
- * Mounts are runtime config (docker run flags), so prebuild features are treated identically
- * to regular features — no build/runtime asymmetry.
  */
 export function buildMountDeclarationsMap(
   projectDeclarations: Record<string, LaceMountDeclaration>,
@@ -319,7 +230,7 @@ export function buildMountDeclarationsMap(
  * Valid namespaces are "project" (for project-level) or a known feature shortId.
  *
  * @param declarations The unified declarations map
- * @param featureShortIds Set of known feature short IDs (from features + prebuildFeatures)
+ * @param featureShortIds Set of known feature short IDs (from features)
  * @throws Error if any namespace is unknown
  */
 export function validateMountNamespaces(
@@ -505,15 +416,12 @@ function mountLabelReferencedInMounts(
 
 /**
  * Auto-inject mount entries for all declarations not already referenced
- * in the config's mounts array. Handles project-level, feature-level, and
- * prebuild feature-level declarations.
+ * in the config's mounts array. Handles project-level and feature-level
+ * declarations.
  *
  * For each declaration label, scans the mounts array for any reference in
  * any accessor form (bare, .source, .target). If no reference found, appends
  * a bare ${lace.mount(ns/label)} entry.
- *
- * Mounts are runtime config (docker run flags), so prebuild features are
- * treated identically to regular features — no build/runtime asymmetry.
  *
  * Modifies the config in-place before template resolution.
  * Returns the injected labels and the unified declarations map.
@@ -561,9 +469,7 @@ export async function resolveTemplates(
   mountResolver?: MountPathResolver,
 ): Promise<TemplateResolutionResult> {
   const features = (config.features ?? {}) as Record<string, unknown>;
-  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
-  const allFeatures = { ...features, ...prebuildFeatures };
-  const featureIdMap = buildFeatureIdMap(allFeatures);
+  const featureIdMap = buildFeatureIdMap(features);
   const allocations: PortAllocation[] = [];
   const warnings: string[] = [];
 
@@ -892,103 +798,4 @@ export function buildFeaturePortMetadata(
   }
 
   return result;
-}
-
-/**
- * Check if any ${lace.port()} expressions exist in prebuildFeatures values
- * and return warnings for them.
- */
-export function warnPrebuildPortTemplates(
-  config: Record<string, unknown>,
-): string[] {
-  const warnings: string[] = [];
-  const customizations = config.customizations as
-    | Record<string, unknown>
-    | undefined;
-  if (!customizations) return warnings;
-
-  const lace = customizations.lace as Record<string, unknown> | undefined;
-  if (!lace?.prebuildFeatures) return warnings;
-
-  const prebuildFeatures = lace.prebuildFeatures as Record<
-    string,
-    Record<string, unknown>
-  >;
-
-  for (const [featureRef, options] of Object.entries(prebuildFeatures)) {
-    if (!options || typeof options !== "object") continue;
-    for (const [optName, optValue] of Object.entries(options)) {
-      if (typeof optValue === "string" && LACE_PORT_PATTERN.test(optValue)) {
-        LACE_PORT_PATTERN.lastIndex = 0;
-        warnings.push(
-          `\${lace.port()} in prebuildFeatures option "${featureRef}".${optName} ` +
-            `will not be resolved. Prebuild features use their default values.`,
-        );
-      }
-    }
-  }
-
-  return warnings;
-}
-
-/**
- * Warn about port-declaring features in prebuildFeatures that have an explicit
- * static port value (opting out of auto-injection) but no appPort entry
- * referencing them. In that case, the feature listens on its static port inside
- * the container but has no host port mapping -- the container is invisible.
- *
- * This does NOT warn when:
- * - Auto-injection is active (no explicit value, so the label appears in `injected`)
- * - The user provides both a static value and an explicit appPort with ${lace.port()}
- */
-export function warnPrebuildPortFeaturesStaticPort(
-  config: Record<string, unknown>,
-  metadataMap: Map<string, FeatureMetadata | null>,
-  injected: string[],
-): string[] {
-  const warnings: string[] = [];
-  const prebuildFeatures = extractPrebuildFeaturesRaw(config);
-  if (Object.keys(prebuildFeatures).length === 0) return warnings;
-
-  const appPort = (config.appPort ?? []) as (string | number)[];
-
-  for (const [fullRef, featureOptions] of Object.entries(prebuildFeatures)) {
-    const shortId = extractFeatureShortId(fullRef);
-    const metadata = metadataMap.get(fullRef);
-    if (!metadata) continue;
-
-    const laceCustom = extractLaceCustomizations(metadata);
-    if (!laceCustom?.ports) continue;
-
-    for (const optionName of Object.keys(laceCustom.ports)) {
-      const label = `${shortId}/${optionName}`;
-
-      // Skip if auto-injection was active for this label (no explicit value was set)
-      if (injected.includes(label)) continue;
-
-      // The user has set an explicit value -- check if they also have an appPort entry
-      const hasAppPortRef = appPort.some(
-        (entry) =>
-          typeof entry === "string" &&
-          entry.includes(`\${lace.port(${label})}`),
-      );
-      if (hasAppPortRef) continue;
-
-      const staticValue =
-        featureOptions &&
-        typeof featureOptions === "object" &&
-        optionName in featureOptions
-          ? featureOptions[optionName]
-          : undefined;
-
-      warnings.push(
-        `Feature "${shortId}" in prebuildFeatures declares port "${optionName}" ` +
-          `but has a static value (${JSON.stringify(staticValue ?? "default")}) and no appPort entry. ` +
-          `The container will have no host port mapping for this port. ` +
-          `Either remove the static value to enable auto-injection, or add an appPort entry.`,
-      );
-    }
-  }
-
-  return warnings;
 }

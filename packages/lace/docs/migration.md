@@ -171,13 +171,11 @@ auto-created default directories, and guided configuration output.
 For the full mount system, see [Mount templates](../README.md#mount-templates)
 in the README.
 
-## Step 4: Prebuilds (optional)
+## Step 4: Warm builds
 
-Move slow-to-install features (git, neovim, claude-code) from `features`
-to `customizations.lace.prebuildFeatures`. They get baked into a cached
-local image.
+There is nothing to configure. List every feature under the top-level
+`features` map:
 
-**Before:**
 ```jsonc
 {
   "features": {
@@ -188,41 +186,30 @@ local image.
 }
 ```
 
-**After:**
-```jsonc
-{
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {},
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
-      }
-    }
-  },
-  "features": {
-    "ghcr.io/devcontainers/features/sshd:1": {}
-  }
-}
-```
+`lace up` invokes `devcontainer up --buildkit never`. The legacy builder
+produces a local layer cache in the container runtime's storage, so a second
+`lace up` reuses cached feature-install layers automatically. No lace-side
+cache management, no separate build step.
 
-**Workflow:**
-```sh
-lace prebuild           # One-time: bake features into image (~minutes)
-lace up                 # Fast: uses cached image
-# ... develop ...
-lace restore            # Before committing: revert Dockerfile FROM
-git add . && git commit
-lace prebuild           # Instant re-activation from cache
-```
+### Migrating off `lace prebuild` (2026-05)
 
-**Rules:**
-- A feature cannot appear in both `prebuildFeatures` and `features`.
-- `${lace.port()}` expressions in `prebuildFeatures` are not resolved
-  (prebuild features use default option values). A warning is emitted.
-- Prebuild images are local-only (`lace.local/*`), never pushed to a
-  registry.
+Earlier versions had a `customizations.lace.prebuildFeatures` block and a
+`lace prebuild` subcommand that baked features into a `lace.local/*` image.
+Both are removed.
 
-For prebuild internals, see [docs/prebuild.md](prebuild.md).
+1. Move every entry from `customizations.lace.prebuildFeatures` into the
+   top-level `features` map. `lace up` exits with an error if the key is
+   still present.
+2. Features now install *after* the Dockerfile's `ENV`/`RUN` directives.
+   Audit the Dockerfile for `ENV` values that affect tooling a feature
+   installs (see [troubleshooting.md](troubleshooting.md#3-feature-install-env-order-conflicts)).
+3. Remove the stale artifacts once:
+   ```sh
+   podman rmi $(podman images -q "lace.local/*") 2>/dev/null  # per host
+   rm -rf .lace/prebuild                                       # per project
+   ```
+
+See [docs/prebuild.md](prebuild.md) for the full migration note.
 
 ## Step 5: Workspace layout (optional)
 
@@ -311,10 +298,10 @@ Lace does not replace:
 - **Docker Compose.** Lace targets single-container devcontainers. If your
   setup uses `docker-compose.yml`, lace is not the right tool.
 
-- **Multi-stage Dockerfile logic.** Lace rewrites only the first `FROM`
-  line during prebuilds. Complex multi-stage builds work fine as long as
-  the first stage is the one lace should prebuild onto.
+- **Multi-stage Dockerfile logic.** Lace does not rewrite your Dockerfile.
+  Complex multi-stage builds are passed through to `devcontainer up`
+  unchanged.
 
 - **Feature-specific configuration.** Lace does not change how features
   work inside the container. It only manages how they are configured,
-  allocated ports, and installed (via prebuilds).
+  allocated ports, and mounted.

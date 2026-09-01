@@ -48,7 +48,7 @@ export function mergeUserMounts(
  * on conflict (same feature ID with different options).
  *
  * @param userFeatures Features from user.json
- * @param projectFeatures Features from devcontainer.json (features or prebuildFeatures)
+ * @param projectFeatures Features from devcontainer.json (top-level `features`)
  * @returns Merged feature set
  */
 export function mergeUserFeatures(
@@ -136,11 +136,9 @@ export function mergeUserGitIdentity(
 export function applyUserConfig(
   userConfig: UserConfig,
   projectFeatures: Record<string, Record<string, unknown>>,
-  projectPrebuildFeatures: Record<string, Record<string, unknown>>,
   projectContainerEnv: Record<string, string>,
 ): {
   mergedFeatures: Record<string, Record<string, unknown>>;
-  mergedPrebuildFeatures: Record<string, Record<string, unknown>>;
   mergedContainerEnv: Record<string, string>;
   userMountDeclarations: Record<string, LaceMountDeclaration>;
   defaultShell: string | undefined;
@@ -153,23 +151,10 @@ export function applyUserConfig(
     ? mergeUserMounts(userConfig.mounts)
     : {};
 
-  // Merge features: user features go into prebuildFeatures if project has them,
-  // otherwise into features
+  // Merge user features into the project's top-level `features`.
   let mergedFeatures = { ...projectFeatures };
-  let mergedPrebuildFeatures = { ...projectPrebuildFeatures };
-
   if (userConfig.features) {
-    if (Object.keys(projectPrebuildFeatures).length > 0) {
-      mergedPrebuildFeatures = mergeUserFeatures(
-        userConfig.features,
-        projectPrebuildFeatures,
-      );
-    } else {
-      mergedFeatures = mergeUserFeatures(
-        userConfig.features,
-        projectFeatures,
-      );
-    }
+    mergedFeatures = mergeUserFeatures(userConfig.features, projectFeatures);
   }
 
   // Merge containerEnv
@@ -193,7 +178,6 @@ export function applyUserConfig(
 
   return {
     mergedFeatures,
-    mergedPrebuildFeatures,
     mergedContainerEnv,
     userMountDeclarations,
     defaultShell: userConfig.defaultShell,

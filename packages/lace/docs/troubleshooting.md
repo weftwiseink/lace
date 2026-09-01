@@ -62,37 +62,27 @@ Pinned versions (exact semver, digest refs) are cached permanently.
 
 ---
 
-## 3. Prebuild image missing after Docker prune
+## 3. Feature install env-order conflicts
 
-**Symptom:** `lace up` logs:
+**Symptom:** A feature's install script fails during `lace up` (for example,
+the `node` feature exits with a non-zero status during `apt`/`npm` steps)
+even though the feature installs cleanly in a plain devcontainer.
 
-```
-Prebuild image missing (lace.local/node:24-bookworm). Rebuilding...
-```
+**Cause:** Features install *after* your Dockerfile's `ENV` and `RUN`
+directives, inheriting whatever environment the Dockerfile set. A Dockerfile
+`ENV` can conflict with a feature's installer. The canonical case is
+`ENV NPM_CONFIG_PREFIX=...` versus the nvm-based `node` feature.
 
-Or `devcontainer up` fails because the Dockerfile's FROM line references a
-`lace.local/` image that no longer exists.
+**Fix:** Audit the Dockerfile for `ENV` directives that affect tooling a
+feature installs. Common culprits: `NPM_CONFIG_*`, `PATH` overrides,
+`GOPATH`, `NODE_PATH`, `PYTHONUSERBASE`.
 
-**Cause:** The prebuild image was pruned by `docker system prune` or
-`docker image prune`. The `lace.local/` images are local-only and are not
-protected from pruning.
-
-**Fix:**
-
-1. If lace detects the missing image during `lace up`, it automatically
-   triggers a full rebuild. No manual action is needed.
-
-2. If the error comes from `devcontainer up` directly (outside lace):
-   ```sh
-   lace restore          # Revert Dockerfile FROM to original
-   lace prebuild --force # Rebuild the prebuild image
-   lace up
-   ```
-
-3. Check prebuild state:
-   ```sh
-   lace status
-   ```
+1. If the Dockerfile sets up something the feature now provides (e.g., an
+   npm globals dir the `node` feature manages), delete the `ENV`.
+2. If the value is needed at container runtime but not at feature-install
+   time, move it from `ENV` (Dockerfile, build-time) to `containerEnv`
+   (devcontainer.json, runtime-only).
+3. Re-run `lace up` and confirm the feature installs.
 
 ---
 
@@ -303,47 +293,11 @@ short ID present in the config.
   the version stripped (e.g., `ghcr.io/devcontainers/features/sshd:1`
   has short ID `sshd`).
 
-- Check that the feature is listed in either `features` or
-  `customizations.lace.prebuildFeatures`.
+- Check that the feature is listed in `features`.
 
 ---
 
-## 10. Lock file contention
-
-**Symptom:** `lace up` or `lace prebuild` fails immediately with:
-
-```
-Another lace operation is already running.
-```
-
-**Cause:** Another `lace up` or `lace prebuild` process holds the flock on
-`.lace/prebuild.lock`. Lace uses non-blocking `flock(1)` for mutual
-exclusion.
-
-**Fix:**
-
-1. Check if another lace process is running:
-   ```sh
-   ps aux | grep lace
-   ```
-
-2. If a previous lace process was killed or crashed, the lock file may be
-   stale. The lock is released when the process exits (even abnormally),
-   since flock is held via file descriptor, not the lock file's existence.
-   However, if the process is still running in the background, the lock is
-   still held.
-
-3. If you are certain no other lace process is running, the lock should
-   have been released. Try running `lace up` again. If the error persists,
-   check for zombie processes holding the file descriptor.
-
-> Note: If `flock(1)` is not available on the system, lace degrades
-> gracefully and proceeds without locking, printing:
-> `Warning: flock not available, proceeding without lock.`
-
----
-
-## 11. Claude Code asks to sign in inside container
+## 10. Claude Code asks to sign in inside container
 
 **Symptom:** Claude Code shows the onboarding or sign-in wizard inside the
 container, despite `~/.claude` being bind-mounted from the host.
@@ -378,7 +332,7 @@ in the README.
 
 ---
 
-## 12. Tool plugins or extensions fail to load with path errors
+## 11. Tool plugins or extensions fail to load with path errors
 
 **Symptom:** A tool inside the container reports that plugins, extensions,
 or registries cannot be found, even though the tool's config directory is

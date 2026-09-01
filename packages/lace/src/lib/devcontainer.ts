@@ -5,14 +5,6 @@ import * as jsonc from "jsonc-parser";
 import { parseDockerfileUser } from "./dockerfile.js";
 
 // Documented in CONTRIBUTING.md -- update if changing this pattern
-/** Discriminated result for prebuild feature extraction. */
-export type PrebuildFeaturesResult =
-  | { kind: "features"; features: Record<string, Record<string, unknown>> }
-  | { kind: "absent" }
-  | { kind: "null" }
-  | { kind: "empty" };
-
-// Documented in CONTRIBUTING.md -- update if changing this pattern
 /** Build source for a devcontainer config - either Dockerfile-based or image-based. */
 export type ConfigBuildSource =
   | { kind: "dockerfile"; path: string }
@@ -76,7 +68,7 @@ export interface DevcontainerConfigMinimal {
 
 /**
  * Read and parse a devcontainer.json (JSONC) file.
- * This version resolves the build source and is used by prebuild.
+ * This version resolves the build source (Dockerfile or image).
  */
 export function readDevcontainerConfig(filePath: string): DevcontainerConfig {
   const minimal = readDevcontainerConfigMinimal(filePath);
@@ -129,37 +121,6 @@ export function readDevcontainerConfigMinimal(
 
   const configDir = resolve(filePath, "..");
   return { raw, configDir };
-}
-
-/**
- * Extract prebuildFeatures from a parsed devcontainer config.
- */
-export function extractPrebuildFeatures(
-  raw: Record<string, unknown>,
-): PrebuildFeaturesResult {
-  const customizations = raw.customizations as
-    | Record<string, unknown>
-    | undefined;
-  if (!customizations) return { kind: "absent" };
-
-  const lace = customizations.lace as Record<string, unknown> | undefined;
-  if (!lace) return { kind: "absent" };
-
-  if (!("prebuildFeatures" in lace)) return { kind: "absent" };
-
-  const prebuildFeatures = lace.prebuildFeatures;
-  if (prebuildFeatures === null) return { kind: "null" };
-  if (
-    typeof prebuildFeatures === "object" &&
-    Object.keys(prebuildFeatures as object).length === 0
-  ) {
-    return { kind: "empty" };
-  }
-
-  return {
-    kind: "features",
-    features: prebuildFeatures as Record<string, Record<string, unknown>>,
-  };
 }
 
 /**
@@ -217,27 +178,6 @@ export function resolveDockerfilePath(
     "This function only supports Dockerfile-based configs. " +
       "Use resolveBuildSource() for image-based config support.",
   );
-}
-
-/**
- * Generate a minimal devcontainer.json for the prebuild temp context.
- * Promotes prebuildFeatures to the `features` key. Excludes original features.
- * When remoteUser is provided, it is included so that the devcontainer CLI
- * passes the correct _REMOTE_USER to features at install time.
- */
-export function generateTempDevcontainerJson(
-  prebuildFeatures: Record<string, Record<string, unknown>>,
-  dockerfileName: string,
-  remoteUser?: string,
-): string {
-  const config: Record<string, unknown> = {
-    build: { dockerfile: dockerfileName },
-    features: prebuildFeatures,
-  };
-  if (remoteUser) {
-    config.remoteUser = remoteUser;
-  }
-  return JSON.stringify(config, null, 2) + "\n";
 }
 
 /**

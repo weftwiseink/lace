@@ -1,210 +1,67 @@
-# Prebuild pipeline internals
+# Migration: `lace prebuild` removed
 
-Detailed reference for lace's prebuild pipeline, cache behavior, image tagging, and lock file integration. For usage and quick start, see the [README](../README.md).
+> BLUF: `lace prebuild` (and the `restore` and `status` subcommands, plus the `customizations.lace.prebuildFeatures` config key) has been removed.
+> Move the features you kept in `prebuildFeatures` into the top-level `features` map.
+> Warm builds stay fast through the legacy builder's local layer cache, with no lace-side cache management.
 
-## Supported configuration types
+The design rationale lives in [`cdocs/proposals/2026-05-12-migrate-to-legacy-builder-cache.md`](../../../cdocs/proposals/2026-05-12-migrate-to-legacy-builder-cache.md).
 
-Lace prebuild supports both **Dockerfile-based** and **image-based** devcontainer configurations:
+## What changed
 
-| Config type | Example | Prebuild behavior |
-|-------------|---------|-------------------|
-| Dockerfile | `"build": { "dockerfile": "Dockerfile" }` | Rewrites `FROM` line in Dockerfile |
-| Image | `"image": "node:24"` | Rewrites `image` field in devcontainer.json |
+Lace no longer pre-bakes features into a `lace.local/*` image before the build.
+Instead, `lace up` invokes `devcontainer up --buildkit never` directly, and the legacy builder produces a local layer cache in the container runtime's normal storage.
+Subsequent `lace up` runs reuse that cache automatically (measured 15x speedup on the heaviest project in the ecosystem: 234s cold, 16s warm).
 
-When both `build.dockerfile` and `image` are present, Dockerfile takes precedence (this is standard devcontainer behavior).
+Removed:
+- The `lace prebuild`, `lace restore`, and `lace status` subcommands.
+- The `customizations.lace.prebuildFeatures` configuration key.
+- `lace.local/*` image tagging, `FROM`/`image` rewriting, and the `.lace/prebuild/` cache directory.
 
-## Pipeline steps
+Retained:
+- `--buildkit never` at the `devcontainer up` invocation (load-bearing on rootless podman: see `containers/buildah#6503`).
+- The `dev_container_feature_content_temp` cleanup before each build (keeps the legacy builder's content cache stable).
 
-When you run `lace prebuild`, these steps execute in order:
+## Migration steps
 
-1. **Read config.** Parse `.devcontainer/devcontainer.json` (JSONC-aware) and extract the `prebuildFeatures` map.
+1. Move every entry from `customizations.lace.prebuildFeatures` into the top-level `features` map.
 
-2. **Validate.** Check that no feature appears in both `prebuildFeatures` and `features`. Detection is version-insensitive: `git:1` and `git:2` are considered the same feature.
+   Before:
+   ```jsonc
+   "customizations": {
+     "lace": {
+       "prebuildFeatures": {
+         "ghcr.io/devcontainers/features/git:1": {},
+         "ghcr.io/weftwiseink/devcontainer-features/claude-code:1": {}
+       }
+     }
+   }
+   ```
 
-3. **Parse build source.** Depending on config type:
-   - **Dockerfile:** Use AST-based parsing (via `dockerfile-ast`) to extract the first `FROM` instruction, including any `ARG` prelude, `--platform` flags, and `AS` aliases.
-   - **Image:** Parse the image reference to extract the image name, tag, and digest.
+   After:
+   ```jsonc
+   "features": {
+     "ghcr.io/devcontainers/features/git:1": {},
+     "ghcr.io/weftwiseink/devcontainer-features/claude-code:1": {}
+   }
+   ```
 
-4. **Generate temp context.** Create a minimal build context in `.lace/prebuild/` containing:
-   - **Dockerfile config:** A Dockerfile with only the ARG prelude and the original FROM line.
-   - **Image config:** A synthetic Dockerfile with `FROM <image>`.
-   - A devcontainer.json that promotes `prebuildFeatures` to the `features` key.
+   If lace sees a config that still declares `customizations.lace.prebuildFeatures`, `lace up` exits non-zero with an error pointing back at this migration.
 
-5. **Cache check.** Compare the generated context against the cached context from the last build. If nothing changed, skip the build (unless `--force` is set).
+2. Check for feature install env-order conflicts.
+   Features now install *after* your Dockerfile's `ENV` and `RUN` directives, not before.
+   Audit the Dockerfile for `ENV` directives that affect tooling a feature installs (common culprits: `NPM_CONFIG_*`, `PATH` overrides, `GOPATH`, `NODE_PATH`, `PYTHONUSERBASE`).
+   See [`troubleshooting.md`](./troubleshooting.md#3-feature-install-env-order-conflicts) for the fix.
 
-6. **Build.** Shell out to `devcontainer build` with the temp context, tagging the resulting image with a `lace.local/` prefixed name.
+3. Run `lace up` and confirm the container starts and each feature's tooling is present.
+   A second consecutive `lace up` should complete in well under the cold-build time (the warm layer cache is reused).
 
-7. **Rewrite source.**
-   - **Dockerfile config:** Replace the Dockerfile's first `FROM` line with the pre-baked image reference. Platform flags and aliases are preserved.
-   - **Image config:** Replace the `image` field in devcontainer.json with the pre-baked image reference. Comments and formatting are preserved (JSONC-aware).
+## One-time cleanup of stale artifacts
 
-8. **Merge lock file.** Write prebuild feature lock entries into the project's `devcontainer-lock.json` under the `lace.prebuiltFeatures` namespace.
+After migrating, remove the artifacts the old pipeline left behind:
 
-9. **Write metadata.** Save the original FROM/image reference, prebuild tag, config type, and timestamp to `.lace/prebuild/metadata.json`.
-
-If the build fails at step 6, the Dockerfile is not modified. The pipeline is atomic with respect to the Dockerfile: it is only rewritten on success.
-
-## FROM rewriting (Dockerfile configs)
-
-Lace rewrites only the first `FROM` instruction in the Dockerfile. It preserves:
-
-- `--platform` flags (e.g., `--platform=linux/amd64`)
-- `AS` aliases (e.g., `AS builder`)
-- All other lines (comments, subsequent stages, etc.)
-
-Before:
-```dockerfile
-ARG BASE=node:24-bookworm
-FROM ${BASE} AS dev
-RUN apt-get update
+```sh
+podman rmi $(podman images -q "lace.local/*") 2>/dev/null  # one-time, per host
+rm -rf .lace/prebuild                                       # one-time, per project
 ```
 
-After `lace prebuild`:
-```dockerfile
-ARG BASE=node:24-bookworm
-FROM lace.local/node:24-bookworm AS dev
-RUN apt-get update
-```
-
-After `lace restore`:
-```dockerfile
-ARG BASE=node:24-bookworm
-FROM node:24-bookworm AS dev
-RUN apt-get update
-```
-
-If the Dockerfile already has a `lace.local/` FROM from a previous prebuild, lace automatically restores the original FROM before parsing. Re-running prebuild after a config change works without a manual `lace restore` first.
-
-## Image field rewriting (image configs)
-
-For image-based configurations, lace rewrites the `image` field in `devcontainer.json`. Comments and formatting are preserved using JSONC-aware modification.
-
-Before:
-```json
-{
-  // My devcontainer config
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {}
-      }
-    }
-  }
-}
-```
-
-After `lace prebuild`:
-```json
-{
-  // My devcontainer config
-  "image": "lace.local/mcr.microsoft.com/devcontainers/base:ubuntu",
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {}
-      }
-    }
-  }
-}
-```
-
-After `lace restore`:
-```json
-{
-  // My devcontainer config
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "customizations": {
-    "lace": {
-      "prebuildFeatures": {
-        "ghcr.io/devcontainers/features/git:1": {}
-      }
-    }
-  }
-}
-```
-
-If the `image` field already has a `lace.local/` prefix from a previous prebuild, lace automatically restores the original image before parsing.
-
-## The `lace.local/` image naming convention
-
-Pre-baked images are tagged with a `lace.local/` prefix. These images exist only in the local Docker daemon and are never pushed to a registry. The prefix signals that the FROM line (Dockerfile) or image field (devcontainer.json) has been modified by lace.
-
-> **Note:** The `lace.local/` prefix is reserved for lace-managed images. Avoid manually setting images to `lace.local/...` outside of the prebuild workflow.
-
-| Original FROM | Pre-baked image tag |
-|---|---|
-| `node:24-bookworm` | `lace.local/node:24-bookworm` |
-| `ubuntu:22.04` | `lace.local/ubuntu:22.04` |
-| `node@sha256:abc123...` | `lace.local/node:from_sha256__abc123...` |
-| `node` (no tag) | `lace.local/node:latest` |
-
-For digest-based references, the digest is converted to a tag-safe format (`sha256:abc` becomes `from_sha256__abc`), since Docker tags cannot contain the `@` character. Tags exceeding Docker's 128-character limit are truncated.
-
-### Bidirectional tag format
-
-The tag format is bidirectional: `generateTag` and `parseTag` are inverses. `lace restore` uses `parseTag` to recover the original image reference from the `lace.local/` tag without requiring metadata:
-
-| Pre-baked tag | Recovered original |
-|---|---|
-| `lace.local/node:24-bookworm` | `node:24-bookworm` |
-| `lace.local/ghcr.io/owner/image:v2` | `ghcr.io/owner/image:v2` |
-| `lace.local/node:from_sha256__abc123` | `node@sha256:abc123` |
-| `lace.local/node:latest` | `node:latest` |
-
-The only minor ambiguity is `node:latest`: the original may have been untagged `FROM node`, but `node:latest` is semantically equivalent.
-
-## Cache internals
-
-Lace caches the build context from the last prebuild in `.lace/prebuild/`:
-
-| File | Purpose |
-|------|---------|
-| `Dockerfile` | The minimal Dockerfile used for the last prebuild (or synthetic `FROM <image>` for image configs) |
-| `devcontainer.json` | The temp devcontainer.json used for the last prebuild |
-| `metadata.json` | Original FROM/image, prebuild tag, config type, and timestamp |
-
-On subsequent runs, lace compares the newly generated context against the cached files. If they match (normalized for whitespace/formatting differences), the build is skipped:
-
-```
-Prebuild is up to date (lace.local/node:24-bookworm). Use --force to rebuild.
-```
-
-### Cache reactivation
-
-After `lace restore`, the `.lace/prebuild/` cache is preserved. When you run `lace prebuild` again with the same configuration, lace detects the cache is fresh and reactivates the prebuild by rewriting the source without running `devcontainer build`:
-
-For Dockerfile configs:
-```
-Prebuild reactivated from cache. Dockerfile FROM rewritten to: lace.local/node:24-bookworm
-```
-
-For image configs:
-```
-Prebuild reactivated from cache. devcontainer.json image rewritten to: lace.local/mcr.microsoft.com/devcontainers/base:ubuntu
-```
-
-This makes the restore-commit-prebuild workflow instant.
-
-## Lock file integration
-
-When `devcontainer build` runs during prebuild, it generates a `devcontainer-lock.json` in the temp context directory. Lace merges these lock entries into the project's `.devcontainer/devcontainer-lock.json` under a separate namespace:
-
-```json
-{
-  "features": {
-    "ghcr.io/devcontainers/features/sshd:1": {
-      "version": "1.0.0",
-      "resolved": "ghcr.io/devcontainers/features/sshd@sha256:..."
-    }
-  },
-  "lace.prebuiltFeatures": {
-    "ghcr.io/devcontainers/features/git:1": {
-      "version": "1.0.0",
-      "resolved": "ghcr.io/devcontainers/features/git@sha256:..."
-    }
-  }
-}
-```
-
-The `lace.prebuiltFeatures` namespace keeps prebuild lock entries separate from the regular `features` entries that `devcontainer up` manages. This prevents conflicts and makes it clear which features were pre-baked.
+Cleanup of the layer cache itself uses standard host tooling (`podman image prune`); lace does not add a cache-management subcommand.

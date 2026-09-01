@@ -5,14 +5,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import * as jsonc from "jsonc-parser";
 import {
-  extractPrebuildFeatures,
   extractRepoMounts,
   deriveRepoName,
   getRepoNameOrAlias,
   parseRepoId,
   resolveBuildSource,
   resolveDockerfilePath,
-  generateTempDevcontainerJson,
   DevcontainerConfigError,
   rewriteImageField,
   hasLaceLocalImage,
@@ -26,80 +24,6 @@ function readFixture(name: string): Record<string, unknown> {
   const content = readFileSync(join(FIXTURES, name), "utf-8");
   return jsonc.parse(content) as Record<string, unknown>;
 }
-
-// --- Config extraction ---
-
-describe("extractPrebuildFeatures", () => {
-  it("returns features from standard config", () => {
-    const raw = readFixture("standard.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("features");
-    if (result.kind === "features") {
-      expect(Object.keys(result.features)).toHaveLength(2);
-      expect(result.features).toHaveProperty(
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1",
-      );
-      expect(result.features).toHaveProperty(
-        "ghcr.io/weft/devcontainer-features/wezterm-server:1",
-      );
-    }
-  });
-
-  it("returns absent when prebuildFeatures is missing", () => {
-    const raw = readFixture("absent-prebuild.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("absent");
-  });
-
-  it("returns null sentinel when prebuildFeatures is null", () => {
-    const raw = readFixture("null-prebuild.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("null");
-  });
-
-  it("returns empty when prebuildFeatures is {}", () => {
-    const raw = readFixture("empty-prebuild.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("empty");
-  });
-
-  it("returns absent when customizations key is missing", () => {
-    const raw = { build: { dockerfile: "Dockerfile" } };
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("absent");
-  });
-
-  it("returns absent when customizations.lace is missing", () => {
-    const raw = { customizations: { vscode: {} } };
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("absent");
-  });
-
-  it("parses JSONC with comments and trailing commas", () => {
-    const raw = readFixture("comments-and-trailing-commas.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("features");
-    if (result.kind === "features") {
-      expect(result.features).toHaveProperty(
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1",
-      );
-    }
-  });
-
-  it("preserves feature options", () => {
-    const raw = readFixture("standard.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    if (result.kind === "features") {
-      const weztermOpts =
-        result.features[
-          "ghcr.io/weft/devcontainer-features/wezterm-server:1"
-        ];
-      expect(weztermOpts).toEqual({
-        version: "20240203-110809-5046fc22",
-      });
-    }
-  });
-});
 
 // --- Build config detection ---
 
@@ -232,98 +156,6 @@ describe("resolveBuildSource", () => {
     expect(() => resolveBuildSource(raw, configDir)).toThrow(
       /Cannot determine build source/,
     );
-  });
-});
-
-// --- Overlap fixture ---
-
-describe("extractPrebuildFeatures: overlap fixture", () => {
-  it("extracts prebuild features even when they overlap with regular features", () => {
-    const raw = readFixture("overlap.jsonc");
-    const result = extractPrebuildFeatures(raw);
-    expect(result.kind).toBe("features");
-    if (result.kind === "features") {
-      expect(result.features).toHaveProperty(
-        "ghcr.io/devcontainers/features/git:1",
-      );
-      expect(result.features).toHaveProperty(
-        "ghcr.io/anthropics/devcontainer-features/claude-code:1",
-      );
-    }
-  });
-});
-
-// --- Temp context generation ---
-
-describe("generateTempDevcontainerJson", () => {
-  it("generates minimal config with promoted features", () => {
-    const features = {
-      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-      "ghcr.io/weft/devcontainer-features/wezterm-server:1": {
-        version: "20240203-110809-5046fc22",
-      },
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile"),
-    );
-    expect(result.build.dockerfile).toBe("Dockerfile");
-    expect(result.features).toEqual(features);
-    expect(Object.keys(result)).toEqual(["build", "features"]);
-  });
-
-  it("does not include original features or other fields", () => {
-    const features = {
-      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile"),
-    );
-    expect(result).not.toHaveProperty("customizations");
-    expect(result).not.toHaveProperty("forwardPorts");
-  });
-
-  it("includes remoteUser when provided", () => {
-    const features = {
-      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile", "node"),
-    );
-    expect(result.remoteUser).toBe("node");
-    expect(Object.keys(result)).toEqual(["build", "features", "remoteUser"]);
-  });
-
-  it("omits remoteUser when not provided", () => {
-    const features = {
-      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile"),
-    );
-    expect(result).not.toHaveProperty("remoteUser");
-  });
-
-  it("omits remoteUser when empty string", () => {
-    const features = {
-      "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile", ""),
-    );
-    expect(result).not.toHaveProperty("remoteUser");
-  });
-
-  it("preserves feature options in generated config", () => {
-    const features = {
-      "ghcr.io/foo/bar:1": { option1: "value1", option2: true },
-    };
-    const result = JSON.parse(
-      generateTempDevcontainerJson(features, "Dockerfile"),
-    );
-    expect(result.features["ghcr.io/foo/bar:1"]).toEqual({
-      option1: "value1",
-      option2: true,
-    });
   });
 });
 

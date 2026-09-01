@@ -32,6 +32,11 @@ tags: [prebuild, migration, legacy_builder, podman, validated, lace_prebuild_del
 > A follow-up workstream owns portless integration and host-SSH replacement.
 > See [`cdocs/reports/2026-05-13-initial-migration-scoping.md`](../reports/2026-05-13-initial-migration-scoping.md).
 
+> NOTE(opus/prebuild-removal/2026-09-01): Phases 4 (code deletion), 5 (test surface), and 6 (docs) are implemented and review-accepted on branch `prebuild-removal` (not merged), along with the Phase 7 substep 1 flip of lace's own `.devcontainer/devcontainer.json` and a fail-loud guard for a lingering `customizations.lace.prebuildFeatures` key.
+> Scoped this way to honor a hard "do not reboot the running weftwise/clauthier/jif containers" constraint.
+> Deferred (require container rebuilds): Phase 3 (migrate the other live user projects), Phase 7 live dogfood, and closing the weftwise container-side SSH/tools verification gap.
+> See devlog [`cdocs/devlogs/2026-09-01-prebuild-removal-iterate.md`](../devlogs/2026-09-01-prebuild-removal-iterate.md) and review [`cdocs/reviews/2026-09-01-prebuild-removal-r1.md`](../reviews/2026-09-01-prebuild-removal-r1.md).
+
 ## Objective
 
 Remove `lace prebuild` as a phase, subcommand, and configuration concept from lace.

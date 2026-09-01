@@ -27,7 +27,7 @@ export const upCommand = defineCommand({
   meta: {
     name: "up",
     description:
-      "Start a devcontainer with prebuild features and repo mounts",
+      "Start a devcontainer with resolved features, ports, and repo mounts",
   },
   args: {
     "workspace-folder": {
@@ -57,7 +57,7 @@ export const upCommand = defineCommand({
     },
     "rebuild": {
       type: "boolean",
-      description: "Force full rebuild: rebuild prebuild image and recreate container",
+      description: "Force full rebuild: recreate the container from scratch",
       default: false,
     },
   },

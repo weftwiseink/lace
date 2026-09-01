@@ -451,7 +451,7 @@ export function checkGitExtensions(
         `Repository uses git extension "${extName}"${versionHint} ` +
         "but the container's git may not support it.",
       remediation:
-        'Set version to "latest" in the git prebuild feature: ' +
+        'Set version to "latest" in the git feature: ' +
         '"ghcr.io/devcontainers/features/git:1": { "version": "latest" }',
     });
   }
@@ -518,7 +518,7 @@ export function verifyContainerGitVersion(
         supported: false,
         message:
           "Could not determine git version in container. " +
-          "git may not be installed. Add the git prebuild feature: " +
+          "git may not be installed. Add the git feature: " +
           '"ghcr.io/devcontainers/features/git:1": { "version": "latest" }',
       }],
     };
@@ -573,7 +573,7 @@ export function verifyContainerGitVersion(
           `container has ${gitVersion}. OK.`
         : `Extension "${extName}" requires git ${requiredVersion}+, ` +
           `but container has ${gitVersion}. ` +
-          'Set version to "latest" in the git prebuild feature.',
+          'Set version to "latest" in the git feature.',
     });
   }
 

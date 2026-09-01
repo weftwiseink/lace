@@ -222,7 +222,6 @@ describe("applyUserConfig", () => {
     const result = applyUserConfig(
       userConfig,
       { "ghcr.io/devcontainers/features/rust:1": {} },
-      {},
       { TERM: "xterm" },
     );
 
@@ -230,7 +229,7 @@ describe("applyUserConfig", () => {
     expect(result.userMountDeclarations["user/screenshots"]).toBeDefined();
     expect(result.userMountDeclarations["user/screenshots"].readonly).toBe(true);
 
-    // Features merged into regular features (no prebuild)
+    // User features merged into the project's top-level features
     expect(Object.keys(result.mergedFeatures)).toHaveLength(2);
 
     // containerEnv: user defaults + project overrides + git identity
@@ -246,32 +245,32 @@ describe("applyUserConfig", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
-  it("user features go into prebuildFeatures when project has them", () => {
+  it("merges user features with project features that share an id", () => {
     const userConfig = {
       features: {
+        "ghcr.io/devcontainers/features/sshd:1": { version: "user" },
         "ghcr.io/eitsupi/devcontainer-features/nushell:0": {},
       },
     };
 
     const result = applyUserConfig(
       userConfig,
-      {},
-      { "ghcr.io/devcontainers/features/sshd:1": {} },
+      { "ghcr.io/devcontainers/features/sshd:1": { version: "project" } },
       {},
     );
 
-    // User features merged into prebuild (project has prebuild features)
-    expect(result.mergedPrebuildFeatures["ghcr.io/eitsupi/devcontainer-features/nushell:0"]).toBeDefined();
-    expect(result.mergedPrebuildFeatures["ghcr.io/devcontainers/features/sshd:1"]).toBeDefined();
-    // Regular features unchanged
-    expect(Object.keys(result.mergedFeatures)).toHaveLength(0);
+    // Both user features present in the unified feature set
+    expect(result.mergedFeatures["ghcr.io/eitsupi/devcontainer-features/nushell:0"]).toBeDefined();
+    // Project options win on id conflict
+    expect(result.mergedFeatures["ghcr.io/devcontainers/features/sshd:1"]).toEqual({
+      version: "project",
+    });
   });
 
   it("returns empty state for empty user config", () => {
     const result = applyUserConfig(
       {},
       { "ghcr.io/devcontainers/features/rust:1": {} },
-      {},
       { TERM: "xterm" },
     );
 
@@ -291,7 +290,7 @@ describe("applyUserConfig", () => {
       },
     };
 
-    const result = applyUserConfig(userConfig, {}, {}, {});
+    const result = applyUserConfig(userConfig, {}, {});
     // User mount is in declarations
     expect(result.userMountDeclarations["user/screenshots"]).toBeDefined();
     // Target conflict detection happens in the pipeline, not here

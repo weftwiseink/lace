@@ -6,7 +6,6 @@ import { tmpdir, homedir } from "node:os";
 import {
   extractFeatureShortId,
   buildFeatureIdMap,
-  extractPrebuildFeaturesRaw,
   autoInjectPortTemplates,
   autoInjectMountTemplates,
   validateMountNamespaces,
@@ -15,8 +14,6 @@ import {
   generatePortEntries,
   mergePortEntries,
   buildFeaturePortMetadata,
-  warnPrebuildPortTemplates,
-  warnPrebuildPortFeaturesStaticPort,
   emitMountGuidance,
   deduplicateStaticMounts,
 } from "../template-resolver";
@@ -99,75 +96,6 @@ const gitMetadata: FeatureMetadata = {
   version: "1.0.0",
   options: { version: { type: "string", default: "latest" } },
 };
-
-// ── extractPrebuildFeaturesRaw ──
-
-describe("extractPrebuildFeaturesRaw", () => {
-  it("returns prebuild features when present", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              version: "20240203-110809-5046fc22",
-            },
-          },
-        },
-      },
-    };
-
-    const result = extractPrebuildFeaturesRaw(config);
-    expect(Object.keys(result)).toHaveLength(1);
-    expect(
-      result["ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"],
-    ).toEqual({ version: "20240203-110809-5046fc22" });
-  });
-
-  it("returns empty object when no customizations", () => {
-    const config: Record<string, unknown> = {};
-    expect(extractPrebuildFeaturesRaw(config)).toEqual({});
-  });
-
-  it("returns empty object when no lace customizations", () => {
-    const config: Record<string, unknown> = {
-      customizations: { vscode: {} },
-    };
-    expect(extractPrebuildFeaturesRaw(config)).toEqual({});
-  });
-
-  it("returns empty object when prebuildFeatures absent", () => {
-    const config: Record<string, unknown> = {
-      customizations: { lace: {} },
-    };
-    expect(extractPrebuildFeaturesRaw(config)).toEqual({});
-  });
-
-  it("returns empty object when prebuildFeatures is null", () => {
-    const config: Record<string, unknown> = {
-      customizations: { lace: { prebuildFeatures: null } },
-    };
-    expect(extractPrebuildFeaturesRaw(config)).toEqual({});
-  });
-
-  it("returns empty object when prebuildFeatures is empty", () => {
-    const config: Record<string, unknown> = {
-      customizations: { lace: { prebuildFeatures: {} } },
-    };
-    expect(extractPrebuildFeaturesRaw(config)).toEqual({});
-  });
-
-  it("returns a direct reference (not a copy)", () => {
-    const prebuildFeatures = {
-      "ghcr.io/devcontainers/features/git:1": {},
-    };
-    const config: Record<string, unknown> = {
-      customizations: { lace: { prebuildFeatures } },
-    };
-
-    const result = extractPrebuildFeaturesRaw(config);
-    expect(result).toBe(prebuildFeatures); // same reference
-  });
-});
 
 // ── extractFeatureShortId ──
 
@@ -417,119 +345,6 @@ describe("autoInjectPortTemplates", () => {
     expect(opts.hostSshPort).toBe("${lace.port(wezterm-server/hostSshPort)}");
   });
 
-  // T1: autoInjectPortTemplates with prebuild feature (asymmetric)
-  it("injects asymmetric appPort entry for prebuild features", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    const injected = autoInjectPortTemplates(config, metadataMap);
-
-    // Feature option should NOT be modified
-    const prebuildFeatures = (
-      config.customizations as Record<string, Record<string, unknown>>
-    ).lace.prebuildFeatures as Record<string, Record<string, unknown>>;
-    expect(
-      prebuildFeatures[
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ],
-    ).toEqual({}); // no hostSshPort injected into feature options
-
-    // Asymmetric appPort entry should be injected
-    const appPort = config.appPort as string[];
-    expect(appPort).toHaveLength(1);
-    expect(appPort[0]).toBe("${lace.port(wezterm-server/hostSshPort)}:2222");
-
-    // Return value includes the label
-    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
-  });
-
-  // T2: autoInjectPortTemplates with prebuild feature, user-provided value
-  it("skips injection for prebuild feature when user provides explicit value", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              hostSshPort: "3333",
-            },
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    const injected = autoInjectPortTemplates(config, metadataMap);
-
-    expect(injected).toEqual([]);
-    expect(config.appPort).toBeUndefined();
-  });
-
-  // T3: autoInjectPortTemplates with features in both blocks
-  it("injects for top-level features only when prebuild features have no port metadata", () => {
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-      },
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/devcontainers/features/git:1": {},
-            "ghcr.io/devcontainers/features/sshd:1": {},
-          },
-        },
-      },
-    };
-
-    const sshdMetadata: FeatureMetadata = {
-      id: "sshd",
-      version: "1.0.0",
-      options: { version: { type: "string", default: "latest" } },
-    };
-
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-      ["ghcr.io/devcontainers/features/git:1", gitMetadata],
-      ["ghcr.io/devcontainers/features/sshd:1", sshdMetadata],
-    ]);
-
-    const injected = autoInjectPortTemplates(config, metadataMap);
-
-    // Only wezterm-server (in features block) gets symmetric injection
-    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
-    const features = config.features as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(
-      features[
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1"
-      ].hostSshPort,
-    ).toBe("${lace.port(wezterm-server/hostSshPort)}");
-
-    // No appPort injection (prebuild features have no port metadata)
-    expect(config.appPort).toBeUndefined();
-  });
 });
 
 // ── autoInjectMountTemplates ──
@@ -819,62 +634,6 @@ describe("autoInjectMountTemplates", () => {
     const result = autoInjectMountTemplates(config, projectDecls, metadataMap);
 
     expect(result.injected).toEqual([]);
-  });
-
-  // ── Prebuild feature declarations ──
-
-  it("injects prebuild feature mount declarations identically to regular features", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        featureWithMountMetadata,
-      ],
-    ]);
-
-    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
-
-    expect(result.injected).toEqual(["wezterm-server/config"]);
-    const mounts = config.mounts as string[];
-    expect(mounts).toHaveLength(1);
-    expect(mounts[0]).toBe("${lace.mount(wezterm-server/config)}");
-  });
-
-  it("injects both regular and prebuild feature mount declarations", () => {
-    const config: Record<string, unknown> = {
-      features: {
-        "ghcr.io/org/data-feature:1": {},
-      },
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/org/data-feature:1", featureWithMultipleMountsMetadata],
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        featureWithMountMetadata,
-      ],
-    ]);
-
-    const result = autoInjectMountTemplates(config, noProjectDecls, metadataMap);
-
-    expect(result.injected).toHaveLength(3);
-    expect(result.injected).toContain("data-feature/data");
-    expect(result.injected).toContain("data-feature/cache");
-    expect(result.injected).toContain("wezterm-server/config");
   });
 
   // ── Unified declarations map ──
@@ -1232,89 +991,14 @@ describe("resolveTemplates", () => {
     expect(remoteEnv.PATH).toBe("${containerEnv:PATH}:/extra");
   });
 
-  // T4: resolveTemplates with prebuild feature in featureIdMap
-  it("resolves appPort template referencing a prebuild-only feature", async () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              hostSshPort: "2222",
-            },
-          },
-        },
-      },
-      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
-    };
-
-    const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator);
-
-    // Template resolved successfully
-    const appPort = result.resolvedConfig.appPort as string[];
-    expect(appPort[0]).toMatch(/^224\d{2}:2222$/);
-    expect(result.allocations).toHaveLength(1);
-    expect(result.allocations[0].label).toBe("wezterm-server/hostSshPort");
-    expect(result.allocations[0].port).toBeGreaterThanOrEqual(22425);
-    expect(result.allocations[0].port).toBeLessThanOrEqual(22499);
-  });
-
-  // T5: resolveTemplates with prebuild feature auto-injected appPort (two-step)
-  it("resolves auto-injected asymmetric appPort for prebuild feature", async () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    // Step 1: auto-inject
-    const injected = autoInjectPortTemplates(config, metadataMap);
-    expect(injected).toEqual(["wezterm-server/hostSshPort"]);
-
-    // Verify injection produced asymmetric appPort template
-    const appPortAfterInjection = config.appPort as string[];
-    expect(appPortAfterInjection).toHaveLength(1);
-    expect(appPortAfterInjection[0]).toBe(
-      "${lace.port(wezterm-server/hostSshPort)}:2222",
-    );
-
-    // Step 2: resolve
-    const allocator = new PortAllocator(workspaceRoot);
-    const result = await resolveTemplates(config, allocator);
-
-    // Resolved appPort has concrete port
-    const resolvedAppPort = result.resolvedConfig.appPort as string[];
-    expect(resolvedAppPort[0]).toMatch(/^224\d{2}:2222$/);
-
-    // Allocation produced
-    expect(result.allocations).toHaveLength(1);
-    expect(result.allocations[0].label).toBe("wezterm-server/hostSshPort");
-  });
-
-  // T6: buildFeatureIdMap collision across blocks
-  it("throws on feature ID collision across features and prebuildFeatures", async () => {
+  // T6: buildFeatureIdMap collision within the features block
+  it("throws on feature ID collision between two features", async () => {
     const config: Record<string, unknown> = {
       features: {
         "ghcr.io/org-a/devcontainer-features/wezterm-server:1": {
           hostSshPort: "${lace.port(wezterm-server/hostSshPort)}",
         },
-      },
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/org-b/devcontainer-features/wezterm-server:2": {},
-          },
-        },
+        "ghcr.io/org-b/devcontainer-features/wezterm-server:2": {},
       },
     };
 
@@ -1593,181 +1277,6 @@ describe("buildFeaturePortMetadata", () => {
 
     const result = buildFeaturePortMetadata(metadataMap);
     expect(result.size).toBe(0);
-  });
-});
-
-// ── warnPrebuildPortTemplates ──
-
-describe("warnPrebuildPortTemplates", () => {
-  it("warns about ${lace.port()} in prebuildFeatures", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/org/feat:1": {
-              port: "${lace.port(feat/port)}",
-            },
-          },
-        },
-      },
-    };
-
-    const warnings = warnPrebuildPortTemplates(config);
-
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("prebuildFeatures");
-    expect(warnings[0]).toContain("will not be resolved");
-  });
-
-  it("returns empty when no prebuildFeatures", () => {
-    const config: Record<string, unknown> = {};
-    const warnings = warnPrebuildPortTemplates(config);
-    expect(warnings).toEqual([]);
-  });
-
-  it("returns empty when prebuildFeatures have no templates", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/org/feat:1": {
-              port: "3000",
-            },
-          },
-        },
-      },
-    };
-
-    const warnings = warnPrebuildPortTemplates(config);
-    expect(warnings).toEqual([]);
-  });
-});
-
-// ── warnPrebuildPortFeaturesStaticPort ──
-
-describe("warnPrebuildPortFeaturesStaticPort", () => {
-  it("warns when prebuild feature has static port and no appPort", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              hostSshPort: "2222",
-            },
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    const warnings = warnPrebuildPortFeaturesStaticPort(
-      config,
-      metadataMap,
-      [], // nothing was auto-injected
-    );
-
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("wezterm-server");
-    expect(warnings[0]).toContain("hostSshPort");
-    expect(warnings[0]).toContain("no appPort entry");
-    expect(warnings[0]).toContain("static value");
-  });
-
-  it("does not warn when auto-injection is active", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {},
-          },
-        },
-      },
-      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    const warnings = warnPrebuildPortFeaturesStaticPort(
-      config,
-      metadataMap,
-      ["wezterm-server/hostSshPort"], // auto-injection happened
-    );
-
-    expect(warnings).toEqual([]);
-  });
-
-  it("does not warn when user provides static value and explicit appPort", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1": {
-              hostSshPort: "2222",
-            },
-          },
-        },
-      },
-      appPort: ["${lace.port(wezterm-server/hostSshPort)}:2222"],
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      [
-        "ghcr.io/weftwiseink/devcontainer-features/wezterm-server:1",
-        weztermMetadata,
-      ],
-    ]);
-
-    const warnings = warnPrebuildPortFeaturesStaticPort(
-      config,
-      metadataMap,
-      [], // nothing injected because user provided explicit value
-    );
-
-    expect(warnings).toEqual([]);
-  });
-
-  it("returns empty when no prebuild features", () => {
-    const config: Record<string, unknown> = {};
-    const metadataMap = new Map<string, FeatureMetadata | null>();
-
-    const warnings = warnPrebuildPortFeaturesStaticPort(
-      config,
-      metadataMap,
-      [],
-    );
-
-    expect(warnings).toEqual([]);
-  });
-
-  it("returns empty when prebuild features have no port metadata", () => {
-    const config: Record<string, unknown> = {
-      customizations: {
-        lace: {
-          prebuildFeatures: {
-            "ghcr.io/devcontainers/features/git:1": {},
-          },
-        },
-      },
-    };
-    const metadataMap = new Map<string, FeatureMetadata | null>([
-      ["ghcr.io/devcontainers/features/git:1", gitMetadata],
-    ]);
-
-    const warnings = warnPrebuildPortFeaturesStaticPort(
-      config,
-      metadataMap,
-      [],
-    );
-
-    expect(warnings).toEqual([]);
   });
 });
 

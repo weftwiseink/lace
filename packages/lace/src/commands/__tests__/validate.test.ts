@@ -107,10 +107,9 @@ describe("lace validate (via runUp with validateOnly)", () => {
     expect(result.phases.mountValidation).toBeDefined();
   });
 
-  it("validateOnly: true skips prebuild phase", async () => {
+  it("fails loud when config still declares customizations.lace.prebuildFeatures", async () => {
     setupWorkspace(
       JSON.stringify({
-        image: "node:24-bookworm",
         build: { dockerfile: "Dockerfile" },
         customizations: {
           lace: {
@@ -133,9 +132,14 @@ describe("lace validate (via runUp with validateOnly)", () => {
       skipMetadataValidation: true,
     });
 
-    // Should pass without running prebuild
-    expect(result.exitCode).toBe(0);
-    expect(result.phases.prebuild).toBeUndefined();
+    // Removed key surfaces an actionable migration error rather than silently
+    // dropping the features.
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toContain("prebuildFeatures");
+    expect(result.message).toContain("features");
+    expect(result.message).toContain(
+      "2026-05-12-migrate-to-legacy-builder-cache.md",
+    );
     // No devcontainer build call should have been made
     const buildCalls = mockCalls.filter(c => c.command === "devcontainer" && c.args[0] === "build");
     expect(buildCalls.length).toBe(0);

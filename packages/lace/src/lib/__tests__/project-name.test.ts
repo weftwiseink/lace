@@ -1,10 +1,14 @@
 // IMPLEMENTATION_VALIDATION
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   deriveProjectName,
   sanitizeContainerName,
   hasRunArgsFlag,
   resolveContainerName,
+  canonicalizeWorkspaceFolder,
 } from "../project-name";
 import type { WorkspaceClassification } from "../workspace-detector";
 
@@ -98,6 +102,83 @@ describe("deriveProjectName", () => {
     expect(deriveProjectName(classification, "/code/lace/develop")).toBe(
       "lace",
     );
+  });
+});
+
+// ── canonicalizeWorkspaceFolder (Bug 1: path-canonicalization identity) ──
+//
+// Hermetic: the symlink is built inside the test's own temp dir, so the test
+// does not depend on the host's real /home -> /var/home layout. The invariant
+// under test is that aliased spellings of the same tree resolve to ONE identity
+// across all three container-identity consumers.
+
+describe("canonicalizeWorkspaceFolder identity invariant", () => {
+  let root: string;
+  let realDir: string;
+  let linkDir: string;
+
+  beforeEach(() => {
+    root = join(
+      tmpdir(),
+      `lace-test-canon-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    realDir = join(root, "real");
+    linkDir = join(root, "link");
+    // tmp/real/proj  and  tmp/link -> tmp/real
+    mkdirSync(join(realDir, "proj"), { recursive: true });
+    symlinkSync(realDir, linkDir);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("aliased paths canonicalize to one identity across all three consumers", () => {
+    const viaReal = canonicalizeWorkspaceFolder(join(realDir, "proj"));
+    const viaLink = canonicalizeWorkspaceFolder(join(linkDir, "proj"));
+
+    // 1. Same canonical workspaceFolder.
+    expect(viaLink).toBe(viaReal);
+
+    const classification: WorkspaceClassification = { type: "normal-clone" };
+    // 2. Same deriveProjectName.
+    expect(deriveProjectName(classification, viaLink)).toBe(
+      deriveProjectName(classification, viaReal),
+    );
+    // 3. Same resolved container name.
+    expect(resolveContainerName(deriveProjectName(classification, viaLink), {}))
+      .toBe(resolveContainerName(deriveProjectName(classification, viaReal), {}));
+    // 4. Same devcontainer.local_folder label filter string.
+    expect(`label=devcontainer.local_folder=${viaLink}`).toBe(
+      `label=devcontainer.local_folder=${viaReal}`,
+    );
+  });
+
+  it("trailing-slash and .. spellings resolve to the same identity", () => {
+    const base = canonicalizeWorkspaceFolder(join(realDir, "proj"));
+    const trailing = canonicalizeWorkspaceFolder(join(realDir, "proj") + "/");
+    const dotdot = canonicalizeWorkspaceFolder(
+      join(realDir, "proj", "..", "proj"),
+    );
+    expect(trailing).toBe(base);
+    expect(dotdot).toBe(base);
+  });
+
+  it("falls back to resolve() for a non-existent path without throwing", () => {
+    const missing = join(root, "does-not-exist", "sub");
+    let out: string | undefined;
+    expect(() => {
+      out = canonicalizeWorkspaceFolder(missing);
+    }).not.toThrow();
+    // resolve() returns an absolute path; the segment is preserved for a later
+    // phase to fail loudly against.
+    expect(out).toBe(missing);
+    expect(out?.startsWith("/")).toBe(true);
+  });
+
+  it("canonicalizes a relative input to an absolute path", () => {
+    const out = canonicalizeWorkspaceFolder("some/relative/path");
+    expect(out.startsWith("/")).toBe(true);
   });
 });
 

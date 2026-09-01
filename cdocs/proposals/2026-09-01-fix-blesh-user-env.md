@@ -5,7 +5,7 @@ first_authored:
 task_list: devcontainer/blesh-user-env
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
@@ -115,7 +115,7 @@ Add a new step `devcontainers/features/src/lace-fundamentals/steps/user-env.sh` 
 The step writes:
 
 ```sh
-# /etc/profile.d/lace-user-env.sh
+# /etc/profile.d/05-lace-user-env.sh
 export USER="${USER:-$(id -un)}"
 ```
 
@@ -170,21 +170,30 @@ The fix stays scoped to `$USER` to remain minimal.
 
 ## Test Plan
 
-- **A, non-login path (the reproduction):** in the Lace container, `env -u USER bash -i -c 'echo "USER=[$USER]"' 2>&1` shows no `insane environment` line and prints a non-empty `USER=[node]`.
+- **A, non-login path (the reproduction):** in the Lace container, drive a real interactive bash under a pty (see Verification Methodology) with `$USER` unset; it shows no `insane environment` line and prints a non-empty `USER=[node]`.
 - **A, deployed dotfiles:** after `chezmoi apply`, a fresh `podman exec -it <container> bash` prompt shows no warning and `echo "$USER"` is non-empty.
-- **B, login path:** in a container WITHOUT these dotfiles (or with the dotfiles guard temporarily removed), a login shell (`bash -l -i`) sources `/etc/profile.d/lace-user-env.sh` and `$USER` is populated.
-- **B, feature build:** `lace-fundamentals` install writes `/etc/profile.d/lace-user-env.sh` with mode `0644`, and `install.sh` sources `steps/user-env.sh` without error.
+- **B, login path:** in a container WITHOUT these dotfiles (or with the dotfiles guard temporarily removed), a login shell (`bash -l -i`) sources `/etc/profile.d/05-lace-user-env.sh` and `$USER` is populated.
+- **B, feature build:** `lace-fundamentals` install writes `/etc/profile.d/05-lace-user-env.sh` with mode `0644`, and `install.sh` sources `steps/user-env.sh` without error.
 - **Regression:** bash-history migration snippet and other profile.d scripts are unaffected; `$USER` is not clobbered when already set (verify by exporting a distinct value and confirming it survives).
 
 ## Verification Methodology
 
 Reproduce the non-login launch path and confirm the warning is gone and `$USER` is populated.
+The reproduction MUST drive a real interactive bash under a pty, feeding commands on stdin.
 
-**Before the fix (failure picture):**
+> NOTE(claude-opus-4-8/blesh-user-env): Do NOT use `env -u USER bash -i -c '<cmd>'` to reproduce this.
+> It is a proven FALSE NEGATIVE: ble.sh early-returns when `BASH_EXECUTION_STRING` is set (the `-c` string), so it never reaches its `check-environment` sanity block (`ble.sh:1008`).
+> The warning never fires under `bash -c` even with `$USER` empty and the guard absent, so `-c` cannot distinguish fixed from broken.
+> A pty-backed interactive session is required.
+
+**Guard-absent baseline (proves the warning appears without the fix):**
 
 ```sh
-# In the Lace container, simulate the non-login entry path:
-env -u USER bash -i -c 'echo "USER=[$USER]"' 2>&1 | head
+# Make a copy of the rc with the guard line stripped, to prove the warning
+# appears when the guard is absent.
+grep -vF 'export USER="${USER:-$(id -un)}"' ~/.bashrc > /tmp/rc-noguard.sh
+printf 'echo "USER=[$USER]"; exit\n' > /tmp/cmds.txt
+env -u USER TERM=screen script -qec "bash --rcfile /tmp/rc-noguard.sh -i" /dev/null < /tmp/cmds.txt
 # Expected (broken):
 #   ble.sh: insane environment: $USER is empty.  Please consider checking the
 #     terminal's settings or setting export USER=$(id -un) in your .bash_profile.
@@ -192,19 +201,21 @@ env -u USER bash -i -c 'echo "USER=[$USER]"' 2>&1 | head
 #   USER=[node]
 ```
 
-The presence of the two `ble.sh:` lines on stderr, or an empty `USER=[]`, is the failure signature.
+The presence of the two `ble.sh:` lines, or an empty `USER=[]`, is the failure signature.
+`TERM=screen` suppresses the `dot_bashrc` tmux auto-launch so the ble.sh path is isolated.
 
 **After the fix (success picture):**
 
 ```sh
-env -u USER bash -i -c 'echo "USER=[$USER]"' 2>&1 | head
+printf 'echo "USER=[$USER]"; exit\n' > /tmp/cmds.txt
+env -u USER TERM=screen script -qec "bash --rcfile ~/.bashrc -i" /dev/null < /tmp/cmds.txt
 # Expected (fixed): no ble.sh warning lines, and:
 #   USER=[node]
 ```
 
-Success criteria: NO `insane environment: $USER is empty` line appears on stderr, AND `$USER` is non-empty in the fresh interactive shell.
+Success criteria: NO `insane environment: $USER is empty` line appears, AND `$USER` is non-empty in the fresh interactive shell.
 
-For Option B in isolation, run the same check in a login shell (`bash -l -i`) in a container built from the updated `lace-fundamentals` feature with the dotfiles guard absent, and confirm `/etc/profile.d/lace-user-env.sh` populates `$USER`.
+For Option B in isolation, run the same pty-backed check as a login shell (`bash --rcfile ~/.bashrc -l -i`, or a real `bash -l`) in a container built from the updated `lace-fundamentals` feature with the dotfiles guard absent, and confirm `/etc/profile.d/05-lace-user-env.sh` populates `$USER`.
 
 ## Implementation Phases
 
@@ -221,7 +232,7 @@ Phase 1 alone silences the reported symptom for this user; Phase 2 is the system
 2. `chezmoi apply` to deploy to `~/.bashrc`.
 
 **Success criteria:**
-- The `env -u USER bash -i -c ...` reproduction (Verification Methodology) prints no ble.sh warning and a non-empty `$USER`.
+- The pty-backed reproduction (Verification Methodology) prints no ble.sh warning and a non-empty `$USER`.
 - The guard appears before the ble.sh source chain in the deployed `~/.bashrc`.
 
 **Constraints:**
@@ -232,7 +243,8 @@ Phase 1 alone silences the reported symptom for this user; Phase 2 is the system
 
 **Repo:** this worktree, `devcontainers/features/src/lace-fundamentals/`.
 
-1. Create `steps/user-env.sh` that writes an idempotent, root-owned, `0644` `/etc/profile.d/lace-user-env.sh` containing `export USER="${USER:-$(id -un)}"`.
+1. Create `steps/user-env.sh` that writes an idempotent, root-owned, `0644` `/etc/profile.d/05-lace-user-env.sh` containing `export USER="${USER:-$(id -un)}"`.
+   The numeric `05-` prefix orders this guard early among `/etc/profile.d/*.sh` scripts, so later profile.d snippets that read `$USER` see it populated.
    Mirror the write/chmod idiom in `bash-history/install.sh` (heredoc, `chmod 0644`, best-effort `chown "$_REMOTE_USER"` when non-root).
 2. Source the new step from `install.sh`, keeping the existing `. "$SCRIPT_DIR/steps/..."` idiom (POSIX `sh`).
    Ordering among steps is cosmetic here: the step writes the profile.d guard at build time and the guard executes at shell runtime, so there is no build-time dependency on `id`/coreutils or on any other step.
@@ -240,7 +252,7 @@ Phase 1 alone silences the reported symptom for this user; Phase 2 is the system
 4. Note the change in `README.md` if the feature documents its steps.
 
 **Success criteria:**
-- Building a container with the updated feature yields `/etc/profile.d/lace-user-env.sh` (mode `0644`) that populates `$USER` in a login shell.
+- Building a container with the updated feature yields `/etc/profile.d/05-lace-user-env.sh` (mode `0644`) that populates `$USER` in a login shell.
 - `install.sh` runs cleanly under `sh` with the new step sourced.
 
 **Constraints:**

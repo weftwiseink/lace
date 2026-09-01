@@ -6,6 +6,11 @@ task_list: lace/prebuild-cache-rethink/legacy-builder-migration
 type: devlog
 state: live
 status: review_ready
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-8"
+  at: 2026-09-01T09:55:00-07:00
+  round: 1
 tags: [prebuild, migration, lace_prebuild_deletion, iterate]
 ---
 
@@ -134,8 +139,10 @@ Deviation note: `docs/architecture.md` and the portless docs were touched beyond
 
 | iteration | implementer | reviewer | review_verdict | review_proof | review_path | notes |
 |---|---|---|---|---|---|---|
+| 1 | impl-1 (general-purpose) | rev-1 (cdocs:reviewer) | accept | confirmed | cdocs/reviews/2026-09-01-prebuild-removal-r1.md | Deletion-correctness floor empirically re-verified by rev-1 (typecheck/build exit 0, guard demo exit 1 no container, retained bits byte-identical to main, no live imports of deleted modules). Sole test failure is the environmental `port-allocator` EADDRINUSE (jif holds :22431), overseer-confirmed byte-identical to main. Container warm-vs-cold timing + live dogfood deferred-to-followup (needs a rebuild). Overseer cleared 2 nits post-accept: 2 branch-introduced em-dashes (README, architecture.md); N3 phantom `bash-history` deletion needs no action for a merge. Open follow-up: `flock.ts` dead code left in place. |
 
 ## Judge Log
 
 | judge_iteration | trigger | verdict | rationale | judge_path |
 |---|---|---|---|---|
+| n/a | n/a | n/a | Loop terminated on a round-1 accept; the judge runs from the Nth revise verdict onward and no revise occurred. | inline |

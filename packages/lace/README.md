@@ -442,7 +442,7 @@ For single-service worktrees, the service prefix can be omitted: just `{worktree
 
 Lace allocates a host port from the 22425-22499 range and injects it as portless's `proxyPort`, so the proxy listens on that port inside the container and the host maps it symmetrically (e.g., `22435:22435`). The `*.localhost` domain resolves to `127.0.0.1` via RFC 6761 / nss-myhostname on Linux.
 
-No lace core changes are needed -- the feature port auto-injection pipeline handles this from the `features` map.
+No lace core changes are needed: the feature port auto-injection pipeline handles this from the `features` map.
 
 ### Troubleshooting
 

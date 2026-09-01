@@ -72,8 +72,8 @@ template expressions resolved to concrete values.
 
 The key insight: lace does not replace the devcontainer CLI. It
 preprocesses your config into a standard one that the devcontainer CLI
-consumes unchanged. Everything lace adds -- port allocations, mount
-resolution -- is expressed in standard devcontainer.json fields.
+consumes unchanged. Everything lace adds (port allocations, mount
+resolution) is expressed in standard devcontainer.json fields.
 
 ## Layer-to-step mapping
 

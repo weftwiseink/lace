@@ -6,8 +6,6 @@
     "dockerfile": "Dockerfile",
     "args": {
       "TZ": "${localEnv:TZ:America/Los_Angeles}",
-      // NOTE: Tied to project/bash-history declaration below
-      "COMMAND_HISTORY_PATH": "/commandhistory",
       "USERNAME": "node"
     },
     "context": ".."
@@ -26,7 +24,7 @@
       // Configure custom source paths in ~/.config/lace/settings.json
       "mounts": {
         "bash-history": {
-          "target": "/commandhistory",
+          "target": "/bash-history",
           "description": "Bash command history persistence"
         }
       },

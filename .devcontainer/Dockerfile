@@ -3,8 +3,6 @@ FROM lace.local/node:24-bookworm
 
 ARG GIT_DELTA_VERSION="0.18.2"
 
-ARG COMMAND_HISTORY_PATH="/commandhistory"
-
 ARG USERNAME=node
 
 ARG TZ
@@ -49,12 +47,12 @@ RUN mkdir -p /usr/local/share/npm-global && \
 # Create config directories and set permissions (as root)
 # The workspace directory (/workspaces/lace) is created empty here and populated
 # at runtime by the bind mount. No source files are copied into it.
-RUN mkdir -p /workspaces /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH} && \
-    touch ${COMMAND_HISTORY_PATH}/.bash_history && \
-    chown -R ${USERNAME}:${USERNAME} /workspaces /home/${USERNAME}/.claude ${COMMAND_HISTORY_PATH}
+RUN mkdir -p /workspaces /home/${USERNAME}/.claude && \
+    chown -R ${USERNAME}:${USERNAME} /workspaces /home/${USERNAME}/.claude
 
-# Persist bash history from https://github.com/anthropics/claude-code/blob/main/.devcontainer/Dockerfile
-RUN echo "export PROMPT_COMMAND='history -a' && export HISTFILE=${COMMAND_HISTORY_PATH}/.bash_history" >> /home/${USERNAME}/.bashrc
+# Bash history persistence is provided by the user-level `bash-history` lace
+# feature (declares the /bash-history per-project mount and sets HISTFILE); no
+# per-image history-path prep is needed here.
 
 # Install git-delta (as root)
 RUN ARCH=$(dpkg --print-architecture) && \

@@ -58,9 +58,10 @@ It runs at container start (via `postCreateCommand`) and handles:
 
 ## Install Steps
 
-The feature runs four install steps in order:
+The feature runs five install steps in order:
 
 1. **staples**: ensures core utilities (curl, jq, less) are present.
 2. **chezmoi**: installs chezmoi binary if not present.
 3. **git-identity**: creates the `lace-fundamentals-init` runtime script.
 4. **shell**: changes the remote user's login shell if `defaultShell` is set.
+5. **user-env**: writes `/etc/profile.d/05-lace-user-env.sh` to populate `$USER` (`${USER:-$(id -un)}`) for login shells that enter without it.

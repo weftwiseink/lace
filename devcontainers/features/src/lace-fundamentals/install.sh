@@ -12,5 +12,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/steps/chezmoi.sh"
 . "$SCRIPT_DIR/steps/git-identity.sh"
 . "$SCRIPT_DIR/steps/shell.sh"
+. "$SCRIPT_DIR/steps/user-env.sh"
 
 echo "lace-fundamentals: Install complete."

@@ -5,7 +5,7 @@ first_authored:
 task_list: devcontainer/blesh-user-env
 type: proposal
 state: live
-status: review_ready
+status: implementation_ready
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
@@ -45,7 +45,7 @@ Eliminate the `ble.sh: insane environment: $USER is empty` / `ble.sh: modified U
 
 ### The warning
 
-ble.sh's environment sanity check lives at `~/.local/share/blesh/ble.sh:1006-1014` (source: `src/ble.pp`).
+ble.sh's environment sanity check lives at `~/.local/share/blesh/ble.sh:1008` (source: `src/ble.pp`).
 The relevant block:
 
 ```sh
@@ -119,9 +119,14 @@ The step writes:
 export USER="${USER:-$(id -un)}"
 ```
 
-This covers ALL Lace containers and ALL users, including those who do not run these dotfiles.
+This covers Lace containers and users regardless of dotfiles.
 Its limitation is timing: `/etc/profile.d` runs only for login shells, so it does not fire in the bare non-login `bash -i` path (see Edge Cases).
 It is a systemic backstop, not a replacement for A.
+
+> NOTE(claude-opus-4-8/blesh-user-env): B's genuine marginal coverage is narrower than "all containers/users."
+> Login shells reached via real `login`/PAM/sshd already have `$USER` populated, which is exactly why they never trip the warning.
+> B's real delta is login shells launched OUTSIDE PAM (e.g. `podman exec -it <c> bash -l`), where `/etc/profile.d` runs but PAM has not set `$USER`.
+> A remains the primary fix for the reported non-login path.
 
 ## Important Design Decisions
 
@@ -150,7 +155,7 @@ Option C (setting `containerEnv.USER` in `devcontainer.json`) is rejected: it ha
 ### Scope: `$USER` only
 
 Only `$USER` is reported empty in this container.
-ble.sh also sanity-checks `$HOME` (`ble.sh:1027`) and `$HOSTNAME`, but those are populated by `podman exec` (home directory) and self-heal quietly, so they are not reported.
+ble.sh also sanity-checks `$HOME` (`ble.sh:1029`) and `$HOSTNAME`, but those are populated by `podman exec` (home directory) and self-heal quietly, so they are not reported.
 The fix stays scoped to `$USER` to remain minimal.
 
 > NOTE(claude-opus-4-8/blesh-user-env): If a future container surfaces `$HOME is empty` from ble.sh, extend the same guard pattern rather than reworking this design.
@@ -229,8 +234,9 @@ Phase 1 alone silences the reported symptom for this user; Phase 2 is the system
 
 1. Create `steps/user-env.sh` that writes an idempotent, root-owned, `0644` `/etc/profile.d/lace-user-env.sh` containing `export USER="${USER:-$(id -un)}"`.
    Mirror the write/chmod idiom in `bash-history/install.sh` (heredoc, `chmod 0644`, best-effort `chown "$_REMOTE_USER"` when non-root).
-2. Source the new step from `install.sh`, after `steps/staples.sh` (POSIX `sh`, keep the existing `. "$SCRIPT_DIR/steps/..."` ordering idiom).
-3. Bump the feature `version` in `devcontainer-feature.json` (currently `2.0.0`) per the repo's feature-versioning convention.
+2. Source the new step from `install.sh`, keeping the existing `. "$SCRIPT_DIR/steps/..."` idiom (POSIX `sh`).
+   Ordering among steps is cosmetic here: the step writes the profile.d guard at build time and the guard executes at shell runtime, so there is no build-time dependency on `id`/coreutils or on any other step.
+3. Bump the feature `version` in `devcontainer-feature.json` from `2.0.0` to `2.1.0`: adding a backwards-compatible step is a semver MINOR bump.
 4. Note the change in `README.md` if the feature documents its steps.
 
 **Success criteria:**
@@ -247,4 +253,3 @@ Phase 1 alone silences the reported symptom for this user; Phase 2 is the system
 ## Open Questions
 
 - Should Option B live in `lace-fundamentals` (general env hygiene, chosen) or `blesh` (symptom co-location)? Flagged for reviewer preference; the proposal recommends `lace-fundamentals` with justification.
-- Does the repo's feature-versioning convention require a minor or patch bump for adding a step? Phase 2 assumes a bump is needed; confirm the exact increment during implementation.

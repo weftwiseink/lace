@@ -1,5 +1,5 @@
 # don't upgrade to 25! for some reason corepack doesn't come installed with it.
-FROM lace.local/node:24-bookworm
+FROM node:24-bookworm
 
 ARG GIT_DELTA_VERSION="0.18.2"
 

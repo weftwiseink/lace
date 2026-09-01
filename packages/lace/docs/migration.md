@@ -203,7 +203,14 @@ Both are removed.
 2. Features now install *after* the Dockerfile's `ENV`/`RUN` directives.
    Audit the Dockerfile for `ENV` values that affect tooling a feature
    installs (see [troubleshooting.md](troubleshooting.md#3-feature-install-env-order-conflicts)).
-3. Remove the stale artifacts once:
+3. Revert any `FROM lace.local/<base>` line in your Dockerfile back to the raw
+   base it encodes (for example `FROM lace.local/node:24-bookworm` becomes
+   `FROM node:24-bookworm`). `lace prebuild` used to rewrite this line in place;
+   post-removal lace never rewrites it, so an un-reverted `FROM` builds on a
+   stale prebuild image that disappears once the cleanup in the next step runs.
+   Only Dockerfile-based configs need this; image-based configs used the
+   `image` field instead.
+4. Remove the stale artifacts once:
    ```sh
    podman rmi $(podman images -q "lace.local/*") 2>/dev/null  # per host
    rm -rf .lace/prebuild                                       # per project

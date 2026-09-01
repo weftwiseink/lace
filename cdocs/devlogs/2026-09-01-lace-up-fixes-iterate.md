@@ -6,6 +6,11 @@ task_list: lace/up-path-fixes
 type: devlog
 state: live
 status: wip
+last_reviewed:
+  status: accepted
+  by: "@claude-opus-4-8"
+  at: 2026-09-01T14:40:00-07:00
+  round: 1
 tags: [lace_up, bugfix, iterate]
 ---
 
@@ -33,7 +38,7 @@ Container-build proof is `deferred-to-followup` where it would need the four liv
 
 | iteration | implementer | reviewer | review_verdict | review_proof | review_path | notes |
 |---|---|---|---|---|---|---|
-| 1 | impl-1 (opus-4-8) | pending | pending | - | - | Both phases implemented + committed. |
+| 1 | impl-1 (opus-4-8) | rev-1 (cdocs:reviewer) | accept | confirmed | cdocs/reviews/2026-09-01-review-of-lace-up-path-fixes-impl-r1.md | Both bugs fixed; load-bearing bits intact; 4 exclusion tests genuinely inverted; determinism guard drives real build path-rewrite; 139/139 relevant tests pass. Port-allocator failures confirmed environmental (byte-identical to main, live containers hold :22430-22432). Deviation surfaced for user confirmation: shape-1 single fingerprint applies the hybrid warn+reuse to ALL drift, so runtime (env/mount) drift on a RUNNING container now warns+reuses instead of auto-recreating (idle unchanged; --rebuild overrides). Reviewer: ship shape-1 fail-safe, offer shape-2 as fast-follow. Pending user decision + merge. |
 
 ## Judge Log
 

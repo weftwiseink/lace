@@ -5,11 +5,11 @@ first_authored:
 task_list: lace/up-path-fixes
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
-  at: 2026-09-01T13:20:00-07:00
+  at: 2026-09-01T13:45:00-07:00
   round: 1
 tags: [lace_up, bugfix, architecture]
 ---

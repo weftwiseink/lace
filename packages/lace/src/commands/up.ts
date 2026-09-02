@@ -3,6 +3,7 @@ import { defineCommand } from "citty";
 import { runUp, type UpOptions } from "@/lib/up";
 import { runSubprocess as defaultRunSubprocess } from "@/lib/subprocess";
 import { getPodmanCommand } from "@/lib/container-runtime";
+import { canonicalizeWorkspaceFolder } from "@/lib/project-name";
 import { formatDebugFooter } from "@/lib/debug-footer";
 
 /**
@@ -62,8 +63,12 @@ export const upCommand = defineCommand({
     },
   },
   async run({ args, rawArgs }) {
-    // Extract workspace-folder if provided
-    const workspaceFolder = args["workspace-folder"] || process.cwd();
+    // Extract workspace-folder if provided, and canonicalize it so this
+    // command's own container-identity uses (the isContainerRunning post-check
+    // and the debug footer) agree with runUp's canonical value.
+    const workspaceFolder = canonicalizeWorkspaceFolder(
+      args["workspace-folder"] || process.cwd(),
+    );
     const noCache = args["no-cache"] ?? false;
     const skipMetadataValidation = args["skip-metadata-validation"] ?? false;
     const skipValidation = args["skip-validation"] ?? false;

@@ -55,7 +55,7 @@ import {
 import { applyUserConfig } from "./user-config-merge";
 import { applyWorkspaceLayout } from "./workspace-layout";
 import { runHostValidation } from "./host-validator";
-import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag, resolveContainerName } from "./project-name";
+import { deriveProjectName, sanitizeContainerName, hasRunArgsFlag, resolveContainerName, canonicalizeWorkspaceFolder } from "./project-name";
 import { classifyWorkspace, getDetectedExtensions, verifyContainerGitVersion } from "./workspace-detector";
 import {
   checkConfigDrift,
@@ -117,6 +117,81 @@ export function getContainerHostPorts(
   return ports;
 }
 
+/** Whether the project's container is clearly running, clearly not, or unknown. */
+export type ContainerRunState = "running" | "not-running" | "unknown";
+
+/**
+ * Probe whether the container with the resolved name is currently running.
+ *
+ * Name-scoped (`name=^<name>$`) and status-scoped (`status=running`) so the
+ * probe cannot false-positive on an unrelated container. Any podman error, or a
+ * thrown subprocess, yields "unknown" so the caller can fail safe: on an
+ * ambiguous signal, never auto-rebuild a container that might be live.
+ */
+export function probeContainerRunning(
+  containerName: string,
+  subprocess: RunSubprocess,
+): ContainerRunState {
+  try {
+    const result = subprocess(getPodmanCommand(), [
+      "ps",
+      "--filter", `name=^${containerName}$`,
+      "--filter", "status=running",
+      "--format", "{{.ID}}",
+    ]);
+    if (result.exitCode !== 0) return "unknown";
+    return result.stdout.trim() !== "" ? "running" : "not-running";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Label-guarded teardown of a stale container before `devcontainer up` recreates.
+ *
+ * Removes a container holding the resolved `containerName` ONLY when it also
+ * carries lace's own `lace.project_name=<projectName>` label (stamped on every
+ * container lace creates). The label guard means a container that merely shares
+ * the sanitized name but was NOT created by lace for this project is never
+ * destroyed. Closes the stale-`/home`-label survivor case that our-side
+ * canonicalization structurally cannot match, plus the name-collision that the
+ * CLI's own removal misses.
+ *
+ * Tolerates "no such container": the name-and-label filter simply returns
+ * nothing. A probe failure is swallowed. WARNs on stderr only when a teardown
+ * actually removes something, for traceability.
+ */
+export function teardownStaleContainer(
+  containerName: string,
+  projectName: string,
+  subprocess: RunSubprocess,
+): void {
+  let ids: string[] = [];
+  try {
+    const ps = subprocess(getPodmanCommand(), [
+      "ps", "-aq",
+      "--filter", `name=^${containerName}$`,
+      "--filter", `label=lace.project_name=${projectName}`,
+    ]);
+    if (ps.exitCode !== 0) return; // tolerate probe failure: leave the CLI to handle it
+    ids = ps.stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return;
+  }
+  if (ids.length === 0) return; // nothing lace-owned under this name: nothing to tear down
+
+  try {
+    subprocess(getPodmanCommand(), ["rm", "-f", ...ids]);
+  } catch {
+    return; // best-effort: the CLI's --remove-existing-container is the fallback
+  }
+  // WARN(claude-opus-4-8/lace/up-path-fixes): a teardown actually fired.
+  console.warn(
+    `Warning: removed stale lace container(s) [${ids.join(", ")}] named ` +
+      `"${containerName}" (label lace.project_name=${projectName}) before recreate.`,
+  );
+}
+
 export interface UpOptions {
   /** Workspace folder path (defaults to cwd) */
   workspaceFolder?: string;
@@ -173,7 +248,7 @@ export interface UpResult {
  */
 export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const {
-    workspaceFolder = process.cwd(),
+    workspaceFolder: rawWorkspaceFolder = process.cwd(),
     subprocess = defaultRunSubprocess,
     devcontainerArgs = [],
     skipDevcontainerUp = false,
@@ -184,6 +259,13 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     rebuild = false,
     validateOnly = false,
   } = options;
+
+  // ── Canonicalize the workspace path ONCE, before any identity is derived. ──
+  // Every downstream consumer of container identity (the devcontainer.local_folder
+  // label filter, the `--workspace-folder` argument, and deriveProjectName) reads
+  // this single canonical value, so they cannot disagree on a symlinked or
+  // otherwise-aliased path. See canonicalizeWorkspaceFolder for the rationale.
+  const workspaceFolder = canonicalizeWorkspaceFolder(rawWorkspaceFolder);
 
   const runLog = new RunLog(workspaceFolder, devcontainerArgs);
 
@@ -948,19 +1030,35 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
 
   // Phase: Config drift detection
-  // Read the generated extended config and compare its runtime fingerprint
-  // against the previous run. When drift is detected, auto-recreate the
-  // container so runtime config changes (mounts, env, workspace paths) take
-  // effect without requiring the heavier --rebuild (which recreates the
-  // container from scratch).
+  // Read the generated extended config and compare its recreation fingerprint
+  // against the previous run. The fingerprint now covers `features` and `build`
+  // in addition to the runtime keys (see config-drift.ts), so a features- or
+  // Dockerfile-`FROM`-only change is no longer a silent no-op.
+  //
+  // When drift is detected, respond hybrid:
+  //   - container NOT running (fresh, stopped, absent): auto-recreate so the
+  //     change is applied, via the existing --remove-existing-container path.
+  //   - container running (or its status is unknown/ambiguous): do NOT recreate;
+  //     WARN and reuse it, so an in-flight session is never rebuilt out from
+  //     under the user. The fingerprint is deliberately NOT advanced in this
+  //     case, so a later idle `lace up` still recreates. `lace up --rebuild`
+  //     is the explicit override that recreates regardless of running state.
   let currentFingerprint: string | undefined;
   let recreateContainer = false;
+  // When drift is deferred because the container is running, skip advancing the
+  // fingerprint so the pending change keeps being detected on the next run.
+  let deferDriftFingerprint = false;
+  // The resolved container name (honors a user `--name`) targeted by the probe
+  // and the label-guarded teardown below.
+  let resolvedContainerName: string | undefined;
   {
     const extendedConfigPath = join(workspaceFolder, ".lace", "devcontainer.json");
     try {
       const extendedConfig = JSON.parse(
         readFileSync(extendedConfigPath, "utf-8"),
       ) as Record<string, unknown>;
+
+      resolvedContainerName = resolveContainerName(projectName, extendedConfig);
 
       if (rebuild) {
         deleteRuntimeFingerprint(workspaceFolder);
@@ -970,14 +1068,25 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       currentFingerprint = drift.currentFingerprint;
 
       if (drift.drifted) {
-        recreateContainer = true;
-        if (rebuild) {
+        // `--rebuild` deletes the fingerprint above, so drift.drifted is false
+        // under --rebuild; the running check therefore only governs the
+        // implicit-drift path. --rebuild still forces recreate via
+        // `removeExistingContainer: rebuild || recreateContainer` below.
+        const runState = probeContainerRunning(resolvedContainerName, subprocess);
+        if (runState === "not-running") {
+          recreateContainer = true;
           console.log(
-            "Runtime config changed; container will be recreated (--rebuild).",
+            "Config changed (features, build, or runtime); container will be recreated.",
           );
         } else {
-          console.log(
-            "Runtime config changed; container will be recreated.",
+          // "running" or "unknown": fail safe to reuse. Never rebuild a
+          // container that might be live, and never auto-rebuild on an
+          // ambiguous probe.
+          deferDriftFingerprint = true;
+          console.warn(
+            "Warning: config changed (features, build, or runtime) but the " +
+              "container is running (or its status is unknown); reusing it " +
+              "without recreating. Run `lace up --rebuild` to apply the change.",
           );
         }
       }
@@ -995,6 +1104,19 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
       ? "Validation passed."
       : "lace up completed (devcontainer up skipped)";
     return result;
+  }
+
+  // ── Label-guarded name teardown before recreate (Bug 1 belt-and-suspenders) ──
+  // When we intend to recreate (--rebuild or detected drift on an idle
+  // container), remove any surviving container that holds the resolved name AND
+  // carries lace's own project label. This covers a stale container labeled with
+  // a non-canonical `devcontainer.local_folder` (e.g. `/home` vs `/var/home`)
+  // that our-side canonicalization cannot match, before the CLI's own
+  // --remove-existing-container runs.
+  if (rebuild || recreateContainer) {
+    const teardownName =
+      resolvedContainerName ?? sanitizeContainerName(projectName);
+    teardownStaleContainer(teardownName, projectName, subprocess);
   }
 
   console.log("Starting devcontainer...");
@@ -1025,9 +1147,12 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
     return result;
   }
 
-  // Write the runtime fingerprint after successful container creation.
+  // Write the recreation fingerprint after successful container creation.
   // This ensures the fingerprint reflects actual container state.
-  if (currentFingerprint) {
+  // Skip the write when drift was deferred because the container was running:
+  // the pending features/build/runtime change was NOT applied, so advancing the
+  // fingerprint would hide it from the next (idle) run.
+  if (currentFingerprint && !deferDriftFingerprint) {
     writeRuntimeFingerprint(workspaceFolder, currentFingerprint);
   }
 

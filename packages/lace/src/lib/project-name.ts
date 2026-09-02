@@ -1,6 +1,32 @@
 // IMPLEMENTATION_VALIDATION
-import { basename } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { WorkspaceClassification } from "./workspace-detector";
+
+/**
+ * Canonicalize a workspace folder path so every consumer of container
+ * identity agrees on a single spelling.
+ *
+ * Container identity is derived from `workspaceFolder` in three places (the
+ * `devcontainer.local_folder` label filter, the `--workspace-folder` argument,
+ * and `deriveProjectName`). A path-aliasing mismatch between them (a `/home`
+ * vs `/var/home` symlink, a trailing slash, a `..` segment, a relative input)
+ * makes `--remove-existing-container` miss a stale container and the follow-up
+ * `podman run --name` collide. Resolving once, at the single choke point, closes
+ * that entire class of mismatch.
+ *
+ * `realpathSync` follows symlinks and normalizes the path. For a path that does
+ * not exist yet, `realpathSync` throws; fall back to `resolve()` so a later
+ * phase surfaces the real, actionable error rather than a canonicalization
+ * stack trace. Precedent: `user-config.ts` `resolveSourceForPolicy`.
+ */
+export function canonicalizeWorkspaceFolder(rawPath: string): string {
+  try {
+    return realpathSync(rawPath);
+  } catch {
+    return resolve(rawPath);
+  }
+}
 
 /**
  * Derive a project name from a workspace classification and path.

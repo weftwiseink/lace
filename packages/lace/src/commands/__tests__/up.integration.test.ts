@@ -6,6 +6,7 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
+  symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -29,9 +30,24 @@ const claudeCodeMetadata: FeatureMetadata = {
 };
 
 /** Mock subprocess that handles devcontainer build, up, and metadata fetch commands. */
-function createMock(): RunSubprocess {
+function createMock(options?: { containerRunning?: boolean }): RunSubprocess {
+  const containerRunning = options?.containerRunning ?? false;
   return (command, args, opts) => {
     mockCalls.push({ command, args, cwd: opts?.cwd });
+
+    // Hybrid drift probe: `podman ps --filter name=^..$ --filter status=running`.
+    // Default to "not running" so drift auto-recreates unless a test opts in.
+    if (args[0] === "ps" && args.includes("status=running")) {
+      return { exitCode: 0, stdout: containerRunning ? "runningid\n" : "", stderr: "" };
+    }
+    // Label-guarded teardown probe: `podman ps -aq --filter name=^..$ --filter label=lace.project_name=..`.
+    // Default to "no stale lace container" so no teardown fires.
+    if (
+      args[0] === "ps" &&
+      args.some((a) => a.startsWith("label=lace.project_name="))
+    ) {
+      return { exitCode: 0, stdout: "", stderr: "" };
+    }
 
     // Handle metadata fetch: devcontainer features info manifest <featureId> --output-format json
     if (
@@ -654,7 +670,7 @@ describe("lace up: runtime fingerprint lifecycle", () => {
     expect(fp).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it("auto-recreates container when drift is detected without --rebuild", async () => {
+  it("auto-recreates an IDLE container when drift is detected without --rebuild", async () => {
     setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
 
     // First run: establish fingerprint
@@ -669,13 +685,14 @@ describe("lace up: runtime fingerprint lifecycle", () => {
     const logSpy = vi.spyOn(console, "log");
     try {
       mockCalls = [];
+      // Container is NOT running (default) -> idle path -> auto-recreate.
       const result = await runUp({
         workspaceFolder: workspaceRoot,
         subprocess: createMock(),
       });
       expect(result.exitCode).toBe(0);
       expect(logSpy).toHaveBeenCalledWith(
-        "Runtime config changed; container will be recreated.",
+        "Config changed (features, build, or runtime); container will be recreated.",
       );
 
       // Verify --remove-existing-container was passed to devcontainer up
@@ -691,6 +708,104 @@ describe("lace up: runtime fingerprint lifecycle", () => {
       expect(fp).toMatch(/^[0-9a-f]{16}$/);
     } finally {
       logSpy.mockRestore();
+    }
+  });
+
+  it("warns and REUSES a running container on drift (hybrid: no recreate)", async () => {
+    setupWorkspace(MINIMAL_JSON, STANDARD_DOCKERFILE);
+
+    // First run: establish fingerprint.
+    await runUp({ workspaceFolder: workspaceRoot, subprocess: createMock() });
+
+    // Simulate drift.
+    writeFileSync(join(laceDir, "runtime-fingerprint"), "stale_fingerprin\n", "utf-8");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      mockCalls = [];
+      // Container IS running -> hybrid warn+reuse path.
+      const result = await runUp({
+        workspaceFolder: workspaceRoot,
+        subprocess: createMock({ containerRunning: true }),
+      });
+      expect(result.exitCode).toBe(0);
+
+      // A distinct warning fired naming the change.
+      expect(
+        warnSpy.mock.calls.some(
+          (c) => typeof c[0] === "string" && c[0].includes("config changed") && c[0].includes("running"),
+        ),
+      ).toBe(true);
+
+      // devcontainer up must NOT remove the running container.
+      const upCall = mockCalls.find(
+        (c) => c.command === "devcontainer" && c.args[0] === "up",
+      );
+      expect(upCall).toBeDefined();
+      expect(upCall?.args).not.toContain("--remove-existing-container");
+
+      // The fingerprint is NOT advanced: the pending change is still detectable
+      // on the next (idle) run.
+      const fp = readFileSync(join(laceDir, "runtime-fingerprint"), "utf-8").trim();
+      expect(fp).toBe("stale_fingerprin");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+describe("lace up: build path rewrite determinism (Bug 2 spurious-drift guard)", () => {
+  // The `build.dockerfile`/`context` rewrite (up.ts generateExtendedConfig) runs
+  // on every `lace up`. If it were non-deterministic, the widened fingerprint
+  // would flip and rebuild every run. This guard drives the ACTUAL rewrite twice
+  // and asserts the emitted `build` object -- and therefore the fingerprint -- is
+  // byte-identical, including across a symlinked spelling of the same tree.
+  const BUILD_JSON = JSON.stringify(
+    { build: { dockerfile: "Dockerfile", context: "." } },
+    null,
+    2,
+  );
+
+  function readBuildAndFingerprint(): { build: string; fingerprint: string } {
+    const generated = JSON.parse(
+      readFileSync(join(laceDir, "devcontainer.json"), "utf-8"),
+    ) as Record<string, unknown>;
+    const fingerprint = readFileSync(
+      join(laceDir, "runtime-fingerprint"),
+      "utf-8",
+    ).trim();
+    return { build: JSON.stringify(generated.build), fingerprint };
+  }
+
+  it("produces a byte-identical build object and fingerprint across runs", async () => {
+    setupWorkspace(BUILD_JSON, STANDARD_DOCKERFILE);
+
+    // Run 1 (absolute real path).
+    await runUp({ workspaceFolder: workspaceRoot, subprocess: createMock() });
+    const first = readBuildAndFingerprint();
+
+    // Run 2 (absolute real path again) -> run-to-run determinism.
+    await runUp({ workspaceFolder: workspaceRoot, subprocess: createMock() });
+    const second = readBuildAndFingerprint();
+
+    expect(second.build).toBe(first.build);
+    expect(second.fingerprint).toBe(first.fingerprint);
+    // The rewrite points the dockerfile back into the real .devcontainer tree.
+    expect(first.build).toContain("../.devcontainer/Dockerfile");
+
+    // Run 3 (symlinked spelling of the same tree) -> same canonical identity.
+    const linkRoot = join(
+      tmpdir(),
+      `lace-test-up-link-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    symlinkSync(workspaceRoot, linkRoot);
+    try {
+      await runUp({ workspaceFolder: linkRoot, subprocess: createMock() });
+      const third = readBuildAndFingerprint();
+      expect(third.build).toBe(first.build);
+      expect(third.fingerprint).toBe(first.fingerprint);
+    } finally {
+      rmSync(linkRoot, { force: true });
     }
   });
 });

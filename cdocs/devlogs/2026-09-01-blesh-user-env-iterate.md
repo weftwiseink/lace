@@ -4,7 +4,7 @@ first_authored:
   at: 2026-09-01T10:30:00-07:00
 task_list: devcontainer/blesh-user-env
 type: devlog
-state: live
+state: archived
 status: done
 tags: [devcontainer, dotfiles, shell]
 ---

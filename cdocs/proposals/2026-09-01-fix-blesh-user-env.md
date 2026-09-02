@@ -4,7 +4,7 @@ first_authored:
   at: 2026-09-01T14:30:00-07:00
 task_list: devcontainer/blesh-user-env
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 last_reviewed:
   status: accepted

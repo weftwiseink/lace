@@ -413,11 +413,43 @@ export interface BareRepoWorkspace {
  *         <name>/   (commondir + gitdir back-pointers)
  *     <name>/       (worktree directories with .git file pointers)
  */
+/**
+ * A stale or ambiguous admin entry to write under `.bare/worktrees/<name>/`,
+ * used to model git's prune criteria hermetically.
+ */
+export interface StaleAdminEntry {
+  /** Name of the admin dir under worktrees/. */
+  name: string;
+  /**
+   * Policy for the worktrees/<name>/gitdir forward pointer:
+   *  - "nonexistent" (default): points to a container path absent on the host.
+   *  - "missing": do not write the gitdir file at all (gitdir-missing).
+   *  - "empty": write an empty gitdir file (gitdir-empty).
+   *  - any other string: written verbatim as the gitdir content.
+   */
+  gitdir?: "nonexistent" | "missing" | "empty" | string;
+  /** Create worktrees/<name>/locked (never auto-prunable). */
+  locked?: boolean;
+  /**
+   * Also create the working-tree directory <root>/<name>/ with a .git
+   * back-pointer. Default false (a true stale entry has no working tree).
+   * Set true for the ambiguous-sibling case: present host working tree +
+   * a nonexistent-location forward pointer.
+   */
+  withWorkingTree?: boolean;
+  /** Back-pointer style for the created working tree (default relative). */
+  workingTreeAbsolute?: boolean;
+}
+
 export function createBareRepoWorkspace(
   parentDir: string,
   projectName: string,
   worktreeNames: string[] = ["main"],
-  options: { useAbsolutePaths?: boolean } = {},
+  options: {
+    useAbsolutePaths?: boolean;
+    /** Extra admin entries modeling stale / ambiguous prune state. */
+    staleAdminEntries?: StaleAdminEntry[];
+  } = {},
 ): BareRepoWorkspace {
   const root = join(parentDir, projectName);
   const bareDir = join(root, ".bare");
@@ -455,6 +487,47 @@ export function createBareRepoWorkspace(
     );
 
     worktrees[name] = worktreeDir;
+  }
+
+  for (const entry of options.staleAdminEntries ?? []) {
+    const adminDir = join(bareDir, "worktrees", entry.name);
+    mkdirSync(adminDir, { recursive: true });
+    writeFileSync(join(adminDir, "commondir"), "../..\n", "utf-8");
+
+    if (entry.locked) {
+      writeFileSync(join(adminDir, "locked"), "", "utf-8");
+    }
+
+    // A working tree directory is created only for the ambiguous-sibling case.
+    if (entry.withWorkingTree) {
+      const worktreeDir = join(root, entry.name);
+      mkdirSync(worktreeDir, { recursive: true });
+      const backTarget = entry.workingTreeAbsolute
+        ? join(bareDir, "worktrees", entry.name)
+        : `../.bare/worktrees/${entry.name}`;
+      writeFileSync(
+        join(worktreeDir, ".git"),
+        `gitdir: ${backTarget}\n`,
+        "utf-8",
+      );
+      worktrees[entry.name] = worktreeDir;
+    }
+
+    const gitdir = entry.gitdir ?? "nonexistent";
+    if (gitdir === "missing") {
+      // Intentionally omit the gitdir file (gitdir-missing).
+    } else if (gitdir === "empty") {
+      writeFileSync(join(adminDir, "gitdir"), "", "utf-8");
+    } else if (gitdir === "nonexistent") {
+      // A container-style path that does not resolve on the host.
+      writeFileSync(
+        join(adminDir, "gitdir"),
+        `/workspace/${projectName}/${entry.name}/.git\n`,
+        "utf-8",
+      );
+    } else {
+      writeFileSync(join(adminDir, "gitdir"), `${gitdir}\n`, "utf-8");
+    }
   }
 
   return { root, worktrees, bareDir };

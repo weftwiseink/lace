@@ -54,6 +54,35 @@ export interface ClassificationResult {
   warnings: ClassificationWarning[];
 }
 
+/**
+ * One entry under a bare repo's `worktrees/` admin directory, classified with
+ * git's own prune criteria (`should_prune_worktree` in git's builtin/worktree.c).
+ *
+ * This is git's source of truth for `git worktree list` / `git worktree prune`.
+ * It is authoritative for prunability precisely because it survives when the
+ * working tree directory is gone (the failure mode the host-children sibling
+ * scan cannot see).
+ */
+export interface WorktreeAdminEntry {
+  /** Directory name under worktrees/ (the git worktree name). */
+  name: string;
+  /**
+   * Absolute path recorded in worktrees/<name>/gitdir (the working tree's .git).
+   * Null when the gitdir file is missing, empty, unreadable, or the entry is locked.
+   */
+  forwardPointer: string | null;
+  /**
+   * True if git would auto-prune this entry under `prune`'s default semantics
+   * (expire = TIME_MAX): the working tree's .git referenced by the forward
+   * pointer is absent, empty, or missing.
+   */
+  prunable: boolean;
+  /** Reason string mirroring `git worktree prune -n` output. */
+  prunableReason?: "gitdir-missing" | "gitdir-empty" | "nonexistent-location";
+  /** True if worktrees/<name>/locked exists (never auto-prunable). */
+  locked: boolean;
+}
+
 // ── Classification Cache ──
 
 /**
@@ -174,13 +203,23 @@ function classifyWorkspaceUncached(absPath: string): ClassificationResult {
       });
     }
 
-    // Also check sibling worktrees for absolute paths (excluding current to avoid duplicates)
-    warnings.push(...checkAbsolutePaths(bareRoot, basename(absPath)));
-
-    // Check for git extensions that may not be supported by the container's git.
-    // The bare git dir (containing the config) is the parent of the worktrees/ dir.
+    // Scan the authoritative worktree admin metadata (.bare/worktrees/*) with
+    // git's own prune criteria. This is git's source of truth and, unlike the
+    // retired host-children sibling scan, sees entries whose working tree is
+    // gone (prunable). The current worktree is excluded here to avoid
+    // duplicating the absolute-back-pointer check just above.
+    //
+    // NOTE(claude-opus-4-8/workspace-validation): This retires the former
+    // `checkAbsolutePaths` sibling scan. It accepts the broken-live-SIBLING
+    // downgrade documented in the proposal: a sibling with a present host
+    // working tree but a nonexistent-location forward pointer now classifies
+    // prunable (warn), because it is host-indistinguishable from a live
+    // co-tenant checkout.
     const bareGitDir = findBareGitDir(resolvedPath);
     if (bareGitDir) {
+      warnings.push(...worktreeAdminWarnings(bareGitDir, basename(absPath)));
+
+      // Check for git extensions that may not be supported by the container's git.
       warnings.push(...checkGitExtensions(bareGitDir));
     }
 
@@ -270,6 +309,12 @@ export function findBareRepoRoot(
  * Only scans immediate children of bareRepoRoot (nikitabobko convention).
  * Worktrees outside the bare-repo root directory are not scanned.
  *
+ * NOTE(claude-opus-4-8/workspace-validation): No longer called by
+ * `classifyWorkspaceUncached`; `scanWorktreeAdmin` / `worktreeAdminWarnings`
+ * replace it there because the admin scan is git's source of truth and sees
+ * prunable entries whose working tree is gone. Retained as a standalone,
+ * unit-tested utility.
+ *
  * @param excludeWorktree Name of worktree to skip (avoids duplicate warnings
  *   when the current worktree was already checked by classifyWorkspace).
  */
@@ -334,6 +379,159 @@ export function findBareGitDir(resolvedWorktreePath: string): string | null {
   }
 
   return null;
+}
+
+// ── Worktree Admin Scan (git prune parity) ──
+
+/**
+ * Scan `<bareGitDir>/worktrees/*` and classify each entry with git's exact
+ * `should_prune_worktree` criteria. Filesystem-only and git-binary-free.
+ *
+ * Ordering reproduces git precisely: the `locked` gate is evaluated BEFORE the
+ * gitdir is stat-ed, so a locked entry is never prunable even when its gitdir
+ * file is missing or empty.
+ *
+ * NOTE(claude-opus-4-8/workspace-validation): This models `git worktree prune`'s
+ * default semantics (expire = TIME_MAX, no `--expire`), under which every
+ * `nonexistent-location` entry is prunable. It deliberately does NOT reproduce
+ * `git worktree list`'s `prunable` annotation, which additionally suppresses
+ * entries whose worktrees/<name>/index mtime is newer than the expire threshold.
+ */
+export function scanWorktreeAdmin(bareGitDir: string): WorktreeAdminEntry[] {
+  const worktreesDir = join(bareGitDir, "worktrees");
+  const entries: WorktreeAdminEntry[] = [];
+
+  let dirents;
+  try {
+    dirents = readdirSync(worktreesDir, { withFileTypes: true });
+  } catch {
+    // No worktrees/ admin dir (or unreadable) — nothing to classify.
+    return entries;
+  }
+
+  for (const dirent of dirents) {
+    if (!dirent.isDirectory()) continue;
+    const name = dirent.name;
+    const adminDir = join(worktreesDir, name);
+
+    // Rule 1: locked gate — git checks this BEFORE stat-ing the gitdir.
+    // A locked entry is never auto-prunable regardless of gitdir state.
+    if (existsSync(join(adminDir, "locked"))) {
+      entries.push({ name, forwardPointer: null, prunable: false, locked: true });
+      continue;
+    }
+
+    // Rule 2: read the gitdir forward pointer. Missing or empty => prunable.
+    const gitdirFile = join(adminDir, "gitdir");
+    if (!existsSync(gitdirFile)) {
+      entries.push({
+        name,
+        forwardPointer: null,
+        prunable: true,
+        prunableReason: "gitdir-missing",
+        locked: false,
+      });
+      continue;
+    }
+
+    let raw: string;
+    try {
+      raw = readFileSync(gitdirFile, "utf-8").trim();
+    } catch {
+      // Unreadable gitdir: neither a confident prune target nor a confident
+      // live-breakage. Treat as non-prunable and skip (defensive posture).
+      entries.push({ name, forwardPointer: null, prunable: false, locked: false });
+      continue;
+    }
+
+    if (raw === "") {
+      entries.push({
+        name,
+        forwardPointer: null,
+        prunable: true,
+        prunableReason: "gitdir-empty",
+        locked: false,
+      });
+      continue;
+    }
+
+    // Rule 3: stat the path recorded in gitdir (the working tree's .git).
+    // If it does not resolve on this host, git prunes it (nonexistent-location).
+    if (!existsSync(raw)) {
+      entries.push({
+        name,
+        forwardPointer: raw,
+        prunable: true,
+        prunableReason: "nonexistent-location",
+        locked: false,
+      });
+      continue;
+    }
+
+    // Rule 4: LIVE. The working tree's .git exists on disk.
+    entries.push({ name, forwardPointer: raw, prunable: false, locked: false });
+  }
+
+  return entries;
+}
+
+/**
+ * Translate admin-scan entries into classification warnings.
+ *
+ * - A prunable entry produces the (previously dead) `prunable-worktree` warning
+ *   whose remediation is the exact prune command, worded to respect the
+ *   host/container ambiguity (never auto-run).
+ * - A LIVE entry whose working-tree back-pointer is absolute produces an
+ *   `absolute-gitdir` warning (the broken-live concern).
+ *
+ * The current worktree is excluded from emission: its absolute back-pointer is
+ * already handled by the dedicated check in `classifyWorkspaceUncached`, and
+ * emitting here too would duplicate that warning.
+ */
+function worktreeAdminWarnings(
+  bareGitDir: string,
+  excludeWorktree: string,
+): ClassificationWarning[] {
+  const warnings: ClassificationWarning[] = [];
+
+  for (const entry of scanWorktreeAdmin(bareGitDir)) {
+    if (entry.name === excludeWorktree) continue;
+
+    if (entry.prunable) {
+      warnings.push({
+        code: "prunable-worktree",
+        message:
+          `Stale worktree admin entry '${entry.name}' has no working tree on the host ` +
+          `(${entry.prunableReason}) and is safely removable with \`git worktree prune\`.`,
+        remediation:
+          "Run `git worktree prune` only when no co-tenant container is live, " +
+          "because a worktree created inside a running container can appear stale " +
+          "from the host while still being in use.",
+      });
+      continue;
+    }
+
+    if (entry.locked || !entry.forwardPointer) continue;
+
+    // LIVE entry: read the working tree's .git back-pointer and flag if absolute.
+    try {
+      const pointer = resolveGitdirPointer(entry.forwardPointer);
+      if (pointer.isAbsolute) {
+        warnings.push({
+          code: "absolute-gitdir",
+          message:
+            `Worktree '${entry.name}' uses an absolute gitdir path (${pointer.rawTarget}) ` +
+            "that will not resolve inside the container.",
+          remediation:
+            "Run `git worktree repair --relative-paths` (requires git 2.48+).",
+        });
+      }
+    } catch {
+      /* skip malformed .git back-pointers in sibling worktrees */
+    }
+  }
+
+  return warnings;
 }
 
 // ── Git Config Extension Detection ──

@@ -232,8 +232,67 @@ describe("applyWorkspaceLayout", () => {
 
     applyWorkspaceLayout(config, worktrees.main);
 
+    // Both the safe.directory injection and the unconditional
+    // worktree.useRelativePaths bake-in are chained.
     expect(config.postCreateCommand).toBe(
-      "git config --global --add safe.directory '*'",
+      "git config --global --add safe.directory '*' && " +
+        "git config --global worktree.useRelativePaths true",
+    );
+  });
+
+  it("injects worktree.useRelativePaths unconditionally (guard-independent of safeDirectory)", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "relpaths-project",
+      ["main"],
+      {},
+    );
+    // safeDirectory disabled: the relative-paths fix must still be injected.
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: {
+          workspace: {
+            layout: "bare-worktree",
+            postCreate: { safeDirectory: false },
+          },
+        },
+      },
+    };
+
+    applyWorkspaceLayout(config, worktrees.main);
+
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
+    );
+    // safe.directory must NOT be present when disabled.
+    expect(String(config.postCreateCommand)).not.toContain("safe.directory");
+  });
+
+  it("injects worktree.useRelativePaths idempotently when already present", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "idem-project",
+      ["main"],
+      {},
+    );
+    const config: Record<string, unknown> = {
+      postCreateCommand:
+        "git config --global worktree.useRelativePaths true",
+      customizations: {
+        lace: {
+          workspace: {
+            layout: "bare-worktree",
+            postCreate: { safeDirectory: false },
+          },
+        },
+      },
+    };
+
+    applyWorkspaceLayout(config, worktrees.main);
+
+    // Not double-added.
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
     );
   });
 
@@ -411,6 +470,60 @@ describe("applyWorkspaceLayout", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
+  it("prunable-only offenders return applied with the prune remedy and mutated config", () => {
+    const { root, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "prunable-project",
+      ["main"],
+      { staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }] },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    // Benign: run proceeds without --skip-validation.
+    expect(result.status).toBe("applied");
+    expect(result.warnings.some((w) => w.includes("git worktree prune"))).toBe(
+      true,
+    );
+    // Config is still mutated.
+    expect(config.workspaceMount).toBe(
+      `source=${root},target=/workspaces,type=bind,consistency=delegated`,
+    );
+    expect(config.workspaceFolder).toBe("/workspaces/main");
+  });
+
+  it("mixed offenders return error AND include the prune remedy in warnings", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "mixed-project",
+      ["main"],
+      {
+        useAbsolutePaths: true,
+        staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }],
+      },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    // Broken-live present -> still a hard error.
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("absolute gitdir");
+    // The prune remedy is still surfaced so the user fixes both in one pass.
+    expect(result.warnings.some((w) => w.includes("git worktree prune"))).toBe(
+      true,
+    );
+  });
+
   it("does not inject safe.directory when safeDirectory is false", () => {
     const { worktrees } = createBareRepoWorkspace(
       testDir,
@@ -430,7 +543,12 @@ describe("applyWorkspaceLayout", () => {
 
     applyWorkspaceLayout(config, worktrees.main);
 
-    expect(config.postCreateCommand).toBeUndefined();
+    // safe.directory is omitted, but the unconditional relative-paths bake-in
+    // remains, so postCreateCommand is exactly that one command.
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
+    );
+    expect(String(config.postCreateCommand)).not.toContain("safe.directory");
   });
 });
 

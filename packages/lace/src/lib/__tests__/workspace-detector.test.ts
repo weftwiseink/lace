@@ -12,6 +12,7 @@ import {
   resolveGitdirPointer,
   findBareRepoRoot,
   checkAbsolutePaths,
+  scanWorktreeAdmin,
   parseGitConfigExtensions,
   checkGitExtensions,
   clearClassificationCache,
@@ -270,6 +271,169 @@ describe("checkAbsolutePaths", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0].message).toContain("main");
     expect(warnings[0].message).not.toContain("feature-x");
+  });
+});
+
+// ── scanWorktreeAdmin ──
+
+describe("scanWorktreeAdmin", () => {
+  it("classifies a live worktree (forward pointer to existing .git) as not prunable", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "live-project", ["main"]);
+
+    const entries = scanWorktreeAdmin(bareDir);
+
+    const main = entries.find((e) => e.name === "main");
+    expect(main).toBeDefined();
+    expect(main!.prunable).toBe(false);
+    expect(main!.locked).toBe(false);
+    expect(main!.forwardPointer).not.toBeNull();
+  });
+
+  it("classifies a nonexistent-location forward pointer as prunable", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "stale-project", ["main"], {
+      staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }],
+    });
+
+    const entries = scanWorktreeAdmin(bareDir);
+    const gone = entries.find((e) => e.name === "gone");
+
+    expect(gone).toBeDefined();
+    expect(gone!.prunable).toBe(true);
+    expect(gone!.prunableReason).toBe("nonexistent-location");
+    expect(gone!.locked).toBe(false);
+  });
+
+  it("classifies a missing gitdir file as prunable (gitdir-missing)", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "missing-project", ["main"], {
+      staleAdminEntries: [{ name: "gone", gitdir: "missing" }],
+    });
+
+    const gone = scanWorktreeAdmin(bareDir).find((e) => e.name === "gone");
+
+    expect(gone!.prunable).toBe(true);
+    expect(gone!.prunableReason).toBe("gitdir-missing");
+  });
+
+  it("classifies an empty gitdir file as prunable (gitdir-empty)", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "empty-project", ["main"], {
+      staleAdminEntries: [{ name: "gone", gitdir: "empty" }],
+    });
+
+    const gone = scanWorktreeAdmin(bareDir).find((e) => e.name === "gone");
+
+    expect(gone!.prunable).toBe(true);
+    expect(gone!.prunableReason).toBe("gitdir-empty");
+  });
+
+  it("evaluates the locked gate BEFORE the gitdir stat (locked + dangling gitdir is not prunable)", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "locked-project", ["main"], {
+      // Dangling gitdir that WOULD be prunable if not for the locked gate.
+      staleAdminEntries: [{ name: "held", gitdir: "nonexistent", locked: true }],
+    });
+
+    const held = scanWorktreeAdmin(bareDir).find((e) => e.name === "held");
+
+    expect(held).toBeDefined();
+    expect(held!.locked).toBe(true);
+    expect(held!.prunable).toBe(false);
+  });
+
+  it("also treats a locked entry with a missing gitdir as not prunable", () => {
+    const { bareDir } = createBareRepoWorkspace(testDir, "locked-missing", ["main"], {
+      staleAdminEntries: [{ name: "held", gitdir: "missing", locked: true }],
+    });
+
+    const held = scanWorktreeAdmin(bareDir).find((e) => e.name === "held");
+
+    expect(held!.locked).toBe(true);
+    expect(held!.prunable).toBe(false);
+  });
+
+  it("returns an empty array when no worktrees admin dir exists", () => {
+    const bareDir = join(testDir, "no-worktrees");
+    mkdirSync(bareDir, { recursive: true });
+
+    expect(scanWorktreeAdmin(bareDir)).toEqual([]);
+  });
+});
+
+// ── classifyWorkspace admin-scan emission ──
+
+describe("classifyWorkspace prunable / broken-live emission", () => {
+  it("emits exactly one prunable-worktree warning for a live worktree + one stale entry", () => {
+    const { worktrees } = createBareRepoWorkspace(testDir, "mixed-live", ["main"], {
+      staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }],
+    });
+
+    const result = classifyWorkspace(worktrees.main);
+
+    const prunable = result.warnings.filter((w) => w.code === "prunable-worktree");
+    const absolute = result.warnings.filter((w) => w.code === "absolute-gitdir");
+    expect(prunable).toHaveLength(1);
+    expect(prunable[0].message).toContain("gone");
+    expect(prunable[0].remediation).toContain("git worktree prune");
+    expect(absolute).toHaveLength(0);
+  });
+
+  it("still emits absolute-gitdir for a live worktree with an absolute back-pointer", () => {
+    const { worktrees } = createBareRepoWorkspace(testDir, "abs-live", ["main"], {
+      useAbsolutePaths: true,
+    });
+
+    const result = classifyWorkspace(worktrees.main);
+
+    const absolute = result.warnings.filter((w) => w.code === "absolute-gitdir");
+    expect(absolute.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("emits BOTH codes for a mixed repo (absolute current worktree + stale sibling)", () => {
+    const { worktrees } = createBareRepoWorkspace(testDir, "mixed-both", ["main"], {
+      useAbsolutePaths: true,
+      staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }],
+    });
+
+    const result = classifyWorkspace(worktrees.main);
+
+    expect(result.warnings.some((w) => w.code === "absolute-gitdir")).toBe(true);
+    expect(result.warnings.some((w) => w.code === "prunable-worktree")).toBe(true);
+  });
+
+  it("downgrades an ambiguous broken-live sibling to prunable-worktree, not absolute-gitdir", () => {
+    // Sibling with a PRESENT host working tree (absolute back-pointer) BUT a
+    // nonexistent-location forward pointer -- host-indistinguishable from a live
+    // co-tenant checkout. Accepted downgrade: warn, do not hard-error.
+    const { worktrees } = createBareRepoWorkspace(testDir, "ambiguous", ["main"], {
+      staleAdminEntries: [
+        {
+          name: "sibling",
+          gitdir: "nonexistent",
+          withWorkingTree: true,
+          workingTreeAbsolute: true,
+        },
+      ],
+    });
+
+    const result = classifyWorkspace(worktrees.main);
+
+    const prunable = result.warnings.filter((w) => w.code === "prunable-worktree");
+    const absolute = result.warnings.filter((w) => w.code === "absolute-gitdir");
+    expect(prunable.some((w) => w.message.includes("sibling"))).toBe(true);
+    expect(absolute).toHaveLength(0);
+  });
+
+  it("excludes the current worktree from the admin scan (no duplicate absolute-gitdir)", () => {
+    // Current worktree: present, host-resolving forward pointer, absolute
+    // back-pointer. The dedicated back-pointer check fires once; the admin scan
+    // must NOT emit a second absolute-gitdir for the same worktree.
+    const { worktrees } = createBareRepoWorkspace(testDir, "dedup", ["main"], {
+      useAbsolutePaths: true,
+    });
+
+    const result = classifyWorkspace(worktrees.main);
+
+    const absolute = result.warnings.filter((w) => w.code === "absolute-gitdir");
+    expect(absolute).toHaveLength(1);
+    expect(result.warnings.filter((w) => w.code === "prunable-worktree")).toHaveLength(0);
   });
 });
 

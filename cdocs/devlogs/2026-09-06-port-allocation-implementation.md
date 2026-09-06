@@ -81,3 +81,29 @@ Exhaustion error now appends cross-project reservation holders from `exclusionHo
 `isPortAvailable` is injectable (`this.probe`) so all new tests are hermetic.
 
 6 hermetic tests (`port-allocator-exclusions.test.ts`), all green: excluded-but-probe-free never returned by `findAvailablePort`, the finding-#1 ownership-flip reuse regression (stored `.lace` port now excluded, `ownedPorts` empty, probe free -> not reused, falls through to fresh), unexcluded stored port still reused, exclusion-wins-over-ownedPorts, exhaustion error lists holders, bare-Set backward compat. No real binds. Existing `port-allocator.test.ts` unchanged (its EADDRINUSE failures are the pre-recorded environmental baseline). typecheck clean.
+
+### Phase 5: coordinator wiring (done)
+
+Replaced the seam at `up.ts` (formerly 726-727). The allocation step now runs inside `withLedgerLock(resolveLedgerPath(), ...)`:
+enumerate `getAllPublishedHostPorts(subprocess)`, `reconcileLedger(loadLedger(path), live, existsSync, now)`, `computeExclusions` + `describeExclusions` for the workspace, seed `new PortAllocator(workspaceFolder, { ownedPorts, exclusions, exclusionHolders })`, `resolveTemplates`, `portAllocator.save()` + `mountResolver.save()`, then `upsertAssignments` into the reconciled ledger and one atomic `saveLedger`.
+The single final save commits both the merge-back and the reconcile-pass GC.
+`resolveLedgerPath()` honors `LACE_PORT_LEDGER` so the ledger is temp-homeable without touching `$HOME`.
+Added `describeExclusions` (port -> holder/reason, live-podman-wins attribution) for the actionable exhaustion error.
+The `.lace/port-assignments.json` per-project record is retained unchanged.
+
+Coordinator composition test (`port-allocation-coordinator.test.ts`), 4 hermetic cases, all green: the whelm/jif stopped-sibling regression (ledger + `ps -a`; another project must not get 22428), lost/corrupt-ledger degradation to the `ps -a` arm alone still excluding the stopped sibling, the ownership-flip no-reuse regression through the full reconcile->exclude->allocate path, and two sequential projects receiving distinct ports with both ledger entries surviving.
+These exercise the real modules in the exact locked sequence `up.ts` uses; the full container-driven `up()` E2E is the proposal's deferred Phase 6.
+
+## Verification
+
+Commands run from the worktree root (`/var/home/mjr/code/weft/lace/impl-port-allocation`).
+
+- `pnpm --filter lace typecheck`: clean (tsc --noEmit, no errors).
+- `pnpm --filter lace build`: clean (vite build, 32 modules, dist/index.js emitted).
+- `pnpm --filter lace test`: 5 failed / 930 passed / 3 skipped / 1 todo.
+  - Passing count rose from the 892 baseline by exactly 38, the count of new hermetic tests (8 podman-ports + 14 port-ledger + 6 lock + 6 exclusions + 4 coordinator).
+  - The 5 failures are byte-for-byte the pre-change environmental baseline, none introduced by this work:
+    - `port-allocator.test.ts` (4): `reuses existing assignment ...`, `reassigns when existing port is in use`, `reuses saved port when it is in ownedPorts ...`, `reassigns when saved port is blocked ...`. All bind or probe real host ports 22430-22432 that live containers on this host hold (EADDRINUSE / probe-in-use). They reproduce on pristine `main`. Not touched: this work adds a NEW hermetic file rather than editing them.
+    - `fundamentals-scenarios.test.ts` (1): `Scenario F3: feature metadata validation` — unrelated to port allocation, failing at baseline.
+
+All new tests are hermetic: podman is a stubbed `RunSubprocess`, ledgers live under `tmpdir()`, and `isPortAvailable` is stubbed, so no new test binds a real host port.

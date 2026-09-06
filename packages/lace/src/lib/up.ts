@@ -20,6 +20,17 @@ import {
 } from "./feature-metadata";
 import { PortAllocator, isPortAvailable } from "./port-allocator";
 import type { PortAllocation, FeaturePortDeclaration } from "./port-allocator";
+import { getAllPublishedHostPorts } from "./podman-ports";
+import {
+  resolveLedgerPath,
+  loadLedger,
+  saveLedger,
+  reconcileLedger,
+  computeExclusions,
+  describeExclusions,
+  upsertAssignments,
+  withLedgerLock,
+} from "./port-ledger";
 import { checkPortlessAliases } from "./portless-alias-check";
 import {
   defaultHostPortlessIO,
@@ -723,12 +734,51 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   }
 
   // Step 8: Resolve all templates (auto-injected + user-written)
+  //
+  // Coordinated cross-project allocation: within a single cross-process ledger
+  // lock, enumerate every podman-published host port machine-wide, reconcile
+  // the global ledger (GC + live-podman-wins ownership), compute the exclusion
+  // set for this project (ledger-other-projects union live-non-current), seed
+  // the per-project allocator with it, resolve, then persist the reconciled +
+  // upserted ledger atomically. The lock spans resolveTemplates (and its TCP
+  // probes), so a concurrent `lace up` waits and allocates around our committed
+  // reservation instead of racing it.
   const ownedPorts = getContainerHostPorts(workspaceFolder, subprocess);
-  const portAllocator = new PortAllocator(workspaceFolder, ownedPorts);
+  const ledgerPath = resolveLedgerPath();
   try {
-    templateResult = await resolveTemplates(configForResolution, portAllocator, mountResolver);
-    portAllocator.save(); // Persist assignments after successful resolution
-    mountResolver.save(); // Persist mount assignments after successful resolution
+    templateResult = await withLedgerLock(ledgerPath, async () => {
+      const live = getAllPublishedHostPorts(subprocess);
+      const reconciled = reconcileLedger(
+        loadLedger(ledgerPath),
+        live,
+        existsSync,
+        new Date(),
+      );
+      const exclusions = computeExclusions(reconciled, live, workspaceFolder);
+      const exclusionHolders = describeExclusions(reconciled, live, workspaceFolder);
+      const portAllocator = new PortAllocator(workspaceFolder, {
+        ownedPorts,
+        exclusions,
+        exclusionHolders,
+      });
+      const tr = await resolveTemplates(
+        configForResolution,
+        portAllocator,
+        mountResolver,
+      );
+      portAllocator.save(); // Persist the per-project record.
+      mountResolver.save(); // Persist mount assignments after successful resolution
+      // Merge this project's assignments into the global ledger and persist
+      // atomically (this save also commits the reconcile-pass GC).
+      const merged = upsertAssignments(
+        reconciled,
+        workspaceFolder,
+        portAllocator.getAllocations(),
+        new Date(),
+      );
+      saveLedger(ledgerPath, merged);
+      return tr;
+    });
 
     if (templateResult.allocations.length > 0) {
       const portSummary = templateResult.allocations

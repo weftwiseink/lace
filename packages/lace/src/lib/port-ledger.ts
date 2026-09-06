@@ -67,6 +67,14 @@ export function defaultLedgerPath(): string {
   return join(homedir(), ".config", "lace", "port-ledger.json");
 }
 
+/**
+ * Resolve the ledger path, honoring the `LACE_PORT_LEDGER` env override so
+ * tests (and unusual deployments) can relocate it without touching `$HOME`.
+ */
+export function resolveLedgerPath(): string {
+  return process.env.LACE_PORT_LEDGER || defaultLedgerPath();
+}
+
 /** Lock path derived from a ledger path. */
 export function lockPathFor(ledgerPath: string): string {
   return `${ledgerPath}.lock`;
@@ -387,6 +395,35 @@ export function computeExclusions(
     if (p.localFolder !== currentProject) exclusions.add(p.port);
   }
   return exclusions;
+}
+
+/**
+ * Human-readable holder/reason for each excluded port, for an actionable
+ * exhaustion error. Live podman containers win the attribution (an actual
+ * publisher) over a ledger reservation. Pure: no I/O.
+ */
+export function describeExclusions(
+  ledger: PortLedger,
+  live: PublishedPort[],
+  currentProject: string,
+): Map<number, string> {
+  const holders = new Map<number, string>();
+  for (const entry of ledger.entries) {
+    if (entry.project !== currentProject) {
+      holders.set(entry.port, `reserved by ${entry.project} (ledger)`);
+    }
+  }
+  for (const p of live) {
+    if (p.localFolder !== currentProject) {
+      holders.set(
+        p.port,
+        p.localFolder
+          ? `published by ${p.localFolder} (live container)`
+          : `published by a non-lace container ${p.containerId.slice(0, 12)} (live)`,
+      );
+    }
+  }
+  return holders;
 }
 
 /**

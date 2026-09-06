@@ -71,3 +71,13 @@ Guaranteed release (`rmSync`) in `finally`, so a throwing critical section still
 `isPidAlive` and `now` are injectable for hermetic tests; `lockPathFor` exported.
 
 6 hermetic tests (`port-ledger-lock.test.ts`), all green: concurrent-coordinator serialization with both writes surviving (no lost update), dead-pid break-and-acquire, no-preempt-live-holder even with a tiny mtime threshold, waiter-blocks-until-real-release ordering, release-on-throw, return-value passthrough. No real ports bound. typecheck clean.
+
+### Phase 4: allocator exclusions (done)
+
+Extended `PortAllocator` with a `PortAllocatorOptions` second-constructor form (`{ ownedPorts, exclusions, exclusionHolders, isPortAvailable }`), still accepting a bare `Set<number>` as `ownedPorts` for backward compatibility.
+Exclusions are consumed by BOTH `findAvailablePort` (skips `assignments ∪ exclusions` before the probe) AND the `_allocate` reuse short-circuit: reuse `existing` only if `!exclusions.has(existing.port)` AND (`ownedPorts.has(existing.port)` OR probe free); otherwise fall through to a fresh port.
+Exclusion gates AHEAD of `ownedPorts`, so an ownership flip wins even if `ownedPorts` still lists the port.
+Exhaustion error now appends cross-project reservation holders from `exclusionHolders` when present.
+`isPortAvailable` is injectable (`this.probe`) so all new tests are hermetic.
+
+6 hermetic tests (`port-allocator-exclusions.test.ts`), all green: excluded-but-probe-free never returned by `findAvailablePort`, the finding-#1 ownership-flip reuse regression (stored `.lace` port now excluded, `ownedPorts` empty, probe free -> not reused, falls through to fresh), unexcluded stored port still reused, exclusion-wins-over-ownedPorts, exhaustion error lists holders, bare-Set backward compat. No real binds. Existing `port-allocator.test.ts` unchanged (its EADDRINUSE failures are the pre-recorded environmental baseline). typecheck clean.

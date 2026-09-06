@@ -411,6 +411,60 @@ describe("applyWorkspaceLayout", () => {
     expect(result.warnings).toHaveLength(0);
   });
 
+  it("prunable-only offenders return applied with the prune remedy and mutated config", () => {
+    const { root, worktrees } = createBareRepoWorkspace(
+      testDir,
+      "prunable-project",
+      ["main"],
+      { staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }] },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    // Benign: run proceeds without --skip-validation.
+    expect(result.status).toBe("applied");
+    expect(result.warnings.some((w) => w.includes("git worktree prune"))).toBe(
+      true,
+    );
+    // Config is still mutated.
+    expect(config.workspaceMount).toBe(
+      `source=${root},target=/workspaces,type=bind,consistency=delegated`,
+    );
+    expect(config.workspaceFolder).toBe("/workspaces/main");
+  });
+
+  it("mixed offenders return error AND include the prune remedy in warnings", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "mixed-project",
+      ["main"],
+      {
+        useAbsolutePaths: true,
+        staleAdminEntries: [{ name: "gone", gitdir: "nonexistent" }],
+      },
+    );
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: { workspace: { layout: "bare-worktree" } },
+      },
+    };
+
+    const result = applyWorkspaceLayout(config, worktrees.main);
+
+    // Broken-live present -> still a hard error.
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("absolute gitdir");
+    // The prune remedy is still surfaced so the user fixes both in one pass.
+    expect(result.warnings.some((w) => w.includes("git worktree prune"))).toBe(
+      true,
+    );
+  });
+
   it("does not inject safe.directory when safeDirectory is false", () => {
     const { worktrees } = createBareRepoWorkspace(
       testDir,

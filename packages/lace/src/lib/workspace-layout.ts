@@ -181,13 +181,32 @@ export function applyWorkspaceLayout(
   // ── Soft validation checks ──
   // Config is already mutated above, so --skip-validation can proceed with
   // correct workspaceMount/workspaceFolder even if these checks fail.
-
-  // Absolute gitdir paths will not resolve inside the container
-  const absoluteGitdirWarnings = result.warnings.filter(
-    (w) => w.code === "absolute-gitdir",
+  //
+  // Partition the worktree offenders into two classes with different severity:
+  //  - `prunable-worktree`: benign stale admin residue, safely removed by
+  //    `git worktree prune`. Warn (already surfaced via `warnings` above) and
+  //    proceed; never abort and never mutate shared worktree admin state.
+  //  - `absolute-gitdir`: a genuinely broken LIVE worktree whose gitdir will
+  //    not resolve inside the container. Keep the promoted hard error.
+  const broken = result.warnings.filter((w) => w.code === "absolute-gitdir");
+  const prunable = result.warnings.filter(
+    (w) => w.code === "prunable-worktree",
   );
-  if (absoluteGitdirWarnings.length > 0) {
-    const names = absoluteGitdirWarnings.map((w) => w.message).join("\n  ");
+
+  // Prunable-only offenders: emit the aggregated prune remedy and proceed.
+  // (Per-entry prunable warnings already flow into `warnings` at :99-103.)
+  if (prunable.length > 0) {
+    warnings.push(
+      "Stale worktree admin entries detected. " +
+        "These have no working tree on the host and are removable with `git worktree prune`. " +
+        "Run it only when no co-tenant container is live, because a worktree created " +
+        "inside a running container can appear stale from the host while still being in use.",
+    );
+  }
+
+  // Broken LIVE worktree(s): keep the hard error, unchanged severity/message.
+  if (broken.length > 0) {
+    const names = broken.map((w) => w.message).join("\n  ");
     return {
       status: "error",
       message:

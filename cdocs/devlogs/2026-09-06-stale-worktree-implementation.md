@@ -40,5 +40,15 @@ A private `worktreeAdminWarnings(bareGitDir, excludeWorktree)` translates entrie
 Extended `createBareRepoWorkspace` with a `staleAdminEntries` option (gitdir missing/empty/nonexistent/verbatim, locked, withWorkingTree for the ambiguous case).
 
 Tests: 7 `scanWorktreeAdmin` unit tests (incl. locked-before-gitdir ordering, both dangling and missing gitdir) + 5 classify emission tests (prunable, still-absolute, mixed, ambiguous-sibling downgrade, current-worktree dedup). 63 detector tests green; typecheck clean.
+
+### Phase 2: Partitioned error policy (done)
+
+Replaced the single `absolute-gitdir` filter in `applyWorkspaceLayout` with a partition: `broken` (absolute-gitdir) still hard-errors with the unchanged message; `prunable-worktree` adds an aggregated co-tenant-safe prune remedy to `warnings` and proceeds to `status:"applied"`.
+Per-entry prunable warnings already flow through the `:99-103` warning loop, so the remedy string is present in both the prunable-only (applied) and mixed (error) cases.
+`up.ts:344-357` needs no structural change: `applied` proceeds, `error` aborts as before.
+
+Tests: prunable-only returns `applied` with the remedy and mutated `workspaceMount`/`workspaceFolder`; mixed returns `error` AND surfaces the prune remedy. 38 layout tests green.
+
+> NOTE(claude-opus-4-8/workspace-validation): The proposal's Test Plan lists a separate `up.ts` wiring test. Since `up.ts` requires no change (it already routes `applied` -> proceed, `error` -> abort) and the gating decision lives entirely in `applyWorkspaceLayout`, the "prunable-only runs without `--skip-validation`" guarantee is covered by the layout-level `applied` assertion. A full `up.ts` integration test would require heavy subprocess stubbing for zero additional coverage of this change.
 </content>
 </invoke>

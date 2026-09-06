@@ -93,10 +93,34 @@ export interface FeaturePortDeclaration {
 
 // ── PortAllocator ──
 
+/**
+ * Options for {@link PortAllocator}. Passed as the second constructor argument
+ * instead of a bare `ownedPorts` Set (which remains accepted for backward
+ * compatibility).
+ */
+export interface PortAllocatorOptions {
+  /** Host ports held by THIS project's own container; reuse-eligible even if the TCP probe reports them in use. */
+  ownedPorts?: Set<number>;
+  /**
+   * Host ports reserved by OTHER projects (ledger) or published by any
+   * non-current podman container (live enumeration). Excluded from allocation
+   * AND from the reuse short-circuit, so a project never hands back a port whose
+   * ownership has flipped away from it.
+   */
+  exclusions?: Set<number>;
+  /** For each excluded port, a human-readable holder/reason, used to make the exhaustion error actionable. */
+  exclusionHolders?: Map<number, string>;
+  /** TCP availability probe; injectable so tests stay hermetic (no real binds). */
+  isPortAvailable?: (port: number, timeout?: number) => Promise<boolean>;
+}
+
 export class PortAllocator {
   private assignments: Map<string, PortAllocation> = new Map();
   private persistPath: string;
   private readonly ownedPorts: Set<number>;
+  private readonly exclusions: Set<number>;
+  private readonly exclusionHolders: Map<number, string>;
+  private readonly probe: (port: number, timeout?: number) => Promise<boolean>;
   /**
    * Serializes allocate() calls. allocate() is an async check-then-act
    * (findAvailablePort reads this.assignments, then a later tick writes it),
@@ -110,8 +134,18 @@ export class PortAllocator {
    */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private workspaceFolder: string, ownedPorts?: Set<number>) {
-    this.ownedPorts = ownedPorts ?? new Set();
+  constructor(
+    private workspaceFolder: string,
+    ownedPortsOrOptions?: Set<number> | PortAllocatorOptions,
+  ) {
+    const opts: PortAllocatorOptions =
+      ownedPortsOrOptions instanceof Set
+        ? { ownedPorts: ownedPortsOrOptions }
+        : (ownedPortsOrOptions ?? {});
+    this.ownedPorts = opts.ownedPorts ?? new Set();
+    this.exclusions = opts.exclusions ?? new Set();
+    this.exclusionHolders = opts.exclusionHolders ?? new Map();
+    this.probe = opts.isPortAvailable ?? isPortAvailable;
     this.persistPath = join(
       workspaceFolder,
       ".lace",
@@ -167,13 +201,27 @@ export class PortAllocator {
 
   private async _allocate(label: string): Promise<PortAllocation> {
     const existing = this.assignments.get(label);
-    if (existing && (this.ownedPorts.has(existing.port) || await isPortAvailable(existing.port))) {
+    // Reuse the stored port ONLY if it is not excluded (its ownership has not
+    // flipped to another project) AND the current project still holds it or the
+    // TCP probe reports it free. Excluding here is load-bearing: without it, a
+    // project whose stored port was reassigned would hand its now-excluded port
+    // straight back (ownedPorts empty because its own container is down; the
+    // probe passes because the new owner is stopped or reserved-but-unbound),
+    // reintroducing the exact cross-project collision this design closes.
+    if (
+      existing &&
+      !this.exclusions.has(existing.port) &&
+      (this.ownedPorts.has(existing.port) || (await this.probe(existing.port)))
+    ) {
       return existing;
     }
 
     if (existing) {
+      const reason = this.exclusions.has(existing.port)
+        ? "reserved by another project"
+        : "in use by another process";
       console.warn(
-        `Port ${existing.port} for "${label}" is in use by another process, reassigning...`,
+        `Port ${existing.port} for "${label}" is ${reason}, reassigning...`,
       );
     }
 
@@ -182,9 +230,16 @@ export class PortAllocator {
       const labels = Array.from(this.assignments.entries())
         .map(([l, a]) => `  ${l}: ${a.port}`)
         .join("\n");
+      const holders = Array.from(this.exclusions)
+        .sort((a, b) => a - b)
+        .map((p) => `  ${p}: ${this.exclusionHolders.get(p) ?? "reserved by another project"}`)
+        .join("\n");
+      const crossProject = holders
+        ? `\nCross-project reservations (ledger + live podman):\n${holders}`
+        : "";
       throw new Error(
         `All ports in range ${LACE_PORT_MIN}-${LACE_PORT_MAX} are in use.\n` +
-          `Active assignments:\n${labels}`,
+          `Active assignments:\n${labels}${crossProject}`,
       );
     }
 
@@ -198,7 +253,8 @@ export class PortAllocator {
   }
 
   /**
-   * Find first available port in range, skipping already-assigned ports.
+   * Find first available port in range, skipping already-assigned ports and
+   * the injected cross-project exclusions before the TCP probe.
    * Intentionally does NOT consult ownedPorts: new labels should get
    * genuinely free ports, not ports already held by our container.
    */
@@ -208,7 +264,8 @@ export class PortAllocator {
     );
     for (let port = LACE_PORT_MIN; port <= LACE_PORT_MAX; port++) {
       if (usedPorts.has(port)) continue;
-      if (await isPortAvailable(port)) return port;
+      if (this.exclusions.has(port)) continue;
+      if (await this.probe(port)) return port;
     }
     return null;
   }

@@ -72,12 +72,18 @@ export function createScenarioWorkspace(name: string): ScenarioWorkspace {
 
   mkdirSync(devcontainerDir, { recursive: true });
 
+  // Isolate the cross-project port ledger to this workspace so allocation is
+  // deterministic and never reads or writes the real
+  // ~/.config/lace/port-ledger.json. Cleared on cleanup().
+  process.env.LACE_PORT_LEDGER = join(workspaceRoot, ".config", "lace", "port-ledger.json");
+
   return {
     workspaceRoot,
     devcontainerDir,
     laceDir,
     metadataCacheDir,
     cleanup: () => {
+      delete process.env.LACE_PORT_LEDGER;
       rmSync(workspaceRoot, { recursive: true, force: true });
     },
   };

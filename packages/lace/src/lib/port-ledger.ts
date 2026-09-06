@@ -161,6 +161,12 @@ export async function withLedgerLock<T>(
   const thisHost = hostname();
   const deadline = now() + timeoutMs;
 
+  // Ensure the containing config dir exists so the atomic lock mkdir below can
+  // create the lock even on a fresh machine where ~/.config/lace does not yet
+  // exist. The lock dir itself is still created non-recursively so it stays the
+  // atomic cross-process arbiter.
+  mkdirSync(dirname(lockDir), { recursive: true });
+
   // Acquire.
   for (;;) {
     try {

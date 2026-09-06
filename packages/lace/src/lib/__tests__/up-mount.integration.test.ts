@@ -155,6 +155,10 @@ beforeEach(() => {
   mkdirSync(settingsDir, { recursive: true });
   writeFileSync(join(settingsDir, "settings.json"), "{}", "utf-8");
   process.env.LACE_SETTINGS = join(settingsDir, "settings.json");
+
+  // Isolate the cross-project port ledger to this workspace so allocation is
+  // deterministic and never reads/writes the real ~/.config/lace/port-ledger.json.
+  process.env.LACE_PORT_LEDGER = join(settingsDir, "port-ledger.json");
 });
 
 afterEach(() => {
@@ -167,6 +171,7 @@ afterEach(() => {
   }
   delete process.env.LACE_SETTINGS;
   delete process.env.LACE_USER_CONFIG;
+  delete process.env.LACE_PORT_LEDGER;
 });
 
 // ── End-to-end mount source resolution (v2 accessor syntax) ──

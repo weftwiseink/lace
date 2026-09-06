@@ -30,6 +30,7 @@ import {
   describeExclusions,
   upsertAssignments,
   withLedgerLock,
+  type PortLedger,
 } from "./port-ledger";
 import { checkPortlessAliases } from "./portless-alias-check";
 import {
@@ -126,6 +127,103 @@ export function getContainerHostPorts(
     }
   }
   return ports;
+}
+
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Allocate this project's ports with best-effort cross-project coordination.
+ *
+ * The global port ledger is an ENHANCEMENT, not a hard dependency. Every part
+ * of the coordination path is fail-safe: if podman enumeration, lock
+ * acquisition, ledger read/reconcile, or ledger persistence fails for ANY
+ * reason (podman missing or erroring, an unstubbed `podman ps -a`, a lock the
+ * process cannot create, a corrupt or unwritable ledger), the allocation
+ * degrades to today's behavior: an empty exclusion set, no ledger write, and
+ * the pipeline proceeds. Only `runResolve` (the actual template/port
+ * resolution) may fail the caller; a ledger problem never does and never
+ * changes the exit code.
+ *
+ * When the lock and ledger are available, the lock spans `runResolve` so a
+ * concurrent `lace up` waits and allocates around the committed reservation.
+ * `runResolve` receives the computed exclusion set as its second argument so
+ * callers (and tests) can observe what was excluded.
+ */
+export async function coordinatePortAllocation(params: {
+  workspaceFolder: string;
+  subprocess: RunSubprocess;
+  ownedPorts: Set<number>;
+  ledgerPath: string;
+  runResolve: (
+    allocator: PortAllocator,
+    exclusions: Set<number>,
+  ) => Promise<TemplateResolutionResult>;
+}): Promise<TemplateResolutionResult> {
+  const { workspaceFolder, subprocess, ownedPorts, ledgerPath, runResolve } = params;
+
+  let allocationStarted = false;
+  const allocate = async (
+    exclusions: Set<number>,
+    exclusionHolders: Map<number, string>,
+  ): Promise<{ tr: TemplateResolutionResult; allocations: PortAllocation[] }> => {
+    const allocator = new PortAllocator(workspaceFolder, {
+      ownedPorts,
+      exclusions,
+      exclusionHolders,
+    });
+    allocationStarted = true;
+    const tr = await runResolve(allocator, exclusions);
+    return { tr, allocations: allocator.getAllocations() };
+  };
+
+  try {
+    return await withLedgerLock(ledgerPath, async () => {
+      // Best-effort read + reconcile. Any failure degrades to empty exclusions.
+      let exclusions = new Set<number>();
+      let exclusionHolders = new Map<number, string>();
+      let reconciled: PortLedger | null = null;
+      try {
+        const live = getAllPublishedHostPorts(subprocess);
+        reconciled = reconcileLedger(loadLedger(ledgerPath), live, existsSync, new Date());
+        exclusions = computeExclusions(reconciled, live, workspaceFolder);
+        exclusionHolders = describeExclusions(reconciled, live, workspaceFolder);
+      } catch (err) {
+        console.warn(
+          `Warning: cross-project port ledger unavailable; continuing without cross-project exclusions: ${errMessage(err)}`,
+        );
+        reconciled = null;
+      }
+
+      const { tr, allocations } = await allocate(exclusions, exclusionHolders);
+
+      // Best-effort persist. A write failure never fails the pipeline.
+      if (reconciled) {
+        try {
+          saveLedger(
+            ledgerPath,
+            upsertAssignments(reconciled, workspaceFolder, allocations, new Date()),
+          );
+        } catch (err) {
+          console.warn(
+            `Warning: could not persist cross-project port ledger; continuing: ${errMessage(err)}`,
+          );
+        }
+      }
+      return tr;
+    });
+  } catch (err) {
+    // A failure AT OR AFTER allocation is a genuine resolution error: propagate.
+    if (allocationStarted) throw err;
+    // Otherwise the lock itself was unavailable (contention timeout, unwritable
+    // config dir, etc). Degrade to an unlocked, exclusion-free allocation so
+    // `lace up` still succeeds exactly as it did before the ledger existed.
+    console.warn(
+      `Warning: cross-project port ledger lock unavailable; continuing without cross-project coordination: ${errMessage(err)}`,
+    );
+    return (await allocate(new Set(), new Map())).tr;
+  }
 }
 
 /** Whether the project's container is clearly running, clearly not, or unknown. */
@@ -746,38 +844,21 @@ export async function runUp(options: UpOptions = {}): Promise<UpResult> {
   const ownedPorts = getContainerHostPorts(workspaceFolder, subprocess);
   const ledgerPath = resolveLedgerPath();
   try {
-    templateResult = await withLedgerLock(ledgerPath, async () => {
-      const live = getAllPublishedHostPorts(subprocess);
-      const reconciled = reconcileLedger(
-        loadLedger(ledgerPath),
-        live,
-        existsSync,
-        new Date(),
-      );
-      const exclusions = computeExclusions(reconciled, live, workspaceFolder);
-      const exclusionHolders = describeExclusions(reconciled, live, workspaceFolder);
-      const portAllocator = new PortAllocator(workspaceFolder, {
-        ownedPorts,
-        exclusions,
-        exclusionHolders,
-      });
-      const tr = await resolveTemplates(
-        configForResolution,
-        portAllocator,
-        mountResolver,
-      );
-      portAllocator.save(); // Persist the per-project record.
-      mountResolver.save(); // Persist mount assignments after successful resolution
-      // Merge this project's assignments into the global ledger and persist
-      // atomically (this save also commits the reconcile-pass GC).
-      const merged = upsertAssignments(
-        reconciled,
-        workspaceFolder,
-        portAllocator.getAllocations(),
-        new Date(),
-      );
-      saveLedger(ledgerPath, merged);
-      return tr;
+    templateResult = await coordinatePortAllocation({
+      workspaceFolder,
+      subprocess,
+      ownedPorts,
+      ledgerPath,
+      runResolve: async (portAllocator) => {
+        const tr = await resolveTemplates(
+          configForResolution,
+          portAllocator,
+          mountResolver,
+        );
+        portAllocator.save(); // Persist the per-project record.
+        mountResolver.save(); // Persist mount assignments after successful resolution
+        return tr;
+      },
     });
 
     if (templateResult.allocations.length > 0) {

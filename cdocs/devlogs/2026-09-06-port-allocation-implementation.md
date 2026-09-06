@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/port-allocation
 type: devlog
 state: live
-status: wip
+status: done
 tags: [port-allocation, dev-infra, bugfix]
 ---
 

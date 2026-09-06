@@ -4,8 +4,9 @@ first_authored:
   at: 2026-08-25T12:30:00-07:00
 task_list: lace/workspace-validation
 type: proposal
-state: live
-status: request_for_proposal
+state: archived
+status: evolved
+superseded_by: cdocs/proposals/2026-09-06-stale-worktree-classification.md
 tags: [workspace-detection, worktree, error-handling, dev-infra, rfp]
 ---
 

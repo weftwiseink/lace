@@ -60,3 +60,14 @@ Deviation (documented in code NOTE): the proposal names workspace-gone as a recl
 Implemented as a shorter accelerated window (`WORKSPACE_GONE_STALE_MS` = 7 days) versus the default 30 days, gating `projectExists` so it has a real, bounded effect while never reclaiming a live or recently-seen reservation.
 
 14 hermetic tests (`port-ledger.test.ts`), all green, including reclaim-on-removal-not-on-stop, ownership rewrite, union exclusion across projects, stopped-sibling exclusion via the live arm, reserved-but-unbound exclusion via the ledger arm, atomic round-trip, corrupt/missing/malformed degradation. typecheck clean.
+
+### Phase 3: cross-process lock (done)
+
+Added `withLedgerLock(ledgerPath, fn, options)` to `port-ledger.ts`.
+Acquisition is an atomic `mkdirSync` of `${ledgerPath}.lock` (OS-level arbiter); owner pid/host/time recorded in `owner.json` inside the lock dir.
+Stale detection is pid-liveness PRIMARY (`kill(pid,0)`, EPERM counts as alive): a held lock is broken only when the recorded owner pid on this host is dead.
+mtime is strictly SUBORDINATE, consulted only when the owner is cross-host or its record is unreadable, and never preempts a live local pid.
+Guaranteed release (`rmSync`) in `finally`, so a throwing critical section still frees the lock.
+`isPidAlive` and `now` are injectable for hermetic tests; `lockPathFor` exported.
+
+6 hermetic tests (`port-ledger-lock.test.ts`), all green: concurrent-coordinator serialization with both writes surviving (no lost update), dead-pid break-and-acquire, no-preempt-live-holder even with a tiny mtime threshold, waiter-blocks-until-real-release ordering, release-on-throw, return-value passthrough. No real ports bound. typecheck clean.

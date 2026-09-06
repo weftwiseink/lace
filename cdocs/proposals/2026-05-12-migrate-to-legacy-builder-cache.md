@@ -5,7 +5,7 @@ first_authored:
 task_list: lace/prebuild-cache-rethink/legacy-builder-migration
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-7"
@@ -32,9 +32,15 @@ tags: [prebuild, migration, legacy_builder, podman, validated, lace_prebuild_del
 > A follow-up workstream owns portless integration and host-SSH replacement.
 > See [`cdocs/reports/2026-05-13-initial-migration-scoping.md`](../reports/2026-05-13-initial-migration-scoping.md).
 
-> NOTE(opus/prebuild-removal/2026-09-01): Phases 4 (code deletion), 5 (test surface), and 6 (docs) are implemented and review-accepted on branch `prebuild-removal` (not merged), along with the Phase 7 substep 1 flip of lace's own `.devcontainer/devcontainer.json` and a fail-loud guard for a lingering `customizations.lace.prebuildFeatures` key.
+> NOTE(opus/prebuild-removal/2026-09-01): Phases 4 (code deletion), 5 (test surface), and 6 (docs) are implemented, review-accepted, and merged to `main` (merge `2e3696c`, follow-up `f12b1b0`), along with the Phase 7 substep 1 flip of lace's own `.devcontainer/devcontainer.json` and a fail-loud guard for a lingering `customizations.lace.prebuildFeatures` key.
+> `lace prebuild` is gone from the lace codebase; this is why `status` is `implementation_accepted`.
+> The four dev projects (jif, whelm, clauthier, weftwise) are migrated off `prebuildFeatures` and rebuilt.
 > Scoped this way to honor a hard "do not reboot the running weftwise/clauthier/jif containers" constraint.
-> Deferred (require container rebuilds): Phase 3 (migrate the other live user projects), Phase 7 live dogfood, and closing the weftwise container-side SSH/tools verification gap.
+>
+> Open residual (state kept `live` to keep these visible; verified 2026-09-06 triage):
+> - Phase 3 tail: `dotfiles` (`.devcontainer/devcontainer.json:13-18`, git + sshd) and `backup` (`.devcontainer/devcontainer.json:20-23`, lace-fundamentals + sprack) still declare `prebuildFeatures` and will hit the fail-loud guard on their next `lace up`.
+> - Phase 7 live dogfood and closing the weftwise container-side SSH/tools verification gap.
+> - `packages/lace/src/lib/flock.ts` is unreferenced dead code (its only callers were the deleted subcommands); harmless, not on the deletion list.
 > See devlog [`cdocs/devlogs/2026-09-01-prebuild-removal-iterate.md`](../devlogs/2026-09-01-prebuild-removal-iterate.md) and review [`cdocs/reviews/2026-09-01-prebuild-removal-r1.md`](../reviews/2026-09-01-prebuild-removal-r1.md).
 
 ## Objective

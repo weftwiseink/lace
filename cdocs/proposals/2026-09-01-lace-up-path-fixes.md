@@ -4,7 +4,7 @@ first_authored:
   at: 2026-09-01T00:00:00-07:00
 task_list: lace/up-path-fixes
 type: proposal
-state: live
+state: archived
 status: implementation_accepted
 last_reviewed:
   status: accepted

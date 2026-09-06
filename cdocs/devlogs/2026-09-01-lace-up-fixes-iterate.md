@@ -4,8 +4,8 @@ first_authored:
   at: 2026-09-01T13:25:00-07:00
 task_list: lace/up-path-fixes
 type: devlog
-state: live
-status: wip
+state: archived
+status: done
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"

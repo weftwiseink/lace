@@ -4,8 +4,9 @@ first_authored:
   at: 2026-08-24T14:40:00-07:00
 task_list: lace/port-allocation
 type: proposal
-state: live
-status: request_for_proposal
+state: archived
+status: evolved
+superseded_by: cdocs/proposals/2026-09-06-cross-project-port-allocation.md
 tags: [port-allocation, devcontainer, networking, dev-infra, rfp]
 ---
 

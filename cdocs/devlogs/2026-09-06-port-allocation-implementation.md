@@ -48,3 +48,15 @@ Fails safe: non-zero `ps -a` exit or unparseable output returns `[]` so allocati
 
 8 hermetic tests (`podman-ports.test.ts`), all green: running/stopped/non-lace parse + attribution, empty/absent Ports, inspect fallback, no-inspect-when-ps-has-ports, empty list, non-zero exit, unparseable output, zero/non-integer host_port filtering.
 No wiring. typecheck clean.
+
+### Phase 2: ledger module, pure core (done)
+
+Added `port-ledger.ts`: `LedgerEntry`/`PortLedger` types, `loadLedger`/`saveLedger` (atomic temp-file + rename, `mkdir -p` parent, corrupt/missing tolerant with a warning), and the pure `reconcileLedger` and `computeExclusions`, plus a pure `upsertAssignments` helper for the coordinator's merge-back.
+
+`reconcileLedger`: live-podman-wins ownership rewrite; lastSeen refresh for any port with a live container of any run-state (so a stopped-but-defined sibling never ages out); reclaim only when no live reference AND aged past threshold.
+`computeExclusions`: union of ledger-other-projects and live-non-current ports; excludes nothing the current project owns.
+
+Deviation (documented in code NOTE): the proposal names workspace-gone as a reclaim contributor but specifies no distinct threshold, only that it requires no-live AND age and never reclaims on a single failed stat.
+Implemented as a shorter accelerated window (`WORKSPACE_GONE_STALE_MS` = 7 days) versus the default 30 days, gating `projectExists` so it has a real, bounded effect while never reclaiming a live or recently-seen reservation.
+
+14 hermetic tests (`port-ledger.test.ts`), all green, including reclaim-on-removal-not-on-stop, ownership rewrite, union exclusion across projects, stopped-sibling exclusion via the live arm, reserved-but-unbound exclusion via the ledger arm, atomic round-trip, corrupt/missing/malformed degradation. typecheck clean.

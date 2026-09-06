@@ -171,6 +171,20 @@ export function applyWorkspaceLayout(
     );
   }
 
+  // Close the source of absolute gitdirs: make container-side git write
+  // relative worktree pointers so in-container `git worktree add` stops
+  // producing the `/workspace/...` absolute gitdirs this validation rejects.
+  //
+  // Deliberately UNCONDITIONAL and NOT gated behind `safeDirectory`: the two
+  // fixes are unrelated, and a user who disables safeDirectory must not also
+  // lose this one. `worktree.useRelativePaths` is a git 2.48+ key; on older
+  // container git it is an inert unknown-key no-op, so applying it is always
+  // version-safe.
+  mergePostCreateCommand(
+    config,
+    "git config --global worktree.useRelativePaths true",
+  );
+
   // Merge vscode settings
   if (wsConfig.postCreate?.scanDepth != null) {
     mergeVscodeSettings(config, {

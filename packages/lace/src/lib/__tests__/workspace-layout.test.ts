@@ -232,8 +232,67 @@ describe("applyWorkspaceLayout", () => {
 
     applyWorkspaceLayout(config, worktrees.main);
 
+    // Both the safe.directory injection and the unconditional
+    // worktree.useRelativePaths bake-in are chained.
     expect(config.postCreateCommand).toBe(
-      "git config --global --add safe.directory '*'",
+      "git config --global --add safe.directory '*' && " +
+        "git config --global worktree.useRelativePaths true",
+    );
+  });
+
+  it("injects worktree.useRelativePaths unconditionally (guard-independent of safeDirectory)", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "relpaths-project",
+      ["main"],
+      {},
+    );
+    // safeDirectory disabled: the relative-paths fix must still be injected.
+    const config: Record<string, unknown> = {
+      customizations: {
+        lace: {
+          workspace: {
+            layout: "bare-worktree",
+            postCreate: { safeDirectory: false },
+          },
+        },
+      },
+    };
+
+    applyWorkspaceLayout(config, worktrees.main);
+
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
+    );
+    // safe.directory must NOT be present when disabled.
+    expect(String(config.postCreateCommand)).not.toContain("safe.directory");
+  });
+
+  it("injects worktree.useRelativePaths idempotently when already present", () => {
+    const { worktrees } = createBareRepoWorkspace(
+      testDir,
+      "idem-project",
+      ["main"],
+      {},
+    );
+    const config: Record<string, unknown> = {
+      postCreateCommand:
+        "git config --global worktree.useRelativePaths true",
+      customizations: {
+        lace: {
+          workspace: {
+            layout: "bare-worktree",
+            postCreate: { safeDirectory: false },
+          },
+        },
+      },
+    };
+
+    applyWorkspaceLayout(config, worktrees.main);
+
+    // Not double-added.
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
     );
   });
 
@@ -484,7 +543,12 @@ describe("applyWorkspaceLayout", () => {
 
     applyWorkspaceLayout(config, worktrees.main);
 
-    expect(config.postCreateCommand).toBeUndefined();
+    // safe.directory is omitted, but the unconditional relative-paths bake-in
+    // remains, so postCreateCommand is exactly that one command.
+    expect(config.postCreateCommand).toBe(
+      "git config --global worktree.useRelativePaths true",
+    );
+    expect(String(config.postCreateCommand)).not.toContain("safe.directory");
   });
 });
 

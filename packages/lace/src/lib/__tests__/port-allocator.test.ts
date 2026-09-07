@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import * as net from "node:net";
 import { PortAllocator, LACE_PORT_MIN, LACE_PORT_MAX } from "../port-allocator";
 
 describe("PortAllocator", () => {
@@ -56,7 +55,10 @@ describe("PortAllocator", () => {
       "utf-8",
     );
 
-    const allocator = new PortAllocator(workspaceRoot);
+    // Stubbed probe reports the saved port free, so it is reused (hermetic; no real bind).
+    const allocator = new PortAllocator(workspaceRoot, {
+      isPortAvailable: async () => true,
+    });
     const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
     expect(alloc.port).toBe(22430);
@@ -83,22 +85,15 @@ describe("PortAllocator", () => {
       "utf-8",
     );
 
-    // Block the port with a server
-    const server = net.createServer();
-    await new Promise<void>((resolve) => {
-      server.listen(blockedPort, "localhost", () => resolve());
+    // Stubbed probe reports the saved port blocked, so it reassigns (hermetic; no real bind).
+    const allocator = new PortAllocator(workspaceRoot, {
+      isPortAvailable: async (p) => p !== blockedPort,
     });
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
-    try {
-      const allocator = new PortAllocator(workspaceRoot);
-      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
-
-      expect(alloc.port).not.toBe(blockedPort);
-      expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
-      expect(alloc.port).toBeLessThanOrEqual(LACE_PORT_MAX);
-    } finally {
-      server.close();
-    }
+    expect(alloc.port).not.toBe(blockedPort);
+    expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
+    expect(alloc.port).toBeLessThanOrEqual(LACE_PORT_MAX);
   });
 
   // Scenario 4: Multiple labels get distinct ports
@@ -230,21 +225,15 @@ describe("PortAllocator", () => {
       "utf-8",
     );
 
-    // Block the port with a TCP server
-    const server = net.createServer();
-    await new Promise<void>((resolve) => {
-      server.listen(blockedPort, "localhost", () => resolve());
+    // Port in ownedPorts is reused even when the probe reports it blocked (hermetic).
+    const allocator = new PortAllocator(workspaceRoot, {
+      ownedPorts: new Set([blockedPort]),
+      isPortAvailable: async (p) => p !== blockedPort,
     });
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
-    try {
-      const allocator = new PortAllocator(workspaceRoot, new Set([blockedPort]));
-      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
-
-      expect(alloc.port).toBe(blockedPort);
-      expect(alloc.assignedAt).toBe("2026-02-06T00:00:00.000Z");
-    } finally {
-      server.close();
-    }
+    expect(alloc.port).toBe(blockedPort);
+    expect(alloc.assignedAt).toBe("2026-02-06T00:00:00.000Z");
   });
 
   // Scenario: Saved port NOT in ownedPorts + port blocked = reassigns
@@ -267,21 +256,15 @@ describe("PortAllocator", () => {
       "utf-8",
     );
 
-    const server = net.createServer();
-    await new Promise<void>((resolve) => {
-      server.listen(blockedPort, "localhost", () => resolve());
+    // ownedPorts does NOT include blockedPort; stubbed probe reports it blocked (hermetic).
+    const allocator = new PortAllocator(workspaceRoot, {
+      ownedPorts: new Set([99999]),
+      isPortAvailable: async (p) => p !== blockedPort,
     });
+    const alloc = await allocator.allocate("wezterm-server/hostSshPort");
 
-    try {
-      // ownedPorts does NOT include blockedPort
-      const allocator = new PortAllocator(workspaceRoot, new Set([99999]));
-      const alloc = await allocator.allocate("wezterm-server/hostSshPort");
-
-      expect(alloc.port).not.toBe(blockedPort);
-      expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
-    } finally {
-      server.close();
-    }
+    expect(alloc.port).not.toBe(blockedPort);
+    expect(alloc.port).toBeGreaterThanOrEqual(LACE_PORT_MIN);
   });
 
   // Scenario: Fresh allocation is not affected by ownedPorts

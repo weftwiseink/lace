@@ -187,7 +187,7 @@ describe("Scenario F3: feature metadata validation", () => {
 
     // Verify identity
     expect(metadata.id).toBe("lace-fundamentals");
-    expect(metadata.version).toBe("2.0.0");
+    expect(metadata.version).toBe("2.1.0");
 
     // Verify dependsOn: git only (sshd removed in v2.0.0)
     expect(metadata.dependsOn).toBeDefined();

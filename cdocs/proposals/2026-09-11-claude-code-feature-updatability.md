@@ -6,6 +6,11 @@ task_list: devcontainer/claude-feature-updatability
 type: proposal
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-8"
+  at: 2026-09-11T15:30:00-07:00
+  round: 1
 tags: [devcontainer, claude-code, dependency_pinning, dev-infra, feature-updatability]
 ---
 

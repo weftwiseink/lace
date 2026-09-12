@@ -5,8 +5,7 @@ first_authored:
 task_list: devcontainer/claude-feature-updatability
 type: proposal
 state: live
-status: evolved
-superseded_by: cdocs/proposals/2026-09-12-claude-code-volume-native-update.md
+status: implementation_ready
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
@@ -17,8 +16,9 @@ tags: [devcontainer, claude-code, dependency_pinning, dev-infra, feature-updatab
 
 # Claude Code Feature Updatability
 
-> NOTE(opus/claude-volume-native-update): Superseded by [`2026-09-12-claude-code-volume-native-update.md`](./2026-09-12-claude-code-volume-native-update.md), which reconsiders this design's one-line rejection of the native updater and instead persists the install directory on a named Docker volume.
-> This proposal remains the more-reproducible fallback if the volume mount is not honored on lace's `--buildkit never` path.
+> NOTE(opus/claude-volume-native-update): This design is paired with [`2026-09-12-claude-code-volume-native-update.md`](./2026-09-12-claude-code-volume-native-update.md) as its accepted fallback, not superseded by it.
+> The volume design is the intended go-forward *if* a feature-native named-volume `mounts` entry is verified to be honored on lace's `devcontainer up --buildkit never` + podman path.
+> Until that go/no-go passes, this npm-reinstall design remains the accepted, more-reproducible mechanism (its lockfile describes the running version); it flips to `evolved` only after that verification.
 
 > BLUF: The `claude-code` feature installs `@anthropic-ai/claude-code@latest` in `install.sh`, but the version is frozen twice over: the legacy builder caches the feature-install layer (so `@latest` is only ever re-resolved when the layer's cache key changes), and the `:1` OCI tag is digest-pinned in each consumer's `devcontainer-lock.json`.
 > A `lace up --rebuild` recreates the container from the cached image and never re-runs the npm install, which is why weftwise stays stale.

@@ -4,8 +4,8 @@ first_authored:
   at: 2026-09-12T11:00:00-07:00
 task_list: devcontainer/claude-volume-native-update
 type: proposal
-state: live
-status: review_ready
+state: deferred
+status: implementation_ready
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
@@ -16,11 +16,13 @@ tags: [devcontainer, claude-code, auto-update, docker-volume, architecture]
 
 # Claude Code via Persistent Volume and Native Self-Update
 
+> NOTE(opus/claude-volume-native-update): Design accepted (round 2), held `deferred`. Implementation is intentionally gated on the empirical go/no-go (a feature-native named-volume `mounts` entry honored by the devcontainer CLI + podman on `devcontainer up --buildkit never`) and on the downstream self-update co-feature report. The 2026-09-11 npm-reinstall design remains the accepted fallback until that gate passes; see Recommendation.
+
 > BLUF: The `claude-code` feature can be kept current by persisting Claude Code's install directory on a per-project named Docker volume and letting the tool's own native updater keep it fresh, instead of npm-reinstalling on every container create.
 > This directly neutralizes the one-line rationale that the accepted npm-reinstall proposal used to reject `claude update` ("evaporates on rebuild"): a named volume survives container recreation, so what the updater writes to `~/.local/share/claude` persists across the exact event the design targets.
 > The approach is also simpler on the two hardest points of the npm design: the native install is user-local (`~/.local`), so the root-build-vs-user-create prefix and `chown` dance disappears, and there is no per-create network install, so rebuilds are faster and work offline.
 > The cost is a genuine reproducibility regression: the running Claude version is no longer described by `devcontainer-lock.json` but by mutable volume state, and update timing shifts from deterministic-at-create to background-while-running.
-> Verdict: sound with conditions. Recommended as the go-forward mechanism, paired with the 2026-09-11 npm-reinstall design as its accepted fallback (not yet superseding it), and gated on an unverified go/no-go: whether the devcontainer CLI, driving podman on lace's `--buildkit never` path, honors a feature-declared named-volume `mounts` entry. It flips from primary-with-fallback to superseding only after that gate passes, and further conditional on per-project volume scoping and an accepted reproducibility tradeoff (background auto-update and exact-version reproducibility cannot both be had).
+> Verdict: sound with conditions. Recommended as the go-forward mechanism, paired with the 2026-09-11 npm-reinstall design as its accepted fallback (not yet superseding it), and gated on an unverified go/no-go: whether the devcontainer CLI, driving podman on lace's `--buildkit never` path, honors a feature-declared named-volume `mounts` entry. It is further conditional on per-project volume scoping and an accepted reproducibility tradeoff (background auto-update and exact-version reproducibility cannot both be had). The supersession bookkeeping is detailed in the Recommendation.
 
 ## Summary
 
@@ -130,7 +132,7 @@ flowchart TD
 
 - Reproducibility regression. WHY THIS IS THE CENTRAL COST: with the npm design, the running version is a function of `version` option plus lock digest plus the create-time resolve, all inspectable in version-controlled config (a pinned `version` is a reproducible reinstall). With the volume design, the running version is mutable state in a Docker volume that no committed file describes. Two containers created from the same locked config can run different Claude versions, and a rebuild does not reset the version.
 
-State the tradeoff as an outright trilemma: the volume design can offer background auto-update OR exact-version reproducibility, not both. `minimumVersion` and `autoUpdatesChannel: stable` bound a floor and a channel, but a floor is not an exact-version pin (the volume still floats forward above it). The only way to pin an exact version through the volume design is `DISABLE_UPDATES` on a frozen baseline, which discards the entire auto-update benefit and reduces to a worse npm design (a persisted baseline that never advances). No mitigation restores "the lockfile describes the running version" while auto-update remains on. This tradeoff must be accepted deliberately, which is precisely why the npm design is retained as the fallback for consumers that require lockfile-described versions.
+State the tradeoff as an outright dilemma: the volume design can offer background auto-update OR exact-version reproducibility, not both. `minimumVersion` and `autoUpdatesChannel: stable` bound a floor and a channel, but a floor is not an exact-version pin (the volume still floats forward above it). The only way to pin an exact version through the volume design is `DISABLE_UPDATES` on a frozen baseline, which discards the entire auto-update benefit and reduces to a worse npm design (a persisted baseline that never advances). No mitigation restores "the lockfile describes the running version" while auto-update remains on. This tradeoff must be accepted deliberately, which is precisely why the npm design is retained as the fallback for consumers that require lockfile-described versions.
 
 - Offline behavior improves. WHY: the npm design must degrade gracefully when the create-time `npm install` cannot reach the network (its offline-fallback requirement). The volume design has no create-time network step: the persisted binary just runs, and a failed background update is a non-event that retries later.
 
@@ -173,12 +175,12 @@ Conditions for adoption:
 
 1. Per-project volume scoping via `${devcontainerId}` (no cross-project sharing).
 2. Go/no-go, currently unverified: whether the devcontainer CLI, driving **podman** on lace's `devcontainer up --buildkit never` path, actually creates and attaches a named volume from a feature-declared top-level `mounts` entry (with `${devcontainerId}` substitution). Naming podman specifically matters: the entire legacy-builder saga exists because the podman path has surprised the project before, so a docker-only check is insufficient. This is the load-bearing unknown, mirroring the npm design's unverified `postCreateCommand` passthrough.
-3. A deliberate reproducibility stance, given the auto-update-XOR-exact-version trilemma: either accept mutable-volume version state, or bound it with a floor/channel (`minimumVersion` / `autoUpdatesChannel: stable`), or freeze exactly with `DISABLE_UPDATES` on a baseline (forgoing auto-update). Exposed as feature options.
+3. A deliberate reproducibility stance, responding to the auto-update-vs-exact-version dilemma: either accept mutable-volume version state, or bound it with a floor/channel (`minimumVersion` / `autoUpdatesChannel: stable`), or freeze exactly with `DISABLE_UPDATES` on a baseline (forgoing auto-update). These are three response stances to the one dilemma, exposed as feature options.
 4. Correct first-population and launcher/PATH mapping so the persisted volume and the launcher agree.
 
 Relationship to the 2026-09-11 npm-reinstall proposal: primary-with-fallback, not supersession.
 The volume design is the recommended go-forward mechanism, but it is implementation-blocked on condition 2 (the go/no-go).
-Until that gate is empirically verified, both proposals stay live: this volume design as primary/recommended, and the accepted npm design (`status: implementation_ready`) as the more-reproducible fallback whose lockfile fully describes the running version.
+Until that gate is empirically verified, neither proposal is superseded: this volume design is the accepted primary/recommended mechanism (held `deferred`, its implementation gated on the go/no-go), and the npm design stays `live` / `implementation_ready` as the more-reproducible fallback whose lockfile fully describes the running version.
 The npm design flips to `evolved` / superseded ONLY after condition 2 passes, because a design depended upon as the fallback for an unresolved go/no-go is by definition not superseded.
 This proposal does not enact that supersession; it defers it to the verification.
 

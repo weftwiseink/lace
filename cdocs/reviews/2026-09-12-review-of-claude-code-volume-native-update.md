@@ -7,7 +7,7 @@ task_list: devcontainer/claude-volume-native-update
 type: review
 state: live
 status: done
-tags: [fresh_agent, architecture, devcontainer, claude-code, reproducibility, go-no-go]
+tags: [fresh_agent, round-2, architecture, devcontainer, claude-code, reproducibility, go-no-go]
 ---
 
 # Review: Claude Code via Persistent Volume and Native Self-Update
@@ -123,3 +123,47 @@ These are the underconsidered points that most need a human/overseer decision be
    - (a) Keep both proposals live now; supersede npm only after condition 2 passes.
    - (b) Introduce an explicit primary-with-fallback pairing and never fully supersede npm while it remains the fallback.
    - Recommendation: (a).
+
+## Round 2
+
+> BLUF(reviewer-r2/claude-volume-native-update): Fresh round-2 review of the revised proposal (committed `a68dd9b`). The sole blocker (B-1, premature supersession) is genuinely resolved, all five nits are folded in, and no new inconsistency was introduced.
+> Verdict: **Accept** (round 2). The two proposals are now mutually consistent: the volume design is primary/recommended-but-go/no-go-blocked, the npm design is restored to `state: live` / `status: implementation_ready` as the accepted fallback, and supersession is explicitly deferred until condition 2 passes.
+> Two residual non-blocking nits noted for the overseer; neither warrants another round.
+
+### B-1 resolved: supersession deferred, both docs consistent
+
+Confirmed resolved. Verified against both documents:
+
+- npm proposal `2026-09-11-claude-code-feature-updatability.md` frontmatter is back to `state: live` / `status: implementation_ready`, round-2 `accepted`, with **no** `superseded_by:` field. Its top NOTE now reads as a primary/fallback pairing ("paired with ... as its accepted fallback, not superseded by it ... it flips to `evolved` only after that verification"), not as a terminal supersession.
+- Volume proposal BLUF and Recommendation now describe a coherent primary-with-fallback relationship: volume is the recommended go-forward mechanism but implementation-blocked on the go/no-go (condition 2); npm is the accepted, more-reproducible fallback whose lockfile describes the running version; supersession is explicitly *not enacted* here and is deferred to the verification ("This proposal does not enact that supersession; it defers it to the verification.").
+- The two documents are mutually consistent. Both state the same flip-after-condition-2 rule from their respective sides, with no lingering contradiction. The logical defect round 1 flagged (depending on a design as fallback while marking it dead) is gone.
+
+The added NOTE(opus/claude-volume-native-update) at the end of the Recommendation correctly frames the supersession-after-verification bookkeeping and the reproducibility stance as overseer/loop policy calls, which is the right disposition.
+
+### Nits confirmed folded in
+
+- N-1 (podman): condition 2 (Recommendation) and the Investigation Requested block now name **podman** explicitly and state why a docker-only check is insufficient ("the entire legacy-builder saga exists because the podman path has surprised the project before"). Resolved.
+- N-2 (trilemma): the Design Decisions "Reproducibility regression" bullet now states the auto-update-XOR-exact-version tradeoff outright, and condition 3 exposes the three stances (accept mutable / bound with floor+channel / freeze with `DISABLE_UPDATES`). Resolved. (See residual nit R2-N1 on the "trilemma" label.)
+- N-3 (BLUF "verified"): the BLUF now says "gated on an unverified go/no-go" and describes the passthrough as the unverified gate. Resolved.
+- N-4 (launcher persistence): the Edge Cases "Launcher outside the volume" bullet now enumerates three mechanisms (single-volume self-repointing launcher; second volume over `~/.local/bin`; volume-internal `current` symlink), notes that a named volume mounts exactly one target path, and flags the `~/.local/bin` shadowing cost as "the least attractive option." Resolved, and the enumeration/deferral split is exactly right for a design proposal.
+- N-5 (migrate-installer): marked author-cited in Background. Resolved.
+
+### New findings
+
+None blocking. Two residual non-blocking nits:
+
+- R2-N1 (cosmetic): the reproducibility tradeoff is labeled a "trilemma" (Design Decisions) but is framed as a binary XOR ("background auto-update OR exact-version reproducibility, not both"). The three-way structure is really *one* dilemma (the two cannot coexist) plus three *response stances*. "Dilemma with three response stances," or simply "tradeoff," would be more precise than "trilemma." Purely a word choice; the substance is correct and clearly stated.
+- R2-N2 (cosmetic): the Recommendation reads "It flips from primary-with-fallback to superseding only after that gate passes" (BLUF) and "flips to `evolved` / superseded ONLY after condition 2 passes" (body). Consistent and correct, just stated in three places (BLUF, Recommendation prose, closing NOTE); a future editor could consolidate, but the repetition aids legibility and is not a defect.
+
+Neither nit requires a revision cycle; the overseer can absorb both if desired.
+
+### Round 2 verdict
+
+**Accept.** Round 2.
+
+The design decision is sound, the conditions and load-bearing unknown (the podman/`--buildkit never` named-volume go/no-go) are correctly scoped, and the one round-1 blocker is cleanly resolved without disturbing the design. As a design/decision proposal this is accepted: the decision is sound with the right conditions and the reproducibility tradeoff surfaced honestly. Remaining work (the go/no-go verification, the launcher-mechanism choice, and the reproducibility stance) is correctly deferred to implementation/overseer, not to another review round.
+
+### Round 2 action items
+
+1. [non-blocking] (R2-N1) Consider relabeling "trilemma" as a dilemma-with-three-stances or simply "tradeoff." Cosmetic.
+2. [non-blocking] (R2-N2) Optionally consolidate the flip-after-condition-2 statement, currently in three places. Cosmetic; repetition is not harmful.

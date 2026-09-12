@@ -7,7 +7,7 @@ task_list: devcontainer/claude-feature-updatability
 type: review
 state: live
 status: done
-tags: [fresh_agent, devcontainer, claude-code, feature-updatability, architecture, missing_validation]
+tags: [fresh_agent, devcontainer, claude-code, feature-updatability, architecture, missing_validation, round_2]
 ---
 
 # Review: Claude Code Feature Updatability
@@ -152,3 +152,76 @@ Consider splitting it to a follow-up `/cdocs:rfp` so Phases 1-2 stay minimal, or
 4. Operator escape hatch (N4):
    - (a) Keep the `--build-no-cache` passthrough in Phase 3.
    - (b) Split to a follow-up RFP; keep Phases 1-2 minimal.
+
+## Round 2
+
+> BLUF: Accept (accept-with-nits). Fresh round-2 review of the revision committed `7a5127a`.
+> All three round-1 blockers are genuinely resolved, not reworded: the version bridge is now a build-time-baked wrapper invoked by a static-path `postCreateCommand` (no `${VERSION}` in any hook string), the user-writable prefix is committed as a static `NPM_CONFIG_PREFIX` `containerEnv` export, and delivery is stated single-leg throughout with the portless over-borrow removed.
+> The mechanism is now coherent end-to-end and implementable, and I traced the data flow against the live tree.
+> Two minor implementer-facing nits remain (root-owned baseline files vs non-root reinstall; PATH for the prefix bin), both already gated by Phase 1's own acceptance criteria, so they are cleanup, not blockers.
+
+### Round-1 blocker disposition
+
+I verified each blocker is resolved in substance, tracing the data flow rather than trusting the prose.
+
+**B1 (version bridge / installed wrapper) - RESOLVED.**
+The design is now the installed-wrapper path, adopted as THE mechanism (Proposed Solution step 1, Design Decisions "Bake the spec into an installed script", Phase 1).
+`install.sh` runs at build time as root where `VERSION` is a known env var, resolves the spec, and writes it literally into `/usr/local/share/claude-code/update.sh`; `devcontainer-feature.json` declares `postCreateCommand: "/usr/local/share/claude-code/update.sh"`, a static path with no option interpolation.
+Data flow: build-time `VERSION` env -> baked as a literal string inside the wrapper file -> wrapper invoked by fixed path at create time.
+This works: it never relies on `${VERSION}` substitution inside a lifecycle-command string, and the proposal both warns against that form (Design Decisions) and forbids it in Phase 1 "Do NOT."
+I grepped the proposal for a residual broken inline form: every `${VERSION}` occurrence is either a description of current `install.sh` behavior, the legitimate build-time baseline install, or the explicit DO-NOT warning. None puts `${VERSION}` in the hook string.
+
+**B2 (user-writable npm prefix) - RESOLVED.**
+The three-way deferred choice is gone.
+The committed mechanism (Proposed Solution step 1, Design Decisions "User-writable npm prefix via `containerEnv`") is: `install.sh` creates a user-writable prefix, `chown`s it to the remote user, and exports it as `NPM_CONFIG_PREFIX` via `containerEnv`, so the root build-time baseline install and the remote-user create-time reinstall target the same writable location.
+The root-build vs remote-user-create ownership tension is genuinely reconciled by the `chown` plus shared prefix.
+This is a STATIC `containerEnv` value (e.g. `/usr/local/share/npm-global`), so it needs no feature-option interpolation into metadata; I confirmed the static-value `containerEnv` precedent exists in-tree (`sprack` -> `SPRACK_EVENT_DIR`, `bash-history` -> `HISTFILE`).
+The per-consumer collision question (weftwise's own node-owned `NPM_CONFIG_PREFIX`) is correctly relegated to a Phase-1 empirical check; see the risk note below - I agree the deferral is acceptable.
+
+**B3 (single-leg delivery) - RESOLVED.**
+Delivery is stated single-leg in the BLUF, Summary, and Design Decisions ("Single-leg delivery").
+The proposal now explicitly states the portless immediate leg (a consumer-side `version` override honored by the old locked `install.sh`) does NOT transfer, because a new lifecycle capability cannot be conjured by an option override on the old digest (Background line 69, Design Decisions).
+The portless over-borrow and the "needs no re-litigation" waving are gone.
+The "sweep is one-time, not a standing obligation" decision cleanly closes the reframe.
+
+### New findings
+
+I checked the revision for internal-consistency defects a revision can introduce (mermaid vs prose, phase dependencies, acceptance criteria). No blockers.
+
+- Mermaid diagram vs prose: consistent. The build subgraph (resolve VERSION, create+chown prefix, baseline install, write `update.sh` with spec baked in) matches Proposed Solution step 1; the create subgraph (run `update.sh` -> `npm install @...@spec`) matches step 2; the running-container leg matches the no-restart constraint. Phase 1 matches the wrapper design and its "Do NOT" forbids the broken form.
+- Phase dependencies: internally consistent (Phase 2 depends on Phase 1; Phase 4 depends on Phase 2; Phase 3 lace check; Phase 5 polish).
+
+**NEW-1 (non-blocking nit): root-owned baseline files vs non-root create-time reinstall.**
+The baseline `npm install -g` runs as root into a prefix `chown`ed to the remote user; files root writes land root-owned inside that directory, and the create-time reinstall runs as the (non-root) remote user.
+An `npm install` overwriting root-owned files as a non-root user can hit `EACCES`.
+This is already gated by Phase 1's explicit criteria ("the wrapper runs without sudo and without permission error against the exported prefix" and the smoke test "under both a root-user and a non-root (`node`) remote-user config"), so it will be caught, not shipped.
+Cheapest fix for the implementer: `chown -R` the prefix AFTER the baseline install, or run the baseline install as the remote user. Worth a one-line note in Phase 1; not a blocker.
+
+**NEW-2 (non-blocking nit): PATH for the prefix `bin`.**
+For `claude --version` to work after relocating the global prefix to `/usr/local/share/npm-global`, that prefix's `bin` must be on the remote user's PATH.
+The Phase 1 success criterion `claude --version` re-resolves correctly is an empirical gate that catches a PATH miss, so this is covered; the implementer should be ready to add the `bin` dir to PATH (via `containerEnv` PATH or profile.d) if the node feature does not already cover the custom prefix.
+
+### Risk: four consumer configs outside the worktree
+
+The four consumer configs (jif, whelm, clauthier, weftwise) live outside this worktree and cannot be inspected here.
+The proposal labels this honestly (Investigation Requested, Edge Cases "Consumer prefix cooperation") and defers the per-consumer `NPM_CONFIG_PREFIX` interaction to a Phase-1 empirical check and the sweep to Phase 4.
+Judgment: the Phase-1 deferral is ACCEPTABLE, not a blocker. The feature-side mechanism is fully committed and verifiable in a scratch container; only the per-consumer interaction is environment-dependent and the target repos are genuinely inaccessible from here. This is exactly the class of risk that belongs in empirical verification, and the active-container-last sweep ordering with explicit weftwise authorization contains the blast radius.
+
+### Round-1 nit disposition (spot-check)
+
+- N1 (CLI version floor + recreate re-run acceptance): addressed. Edge Cases "Stale toolchain", Verification Methodology "toolchain floor", Phase 1 and Test Plan both name the Remote-Containers v0.223.0 floor and assert re-run on recreate.
+- N2 (`postCreateCommand` over `updateContentCommand`): addressed. Now a committed Design Decision with the cache-safety reasoning; the open question is deleted.
+- N3 ("idempotent reinstall" wording): addressed. "deterministic no-op" is gone; Design Decisions and Phase 5 say "idempotent reinstall."
+- N4 (descope `--build-no-cache`): addressed. Now a Phase 3 NOTE marking it out of scope with a follow-up `/cdocs:rfp` pointer.
+
+### Round-2 Verdict
+
+**Accept (accepted).**
+All three round-1 blockers are resolved in substance, the mechanism is coherent and implementable end-to-end, per-phase acceptance criteria and "Do NOT" constraints are concrete, and the Verification Methodology proves the two hard properties (rebuild lands current; active containers untouched).
+
+Remaining nits to clean up before/during implementation (accept-with-nits; none blocks acceptance):
+
+```
+1. [nit] NEW-1: In Phase 1, chown -R the npm prefix AFTER the baseline install (or run the baseline as the remote user) so the non-root create-time reinstall does not hit EACCES on root-owned files.
+2. [nit] NEW-2: Ensure the relocated prefix's bin is on the remote user's PATH (containerEnv PATH or profile.d) if the node feature does not already cover the custom NPM_CONFIG_PREFIX.
+```

@@ -7,10 +7,10 @@ task_list: devcontainer/feature-update-sweep
 type: review
 state: live
 status: done
-tags: [fresh_agent, devcontainer, feature_versioning, dependency_pinning, missing_validation]
+tags: [fresh_agent, devcontainer, feature_versioning, dependency_pinning, missing_validation, round_2]
 ---
 
-# Review: Feature Version Update Sweep (R1)
+# Review: Feature Version Update Sweep (R1 + R2)
 
 ## Summary Assessment
 
@@ -110,3 +110,57 @@ The proposal is factually sound, honestly scoped, and reuses a real precedent. I
 **C2. Relock authority (drives B1):**
 - (a) Standardize on `--config .lace/devcontainer.json` for all consumers and treat any `.devcontainer/*-lock.json` as legacy cruft to optionally clean up.
 - (b) Investigate whether a lace-native relock should exist before proceeding (heavier; likely out of shallow scope).
+
+---
+
+## Round 2
+
+Fresh round-2 reviewer, revised proposal (`status: review_ready`, committed `1dea172`).
+Focus: are the two R1 blockers resolved, is the reframed mechanism coherent and behavior-neutral, and are no new blockers introduced.
+The author chose C1(a) (defer fundamentals `:2` entirely) and C2(a) (standardize on `.lace/` `--config`).
+
+### Verdict: **Accept** (with non-blocking nits for implementation)
+
+Both R1 blockers are resolved, the reframed republish-plus-single-relock mechanism is coherent and truly behavior-neutral in the sense that matters (no major-version change, no breaking dependency-chain change), and no new inconsistency was introduced. The remaining items are implementation hygiene, not design defects.
+
+### B1 (relock targets wrong file): RESOLVED
+
+- The relock command is now `devcontainer upgrade --config <consumer>/.lace/devcontainer.json` at every prescriptive site: Summary step 2 (L36), Background relock definition (L76), the mermaid node (L119), Important Design Decision "always with `--config`" (L138), Verification step 1 (L168), and Phase 3 (L205). The only two `--workspace-folder` mentions (L77, L148) are explicit "must not be used" counter-examples, not instructions.
+- The `up.ts:1679` claim is empirically accurate. `packages/lace/src/lib/up.ts:1677-1679` builds `extendedPath = join(workspaceFolder, ".lace", "devcontainer.json")` and pushes `--config <that>` when the extended config exists. The lock the CLI reads/writes is adjacent to that `--config`, so `.lace/devcontainer-lock.json` is genuinely the authoritative build lock. Claim holds.
+- Phase 1 now carries a per-consumer step to "confirm ... `lace up` builds from `.lace/devcontainer.json` and that `.lace/devcontainer-lock.json` is the authoritative lock (spot-check the `--config` path)" (L188), with the confirmation folded into Phase 1 acceptance (L192).
+- The weftwise dual-lock is correctly reframed as a systemic symptom rather than a weftwise quirk: L81-87 title the section "`.lace/` is the authoritative lock; `.devcontainer/` locks are legacy cruft," state "The lock authority is systemic, not a weftwise quirk," and diagnose weftwise's divergent `.devcontainer/` lock as evidence that the portless precedent's relock wrote the non-authoritative file. The prior-art NOTE (L102-104) closes the loop: correcting the target to `.lace/` "also finally delivers that portless fix to weftwise."
+
+### B2 (`lace-fundamentals :1 -> :2` silently drops sshd): RESOLVED
+
+- The `:2` migration is fully removed from the actionable path and deferred via NOTE. Every `:2` reference (L22 BLUF, L42-44 NOTE, L63 inventory action, L134, L142 design decision, L193 and L209 "Do NOT," L219 Investigation hand-off) frames it as deferred to the SSH-decoupling workstream. There is no residual instruction anywhere that bumps fundamentals to `:2`.
+- The inventory Action cell for `lace-fundamentals` reads "deferred (see NOTE: `:2` drops `sshd`)" (L63), and Phase 1 / Phase 3 "Do NOT" bars explicitly forbid including a `:2` migration or changing any `:1` reference to `:2` (L193, L209).
+- Because relock re-resolves only within-major (`:1`), fundamentals stays on its `:1` line and cannot pick up the `:2` sshd-dropping digest through this sweep. The deferral is enforced by the mechanism, not just by prose.
+
+### Mechanism coherence and behavior-neutrality: CONFIRMED
+
+- The reframed two-step mechanism (republish `claude-code` for a fresh `:1` digest that re-resolves `latest`; one `devcontainer upgrade --config .lace/...` per consumer that re-resolves every floating `:N` to newest in-major digest) is internally consistent across BLUF, Summary, Proposed Solution, and Design Decisions.
+- No hidden major-version change lurks. The only feature whose source has advanced a major (fundamentals, source 2.1.0) is explicitly held at `:1`; all consumer references are `:1` tags and relock stays within major 1. Verified no `:2`/major bump is prescribed anywhere.
+- The "sweeps up portless `1.0.0` -> `1.0.1` in-major" claim is accurate: R1 verified whelm and weftwise sit on portless feature `1.0.0` while jif is on `1.0.1` (i.e. the `:1` tag already resolves to the `1.0.1` digest), so a `:1` relock re-resolves whelm/weftwise to that same newest in-major digest. This is a within-major bump, not a major change.
+- Note on the word "behavior-neutral": delivering portless `1.0.1` (an ingress-durability fix) is a functional improvement, so "behavior-neutral" is precise only in the L37 sense of "no major-version change and therefore no behavioral break." The proposal is honest about this and routes it to the portless workstream for sign-off (Investigation Requested L220), which is the right treatment. Not a blocker; see N7.
+
+### Nit spot-check (R1 non-blocking items): all landed
+
+- N1 (overridable `version` default): inventory cell now reads "`@anthropic-ai/claude-code@${VERSION}`, `version` option default `latest`" (L62); prose consistently says "keep the `version` default `latest`." Landed.
+- N2 (cold-cache honesty): Verification step 2 (L169-173) and Phase 4 acceptance/Do-NOT (L214-215) explicitly state the scratch build proves resolution "on a COLD cache only," that the warm-cache layer-bust "rests by reference on the legacy-builder cache model" in the cited report, and forbid claiming the scratch build proves the warm-cache layer-bust. Honest and well-separated. Landed.
+- N3 (portless staleness hand-off): Investigation Requested item (L220) hands the whelm/weftwise `1.0.0` pickup to the portless workstream. Landed.
+- N4 (port-ledger contention): NOTE at L176-177 plus Phase 4 "honoring the port-ledger NOTE" (L213). Landed.
+- N5 (GHCR auth downgrade): Edge Cases (L154) now calls it "a confirmation, not a blocker"; Phase 1 keeps it as a precondition check. Landed.
+
+### New / residual findings (all non-blocking)
+
+- **N6 [non-blocking].** The Test Plan (L160) and Phase 3 acceptance (L208) speak of "unchanged features confirmed unchanged," but portless on whelm/weftwise is a *changed* entry (`1.0.0` -> `1.0.1`). The proposal is clear about this elsewhere; just ensure the implementation sweep report lists portless under "intentionally changed in-major," not silently under "unchanged," so the durability delivery is visible.
+- **N7 [non-blocking].** Sequence the portless-workstream confirmation (Investigation Requested L220) before weftwise's `.lace/` lock is written, since weftwise is the production canary and the portless pickup lands there. Phase 3 already final-confirm-gates weftwise; fold the portless sign-off into that gate.
+- **N8 [non-blocking].** neovim/blesh upstream currency remains an unresolved Phase-1 online check (correctly deferred, L189/L221). Implementation must actually perform it and record bump-or-leave per feature; do not let it silently default to "leave" without the check.
+
+### Action Items (Round 2)
+
+1. [non-blocking] N6: In the sweep report, list portless on whelm/weftwise as an intentional in-major change, not under "unchanged."
+2. [non-blocking] N7: Gate weftwise's relock on the portless-workstream sign-off, folded into the existing weftwise final-confirm gate.
+3. [non-blocking] N8: Actually run the Phase-1 neovim/blesh upstream currency check and record the per-feature bump-or-leave decision with reasons.
+
+No blocking action items remain. The proposal is implementation-ready.

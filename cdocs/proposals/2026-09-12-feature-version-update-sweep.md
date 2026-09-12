@@ -6,6 +6,11 @@ task_list: devcontainer/feature-update-sweep
 type: proposal
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-8"
+  at: 2026-09-12T07:24:00-07:00
+  round: 1
 tags: [devcontainer, feature_versioning, dependency_pinning, dev-infra]
 ---
 

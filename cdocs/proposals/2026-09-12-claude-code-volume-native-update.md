@@ -6,6 +6,11 @@ task_list: devcontainer/claude-volume-native-update
 type: proposal
 state: live
 status: review_ready
+last_reviewed:
+  status: revision_requested
+  by: "@claude-opus-4-8"
+  at: 2026-09-12T12:00:00-07:00
+  round: 1
 tags: [devcontainer, claude-code, auto-update, docker-volume, architecture]
 ---
 

@@ -19,7 +19,7 @@ VERSION="${VERSION:-0.4.0-devel3}"
 # Optional fzf install so ble.sh's fzf-completion / fzf-key-bindings integration
 # works (otherwise ble emits `"fzf" not found` on every prompt).
 INSTALL_FZF="${INSTALLFZF:-true}"
-FZF_VERSION="${FZFVERSION:-0.74.3}"
+FZF_VERSION="${FZFVERSION:-0.74.4}"
 
 _REMOTE_USER="${_REMOTE_USER:-root}"
 if [ "$_REMOTE_USER" = "root" ]; then

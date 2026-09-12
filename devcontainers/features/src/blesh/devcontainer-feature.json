@@ -1,6 +1,6 @@
 {
     "id": "blesh",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "name": "ble.sh (Bash Line Editor)",
     "description": "Installs ble.sh for the remote user at ~/.local/share/blesh so interactive bash (via dotfiles) loads it. Pins a prebuilt ble.sh release tarball for reproducible, cached installs; falls back to build-from-source. Optionally installs a pinned fzf binary so ble.sh's fzf integration works.",
     "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/blesh",
@@ -17,7 +17,7 @@
         },
         "fzfVersion": {
             "type": "string",
-            "default": "0.74.3",
+            "default": "0.74.4",
             "description": "fzf release version to install when installFzf is true (junegunn/fzf release tag without the leading 'v')."
         }
     },

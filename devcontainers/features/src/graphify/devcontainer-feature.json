@@ -1,0 +1,45 @@
+{
+    "id": "graphify",
+    "version": "1.0.0",
+    "name": "graphify (code graph)",
+    "description": "Installs the graphify (graphifyy) code-graph CLI via isolated system-wide pipx. Sets GRAPHIFY_OUT to a mounted cache dir and declares a lace mount so the deterministic tree-sitter index persists across rebuilds without polluting the working tree. Provisions a scoping aid, not a related-code guarantee: consumers must fall back to grep when the index is stale or absent.",
+    "documentationURL": "https://github.com/weftwiseink/lace/tree/main/devcontainers/features/src/graphify",
+    "options": {
+        "version": {
+            "type": "string",
+            "default": "0.9.61",
+            "description": "graphifyy PyPI version to install (exact pin; pre-1.0, so no range). Passed to pipx as graphifyy==<version>."
+        },
+        "installMcpServer": {
+            "type": "boolean",
+            "default": false,
+            "description": "Register the graphify MCP server (query_graph, get_node, shortest_path) into the remote user's Claude config via 'claude mcp add'. Requires the claude-code feature; no-op with a warning if the claude CLI is absent."
+        },
+        "installGitHook": {
+            "type": "boolean",
+            "default": false,
+            "description": "Install a post-commit git hook running 'graphify update' for index freshness. Off by default: it adds latency to every commit."
+        }
+    },
+    "dependsOn": {
+        "ghcr.io/devcontainers/features/python:1": {}
+    },
+    "installsAfter": [
+        "ghcr.io/weftwiseink/devcontainer-features/claude-code"
+    ],
+    "containerEnv": {
+        "GRAPHIFY_OUT": "${containerEnv:HOME}/.cache/graphify"
+    },
+    "customizations": {
+        "lace": {
+            "mounts": {
+                "index": {
+                    "target": "/home/${_REMOTE_USER}/.cache/graphify",
+                    "recommendedSource": "~/.cache/graphify",
+                    "sourceMustBe": "directory",
+                    "description": "graphify output dir (GRAPHIFY_OUT): the AST index cache plus graph.json/GRAPH_REPORT.md, redirected out of the working tree and persisted across rebuilds so 'graphify update' stays incremental"
+                }
+            }
+        }
+    }
+}

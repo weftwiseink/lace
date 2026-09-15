@@ -1,0 +1,35 @@
+{
+    "default_install": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "features": {
+            "ghcr.io/devcontainers/features/python:1": {},
+            "graphify": {}
+        }
+    },
+    "custom_version": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "features": {
+            "ghcr.io/devcontainers/features/python:1": {},
+            "graphify": {
+                "version": "0.9.60"
+            }
+        }
+    },
+    "non_root_user": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "remoteUser": "vscode",
+        "features": {
+            "ghcr.io/devcontainers/features/python:1": {},
+            "graphify": {}
+        }
+    },
+    "mcp_without_claude": {
+        "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+        "features": {
+            "ghcr.io/devcontainers/features/python:1": {},
+            "graphify": {
+                "installMcpServer": true
+            }
+        }
+    }
+}

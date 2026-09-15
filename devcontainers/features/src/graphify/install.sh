@@ -105,7 +105,9 @@ fi
 # ---------------------------------------------------------------------------
 # Optional: post-commit git hook running `graphify update` (default off).
 # Uses a global hooks dir for the remote user so it applies to any repo checked
-# out in the container. Guarded and non-fatal.
+# out in the container. Guarded and non-fatal. CAVEAT: a global core.hooksPath
+# SHADOWS any repo-local .git/hooks for that user across every checkout, not just
+# this repo. Opt-in for exactly that reason (default off).
 # ---------------------------------------------------------------------------
 if [ "$INSTALL_HOOK" = "true" ]; then
     echo "graphify: installing post-commit git hook (graphify update)..."

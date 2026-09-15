@@ -37,7 +37,9 @@ Pin a version, and opt into the MCP server:
 |--------|------|---------|-------------|
 | `version` | string | `0.9.61` | `graphifyy` PyPI version (exact pin; pre-1.0, so no range). Installed as `graphifyy==<version>`. |
 | `installMcpServer` | boolean | `false` | Register the graphify MCP server for the remote user via `claude mcp add graphify -s user -- graphify-mcp`. Requires the `claude-code` feature; no-op with a warning if the `claude` CLI is absent. |
-| `installGitHook` | boolean | `false` | Install a post-commit git hook running `graphify update`. Off by default: it adds latency to every commit. |
+| `installGitHook` | boolean | `false` | Install a post-commit git hook running `graphify update`. Off by default: it adds latency to every commit. See the caveat below. |
+
+> WARN(opus/code-graph/graphify-lace-feature): `installGitHook=true` sets a GLOBAL `git config --global core.hooksPath` for the remote user, which SHADOWS any repo-local `.git/hooks` across every checkout in the container, not just this one. It is opt-in and default off, but enabling it overrides other repos' hooks for that user. Leave it off unless container-wide index freshness is worth that trade.
 
 ## What gets installed
 
@@ -68,11 +70,11 @@ This feature instead sets `GRAPHIFY_OUT=/var/cache/graphify` (via the manifest's
 |-------|--------|------|----------------|-------------|
 | `graphify/index` | `/var/cache/graphify` | directory | `~/.cache/graphify` | graphify output dir (`GRAPHIFY_OUT`): AST index cache + `graph.json` |
 
-> NOTE: `GRAPHIFY_OUT` is a fixed, user-independent path (`/var/cache/graphify`) rather than `$HOME/.cache/graphify`, because a feature's `containerEnv` is baked as a raw Docker `ENV` that does not resolve `${containerEnv:HOME}`. The fixed path also avoids the root-vs-non-root home divergence.
+> NOTE(opus/code-graph/graphify-lace-feature): `GRAPHIFY_OUT` is a fixed, user-independent path (`/var/cache/graphify`) rather than `$HOME/.cache/graphify`, because a feature's `containerEnv` is baked as a raw Docker `ENV` that does not resolve `${containerEnv:HOME}`. The fixed path also avoids the root-vs-non-root home divergence.
 
 When the mount is active, the index persists across container rebuilds, so `graphify update` stays incremental rather than re-indexing from scratch.
 
-> NOTE: The mount is applied by lace's `up` path, not by the standalone `devcontainer features test` harness. Harness tests verify the target dir is created and owned by the remote user; end-to-end persistence across a rebuild is a lace `up` concern.
+> NOTE(opus/code-graph/graphify-lace-feature): The mount is applied by lace's `up` path, not by the standalone `devcontainer features test` harness. Harness tests verify the target dir is created and owned by the remote user; end-to-end persistence across a rebuild is a lace `up` concern.
 
 To use a different host path, add a settings override to `~/.config/lace/settings.json`:
 
@@ -84,7 +86,7 @@ To use a different host path, add a settings override to `~/.config/lace/setting
 }
 ```
 
-> NOTE: `GRAPHIFY_OUT` is a single fixed path, so a container hosting multiple checkouts shares one graph. This matches lace's one-project-per-container norm. For multiple projects in one container, set `GRAPHIFY_OUT` per-invocation or run graphify from each project root with its own override.
+> NOTE(opus/code-graph/graphify-lace-feature): `GRAPHIFY_OUT` is a single fixed path, so a container hosting multiple checkouts shares one graph. This matches lace's one-project-per-container norm. For multiple projects in one container, set `GRAPHIFY_OUT` per-invocation or run graphify from each project root with its own override.
 
 ## MCP server (opt-in)
 

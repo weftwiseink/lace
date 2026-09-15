@@ -99,10 +99,25 @@ Static verification also clean: `shellcheck --shell=sh install.sh` (no findings)
 - **The git hook (Phase 4, `installGitHook=true`).** Not exercised by a scenario. The hook script is static-only verified (written, `chmod +x`, guarded/non-fatal). No scenario builds it or runs a commit.
 - **Phase 7 CI publish.** Not triggered (no merge). Confirmed by inspection only: `.github/workflows/devcontainer-features-release.yaml` publishes `devcontainers/features/src/**` to GHCR on push to main, and `devcontainer-features-test.yaml` runs the harness on PRs touching `devcontainers/features/**`. The first merge to main WILL publish `ghcr.io/weftwiseink/devcontainer-features/graphify:1.0.0` with the `0.9.61` pin baked in - a real side effect, and the pin is verified (latest on PyPI).
 
+## Deferred follow-ups (open items)
+
+Recorded from the R1 review (accepted, non-blocking). NOT built in this iteration; tracked honestly for a future pass.
+
+> WARN(opus/code-graph/graphify-lace-feature): MCP happy-path is UNTESTED and is a REQUIRED-BEFORE-PUBLISH gate.
+> The `installMcpServer=true` WITH the claude-code feature present path (register via `claude mcp add`, then assert `claude mcp list` reports the `graphify` entry) has no scenario. This is the one meaningful untested behavior: the `1.0.0` manifest ships the MCP wiring, and the first merge to `main` publishes `ghcr.io/weftwiseink/devcontainer-features/graphify:1.0.0` to GHCR (`devcontainer-features-release.yaml`, path filter `devcontainers/features/src/**`).
+> Add a with-claude-code scenario asserting `claude mcp list` shows `graphify` BEFORE that first GHCR publish. The command shape (`su - $_REMOTE_USER -c 'claude mcp add graphify -s user -- graphify-mcp'`) is spec-faithful and `graphify-mcp` is confirmed to exist, but the registration write itself is unverified end-to-end.
+
+> WARN(opus/code-graph/graphify-lace-feature): pipx re-install idempotency is untested across a second build pass.
+> `pipx install graphifyy==<ver>` over an already-populated `/usr/local/pipx` can exit non-zero ("already installed"). This never fires in a normal single-pass feature build (fresh layer), so it is harmless here, but a consumer re-running `install.sh` over an existing `PIPX_HOME` could surface it. A `--force` or a pre-check would harden the re-run edge. Low priority.
+
+Still-open not-verified items (carried from the Verification results section, kept visible here):
+- **Mount persistence across a `lace up` rebuild** - out of `devcontainer features test` harness scope (it does not apply lace mounts). Target-dir creation + ownership IS verified; cross-rebuild incremental reuse needs a lace `up` cycle.
+- **Git-hook execution (`installGitHook=true`)** - static-only (written, `chmod +x`, guarded, global `core.hooksPath` shadowing caveat now documented in README + install.sh). No scenario builds it or runs a commit.
+
 ## Status
 
 Core deliverable (Phases 1, 2, 6) empirically verified via the harness. Additive Phases 3 (MCP no-op path only), 4 (static only), 5 (README) complete. Phase 7 confirmed by inspection.
-Setting this devlog `review_ready`.
+R1 review: ACCEPT (accepted, round 1); reviewer independently re-ran the harness (4/4 pass, exit 0). Non-blocking README nits folded (callout attribution, git-hook shadowing caveat); follow-ups logged above. Devlog stays `review_ready`.
 
 ## Issues Encountered and Solved
 

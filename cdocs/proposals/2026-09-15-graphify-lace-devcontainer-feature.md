@@ -5,7 +5,7 @@ first_authored:
 task_list: code-graph/graphify-lace-feature
 type: proposal
 state: live
-status: implementation_ready
+status: implementation_accepted
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"

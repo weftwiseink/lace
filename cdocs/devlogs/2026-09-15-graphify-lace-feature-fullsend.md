@@ -31,7 +31,26 @@ Model: opus for subagents (per repo memory overseer directives).
 ## Arc state
 
 - Phase 1 (propose-revise): DONE. Accepted R2 (commit a1b9a7e); accept-nits folded + `implementation_ready` (commit 9ae227e3). Proposal: `cdocs/proposals/2026-09-15-graphify-lace-devcontainer-feature.md`.
-- Phase 2 (iterate): IN PROGRESS.
+- Phase 2 (iterate): DONE. Accepted R1 (rev-1, harness independently reproduced 4/4). Accept-nits folded (f7971ce). Proposal -> `implementation_accepted`.
+- Arc: COMPLETE. Feature committed to local `main`; NOT pushed (GHCR publish gated on push, deferred to user).
+
+## Handoff (arc close-out)
+
+### Completed
+- Full two-loop `/cdocs:full-send`: `/cdocs:propose-revise` (R1 revise -> R2 accept) then `/cdocs:iterate` (R1 accept, empirically verified twice).
+- Shipped `devcontainers/features/src/graphify/` (devcontainer-feature.json + install.sh + README) and `devcontainers/features/test/graphify/` (scenarios.json + 4 scenario scripts). Impl devlog: `cdocs/devlogs/2026-09-15-graphify-lace-feature-impl.md`.
+- Commits: proposal 2901ff7->23eb222(R1 review)->57b47d9->a1b9a7e->9ae227e3; impl 2365ffd->f5c6096->011243d->f7971ce; reviews 23eb222/a1b9a7e/bb70639; arc devlog 2256e33.
+
+### Decisions Made
+- lace defined (RFP open-Q answered) as the devcontainer-feature framework; graphify feature is the in-container index-provisioning surface, framed as a scoping AID with grep-floor fallback (never a coupling guarantee).
+- Honesty discipline held: pre-1.0 churn, CRDT blind spot, unmeasured-cost-win-vs-grep are first-class WARNs; BLUF refuses a cost claim.
+- Phase-1 empirical resolutions changed the design: cache is project-local via `GRAPHIFY_OUT` at a FIXED `/var/cache/graphify` mount target (Docker baked-ENV cannot resolve `${containerEnv:HOME}`), index cmd is `graphify update <path>`, MCP is the `graphify-mcp` stdio console script.
+- Verified: `devcontainer features test` run twice (impl + fresh reviewer), HARNESS_EXIT=0, 4/4 scenarios incl. the non-root PATH/ownership floor and a real `graphify update`->graph.json functional smoke.
+
+### Open Todos (deferred, honest)
+- REQUIRED-BEFORE-PUBLISH: add an `installMcpServer=true` + claude-code scenario asserting `claude mcp list` shows `graphify` (the one meaningful untested behavior). Publish triggers on push to `main`.
+- Not harness-verifiable / deferred: mount persistence across a `lace up` rebuild; `installGitHook=true` execution; pipx re-install idempotency on a second build pass.
+- Outward action reserved for the user: push to `main` (fires CI GHCR publish `ghcr.io/weftwiseink/devcontainer-features/graphify:1.0.0`).
 
 ## Phase 2 (iterate) Brief
 
@@ -47,6 +66,7 @@ Known harness limit (from R2 review): `devcontainer features test` does NOT appl
 
 | iteration | implementer | reviewer | review_verdict | review_proof | review_path | overseer_ctx_est | inline_work | notes |
 |---|---|---|---|---|---|---|---|---|
+| 1 | impl-1 (general-purpose) | rev-1 (cdocs:reviewer) | accept | confirmed | cdocs/reviews/2026-09-15-review-of-graphify-lace-feature-impl.md | ~120K (low inline) | no | rev-1 independently re-ran `devcontainer features test`: 4/4 scenarios PASS, exit 0; floor reproduced not read. 0 blocking. 4 non-blocking nits (README attribution, hooksPath caveat, pipx idempotency, MCP-happy-path follow-up). |
 
 ## Judge Log
 
@@ -78,3 +98,7 @@ Known harness limit (from R2 review): `devcontainer features test` does NOT appl
 | 2026-09-15T15:45 | resume | impl-1 (running, msg delivered) | finalizing: commit worktree refinements + impl devlog → review_ready + report |
 | 2026-09-15T15:55 | return | impl-1 | DONE. commits 2365ffd/f5c6096/011243d; worktree clean; committed src == tested src. Floor SATISFIED (HARNESS_EXIT=0, 4/4). Phase-1 facts resolved: cache=project-local via GRAPHIFY_OUT (fixed /var/cache/graphify), index cmd `graphify update <path>`, MCP `graphify-mcp` stdio. 4 deviations (all NOTE'd); mount-persistence + MCP-happy-path + git-hook + CI-publish NOT harness-verified. |
 | 2026-09-15T15:56 | dispatch | rev-1 (cdocs:reviewer, fresh) | claims cdocs/reviews/** only; review the implemented feature + empirically re-verify floor |
+| 2026-09-15T16:05 | return | rev-1 | ACCEPT (0 blocking). Independently re-ran harness: 4/4 PASS, exit 0. Deviations sound; /var/cache/graphify mount label resolves (template-resolver.ts/mount-resolver.ts). review bb70639. 4 non-blocking nits. |
+| 2026-09-15T16:06 | dispatch | impl-1 (resume) | fold README nits #1/#2 + log deferred follow-ups |
+| 2026-09-15T16:10 | return | impl-1 | DONE. commit f7971ce; NOTE attributions + hooksPath WARN; MCP-happy-path logged as required-before-publish follow-up. Worktree clean. |
+| 2026-09-15T16:12 | accept-checkpoint | overseer | proposal -> implementation_accepted; arc handoff written. Loop terminates on Accept. |

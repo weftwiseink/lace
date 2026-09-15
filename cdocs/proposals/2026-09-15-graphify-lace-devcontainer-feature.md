@@ -5,11 +5,11 @@ first_authored:
 task_list: code-graph/graphify-lace-feature
 type: proposal
 state: live
-status: wip
+status: implementation_ready
 last_reviewed:
   status: accepted
   by: "@claude-opus-4-8"
-  at: 2026-09-15T18:30:00-07:00
+  at: 2026-09-15T18:30:00-08:00
   round: 2
 tags: [devcontainer_features, code_graph, tooling, architecture, future_work]
 ---
@@ -181,8 +181,12 @@ else
         exit 1
     }
     python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
-    python3 -m pip install --upgrade pip pipx >/dev/null 2>&1 \
-        || python3 -m pip install --user pipx
+    # --break-system-packages guards the PEP 668 edge: the intended `dependsOn
+    # python` path is a source-built /usr/local CPython with no EXTERNALLY-MANAGED
+    # marker (so the flag is a harmless no-op there), but a distro-managed python3
+    # (Debian/Ubuntu ship the marker) would otherwise refuse the bootstrap.
+    python3 -m pip install --break-system-packages --upgrade pip pipx >/dev/null 2>&1 \
+        || python3 -m pip install --break-system-packages --user pipx
     PIPX="python3 -m pipx"
 fi
 
@@ -218,6 +222,7 @@ This avoids the per-user PATH fragility of installing into one user's `~/.local/
 > node provides `npm` on the build PATH for a later feature (which is why claude-code can rely on `command -v npm`), but the python feature installs pipx into an isolated `/usr/local/py-utils` venv whose bin dir is not guaranteed on a subsequent feature's `install.sh` PATH, and `python3 -m pipx` fails the same way (pipx is not in the base interpreter's site-packages).
 > This is the one assumption whose failure hard-fails the core install, so `install.sh` self-provisions pipx via `ensurepip`/`pip install pipx` when neither probe resolves, rather than betting on how the python feature exposes it.
 > The node→npm and python→pipx cases are therefore NOT equivalent, and the design does not treat them as such.
+> The bootstrap's `pip install` carries `--break-system-packages` defensively for the PEP 668 edge: the intended `dependsOn python` target is a source-built `/usr/local` CPython with no `EXTERNALLY-MANAGED` marker (where the flag is a no-op), but a distro-managed python3 would otherwise refuse the install. The only genuinely unrecoverable case is `python3` absent.
 
 **Exact version pin, no range.**
 graphify is pre-1.0 with 229 releases in ~5.5 months. A range would silently pull breaking CLI/MCP changes on every rebuild. The `version` option defaults to an exact pin and is passed as `graphifyy==<version>`.
@@ -261,7 +266,7 @@ The contract, stated in the README and the manifest description, is that the con
 
 ## Edge Cases / Challenging Scenarios
 
-- **pipx absent** (base image without the python feature): install.sh errors with a pointer to add the python feature, mirroring claude-code's npm check.
+- **python3 absent** (no python feature, and no base-image python3): this is the sole unrecoverable case, so install.sh errors loudly with a pointer to add the python feature. pipx-absent is NOT this case: it self-heals (next bullet).
 - **Root vs non-root remote user**: cache dir and chown branch on `_REMOTE_USER`, following the blesh pattern. System-wide binary needs no per-user chown.
   > NOTE(opus/code-graph/graphify-lace-feature): The mount `target` hardcodes `/home/${_REMOTE_USER}/.cache/graphify`, which resolves to `/home/root/...` for a root remote user, while `install.sh` branches `USER_HOME` to `/root`. This mirrors a pre-existing divergence in the claude-code manifest (same `/home/${_REMOTE_USER}` target, `/root` script branch) and is harmless in the normal non-root case; a root remote user is the edge where the mount target and the created dir diverge.
 - **pipx not on build-time PATH**: the install script self-provisions pipx via `ensurepip`/`pip install pipx` rather than failing, since `dependsOn python` does not guarantee pipx on a later feature's PATH (see the [Important Design Decisions](#important-design-decisions) WARN).
@@ -324,7 +329,8 @@ Add `customizations.lace.mounts.index` targeting the confirmed cache dir; create
 Success: harness confirms the dir exists and is remote-user-owned; a lace `up` rebuild (manual, per the Verification NOTE) confirms `--update` stays incremental.
 
 **Phase 3: Optional MCP server registration.**
-Implement `installMcpServer` (default false): when true and the `claude` CLI is present, register the server via `claude mcp add graphify -s user -- <graphify mcp command>` (idempotent, version-tolerant), run as the remote user so it lands in that user's config; when `claude` is absent, warn and no-op. Add `installsAfter` claude-code.
+Implement `installMcpServer` (default false): when true and the `claude` CLI is present, register the server via `claude mcp add graphify -s user -- <graphify mcp command>` (idempotent, version-tolerant); when `claude` is absent, warn and no-op. Add `installsAfter` claude-code.
+Because install.sh runs from the root build context, `claude mcp add -s user` writes root's config unless invoked as the remote user: wrap it as `su - "$_REMOTE_USER" -c 'claude mcp add graphify -s user -- ...'` (a login shell so the remote user's HOME and the `claude` CLI on PATH resolve). For a root remote user, run it directly.
 The stdio-vs-HTTP transport of the registered command is the deferred sub-decision (default stdio, per [Open Questions](#open-questions)).
 Success: `mcp_without_claude` scenario exits 0 with a warning and no broken config; a with-claude scenario registers a valid MCP entry that `claude mcp list` reports.
 

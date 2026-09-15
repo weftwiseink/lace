@@ -15,8 +15,9 @@ check "graphify shim is system-wide (/usr/local/bin, not ~/.local/bin)" bash -c 
 check "graphify-mcp on PATH" command -v graphify-mcp
 
 # --- Cache/output mount-target dir (created + owned by the remote user) ---
-check "GRAPHIFY_OUT cache dir exists" test -d "$HOME/.cache/graphify"
-check "GRAPHIFY_OUT cache dir is writable by the remote user" test -w "$HOME/.cache/graphify"
+check "GRAPHIFY_OUT is set to the mounted cache dir" bash -c '[ "$GRAPHIFY_OUT" = "/var/cache/graphify" ]'
+check "GRAPHIFY_OUT cache dir exists" test -d /var/cache/graphify
+check "GRAPHIFY_OUT cache dir is writable by the remote user" test -w /var/cache/graphify
 
 # --- Functional smoke: graphify actually indexes (AST-only, no API key) ---
 # Proves the CLI does more than resolve on PATH: it builds graph.json from a real

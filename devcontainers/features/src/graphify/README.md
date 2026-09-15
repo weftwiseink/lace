@@ -43,7 +43,7 @@ Pin a version, and opt into the MCP server:
 
 - `/usr/local/bin/graphify`: the code-graph CLI (isolated pipx venv under `/usr/local/pipx`).
 - `/usr/local/bin/graphify-mcp`: the MCP server (`--transport stdio|http`, stdio default).
-- `GRAPHIFY_OUT=$HOME/.cache/graphify`: the container env var pointing graphify's output/cache dir out of the working tree (see below).
+- `GRAPHIFY_OUT=/var/cache/graphify`: the container env var pointing graphify's output/cache dir out of the working tree (see below).
 
 Verify with `graphify --version`.
 
@@ -62,11 +62,13 @@ graphify path "A" "B"      # shortest path between two nodes
 
 By default graphify writes its output (the AST cache **and** `graph.json` / `GRAPH_REPORT.md` / `graph.html`) to a project-local `graphify-out/` directory inside the working tree.
 That would pollute the repo.
-This feature instead sets `GRAPHIFY_OUT=$HOME/.cache/graphify` (via the manifest's `containerEnv`), redirecting the whole output dir out of the tree, and declares a lace mount for it:
+This feature instead sets `GRAPHIFY_OUT=/var/cache/graphify` (via the manifest's `containerEnv`), redirecting the whole output dir out of the tree, and declares a lace mount for it:
 
 | Label | Target | Type | Default Source | Description |
 |-------|--------|------|----------------|-------------|
-| `graphify/index` | `/home/${_REMOTE_USER}/.cache/graphify` | directory | `~/.cache/graphify` | graphify output dir (`GRAPHIFY_OUT`): AST index cache + `graph.json` |
+| `graphify/index` | `/var/cache/graphify` | directory | `~/.cache/graphify` | graphify output dir (`GRAPHIFY_OUT`): AST index cache + `graph.json` |
+
+> NOTE: `GRAPHIFY_OUT` is a fixed, user-independent path (`/var/cache/graphify`) rather than `$HOME/.cache/graphify`, because a feature's `containerEnv` is baked as a raw Docker `ENV` that does not resolve `${containerEnv:HOME}`. The fixed path also avoids the root-vs-non-root home divergence.
 
 When the mount is active, the index persists across container rebuilds, so `graphify update` stays incremental rather than re-indexing from scratch.
 
@@ -82,7 +84,7 @@ To use a different host path, add a settings override to `~/.config/lace/setting
 }
 ```
 
-> NOTE: `GRAPHIFY_OUT` is a single per-user path, so a container hosting multiple checkouts shares one graph. This matches lace's one-project-per-container norm. For multiple projects in one container, set `GRAPHIFY_OUT` per-invocation or run graphify from each project root with its own override.
+> NOTE: `GRAPHIFY_OUT` is a single fixed path, so a container hosting multiple checkouts shares one graph. This matches lace's one-project-per-container norm. For multiple projects in one container, set `GRAPHIFY_OUT` per-invocation or run graphify from each project root with its own override.
 
 ## MCP server (opt-in)
 

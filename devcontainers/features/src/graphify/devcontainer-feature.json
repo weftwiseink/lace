@@ -28,13 +28,13 @@
         "ghcr.io/weftwiseink/devcontainer-features/claude-code"
     ],
     "containerEnv": {
-        "GRAPHIFY_OUT": "${containerEnv:HOME}/.cache/graphify"
+        "GRAPHIFY_OUT": "/var/cache/graphify"
     },
     "customizations": {
         "lace": {
             "mounts": {
                 "index": {
-                    "target": "/home/${_REMOTE_USER}/.cache/graphify",
+                    "target": "/var/cache/graphify",
                     "recommendedSource": "~/.cache/graphify",
                     "sourceMustBe": "directory",
                     "description": "graphify output dir (GRAPHIFY_OUT): the AST index cache plus graph.json/GRAPH_REPORT.md, redirected out of the working tree and persisted across rebuilds so 'graphify update' stays incremental"

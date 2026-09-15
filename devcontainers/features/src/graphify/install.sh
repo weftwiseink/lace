@@ -67,13 +67,15 @@ command -v graphify >/dev/null 2>&1 || {
 graphify --version
 
 # Create the GRAPHIFY_OUT cache/output dir so the lace mount target exists and is
-# owned by the remote user. GRAPHIFY_OUT is set to $HOME/.cache/graphify via the
-# manifest's containerEnv; this path matches for both root ($HOME=/root) and a
-# non-root user ($HOME=/home/<user>).
-CACHE_DIR="${USER_HOME}/.cache/graphify"
+# owned by the remote user. GRAPHIFY_OUT is set to a fixed, user-independent path
+# (/var/cache/graphify) via the manifest's containerEnv. A fixed path is used
+# rather than $HOME/.cache/graphify because a feature's containerEnv is baked as a
+# raw Docker ENV that does NOT resolve ${containerEnv:HOME} (it errors at build);
+# a fixed path also sidesteps the root-vs-non-root home divergence entirely.
+CACHE_DIR="/var/cache/graphify"
 mkdir -p "$CACHE_DIR"
 if [ "$_REMOTE_USER" != "root" ]; then
-    chown -R "${_REMOTE_USER}:${_REMOTE_USER}" "${USER_HOME}/.cache" 2>/dev/null || true
+    chown -R "${_REMOTE_USER}:${_REMOTE_USER}" "$CACHE_DIR" 2>/dev/null || true
 fi
 echo "graphify: cache/output dir ready at ${CACHE_DIR} (GRAPHIFY_OUT)."
 

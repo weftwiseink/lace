@@ -26,7 +26,8 @@ The [code-graph review-plugin RFP](#links) lists "what is lace?" as its first, b
 This proposal answers it concretely on the lace side: lace is the devcontainer-feature framework under `devcontainers/features/src/**`, auto-published to GHCR by CI, and its review/dev-loop integration surface for a graph substrate is a new `graphify` feature that provisions the index in-container.
 
 The feature installs the `graphifyy` PyPI package (the bare `graphify` name is squatted) at an exact pin, isolated from any project venv, verifies the CLI is on the remote user's PATH, and declares a `customizations.lace.mounts` entry so graphify's incremental index state survives rebuilds - analogous to the neovim feature's plugin-state mount.
-Optional, default-off booleans expose the MCP server and the `/graphify` skill for the in-container agent, and an optional git hook wires `graphify --update`.
+A default-off `installMcpServer` boolean registers the MCP server for the in-container agent via `claude mcp add`, and an optional git hook wires `graphify --update`.
+The `/graphify` skill is out of scope: it is owned by the clauthier `cdocs` plugin layer that the driving RFP names as the review-loop owner, and the README points there.
 
 The honest framing, carried from the RFP and the landscape survey, is load-bearing and appears as first-class WARN callouts below: pre-1.0 API churn, the CRDT blind spot, and the unmeasured cost win.
 This feature makes the graph substrate cheaply available and reproducible in a container; it does not settle whether the graph earns its cost over grep. That remains the unrun A/B the RFP flags.
@@ -38,7 +39,7 @@ Provide a reproducible, pinned, isolated in-container installation of the graphi
 Concretely:
 - Install `graphifyy` at a pinned version, isolated from project Python environments, on the remote user's PATH.
 - Persist the incremental index/cache across container rebuilds via a lace mount.
-- Expose the graphify MCP server and `/graphify` skill to the in-container agent as opt-in options.
+- Expose the graphify MCP server to the in-container agent as an opt-in option (the `/graphify` skill is owned by the clauthier plugin layer, not this feature).
 - Frame the feature so the consuming loop treats the index as a scoping aid with a defined grep fallback, never a guarantee.
 
 ## Background
@@ -81,14 +82,14 @@ A new `graphify` feature that installs `graphifyy` system-wide via pipx into `/u
 ```mermaid
 flowchart TD
     A["devcontainer.json<br/>features: graphify"] --> B["install.sh"]
-    B --> C{"pipx available?<br/>(python feature)"}
-    C -->|no| C1["error: add python feature"]
-    C -->|yes| D["pipx install graphifyy==PIN<br/>PIPX_HOME=/usr/local/pipx<br/>PIPX_BIN_DIR=/usr/local/bin"]
+    B --> C{"pipx on build PATH?"}
+    C -->|no| C1["bootstrap: ensurepip +<br/>pip install pipx"]
+    C -->|yes| D
+    C1 --> D["pipx install graphifyy==PIN<br/>PIPX_HOME=/usr/local/pipx<br/>PIPX_BIN_DIR=/usr/local/bin"]
     D --> E["verify: graphify --version"]
     E --> F["mkdir + chown cache mount dir<br/>for _REMOTE_USER"]
     F --> G{"optional opts"}
-    G -->|installMcpServer| H["register MCP server<br/>in remote user Claude config"]
-    G -->|installSkill| I["install /graphify skill"]
+    G -->|installMcpServer| H["claude mcp add graphify -s user"]
     G -->|installGitHook| J["wire graphify --update hook"]
     F --> K["lace mount persists<br/>index across rebuilds"]
 ```
@@ -111,12 +112,7 @@ flowchart TD
     "installMcpServer": {
       "type": "boolean",
       "default": false,
-      "description": "Register the graphify MCP server (query_graph, get_node, shortest_path) into the remote user's Claude config. Requires the claude-code feature; no-op with a warning if absent."
-    },
-    "installSkill": {
-      "type": "boolean",
-      "default": false,
-      "description": "Install the /graphify Claude Code skill for the remote user."
+      "description": "Register the graphify MCP server (query_graph, get_node, shortest_path) into the remote user's Claude config via 'claude mcp add'. Requires the claude-code feature; no-op with a warning if absent."
     },
     "installGitHook": {
       "type": "boolean",
@@ -146,8 +142,8 @@ flowchart TD
 ```
 
 Rationale for the key choices, expanded in [Important Design Decisions](#important-design-decisions):
-- `dependsOn` the standard `python` feature: it provides Python and bundles pipx, mirroring how `claude-code` depends on node.
-- `installsAfter` `claude-code` (not `dependsOn`): the MCP/skill options need Claude config to exist when enabled, but the core install must not hard-require claude-code.
+- `dependsOn` the standard `python` feature: it provides Python 3 (and, on most images, `pip`/`ensurepip`), the substrate the install script bootstraps pipx onto if pipx is not already on the build-time PATH.
+- `installsAfter` `claude-code` (not `dependsOn`): the `installMcpServer` option needs Claude config to exist when enabled, but the core install must not hard-require claude-code.
 - The mount targets graphify's cache dir, not the repo, so the graph artifact does not pollute or risk being committed to the working tree.
 
 ### Install script (`install.sh`) shape
@@ -160,22 +156,38 @@ set -eu
 
 VERSION="${VERSION:-0.9.61}"
 INSTALL_MCP="${INSTALLMCPSERVER:-false}"
-INSTALL_SKILL="${INSTALLSKILL:-false}"
 INSTALL_HOOK="${INSTALLGITHOOK:-false}"
 
 _REMOTE_USER="${_REMOTE_USER:-root}"
 if [ "$_REMOTE_USER" = "root" ]; then USER_HOME="/root"; else USER_HOME="/home/${_REMOTE_USER}"; fi
 
-command -v pipx >/dev/null 2>&1 || python3 -m pipx --version >/dev/null 2>&1 || {
-    echo "Error: pipx is required. Add ghcr.io/devcontainers/features/python (it bundles pipx)."
-    exit 1
-}
-
 # System-wide install so the CLI is on PATH for every user (no per-user PATH fragility).
 export PIPX_HOME=/usr/local/pipx
 export PIPX_BIN_DIR=/usr/local/bin
+
+# Resolve a pipx invocation. `dependsOn python` provides Python 3, but the
+# python feature installs pipx into an isolated /usr/local/py-utils venv that is
+# NOT guaranteed on this script's build-time PATH, and `python3 -m pipx` fails
+# for the same reason (pipx is not in the base interpreter's site-packages).
+# So probe for pipx, and self-provision it onto python3 if absent, idempotently.
+if command -v pipx >/dev/null 2>&1; then
+    PIPX="pipx"
+elif python3 -m pipx --version >/dev/null 2>&1; then
+    PIPX="python3 -m pipx"
+else
+    echo "pipx not found on build PATH; bootstrapping it via pip."
+    command -v python3 >/dev/null 2>&1 || {
+        echo "Error: python3 is required. Add ghcr.io/devcontainers/features/python." >&2
+        exit 1
+    }
+    python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
+    python3 -m pip install --upgrade pip pipx >/dev/null 2>&1 \
+        || python3 -m pip install --user pipx
+    PIPX="python3 -m pipx"
+fi
+
 echo "Installing graphifyy==${VERSION} via pipx (system-wide)..."
-pipx install "graphifyy==${VERSION}"
+$PIPX install "graphifyy==${VERSION}"
 
 # Verify the CLI resolves on PATH. Fail loudly if it does not.
 command -v graphify >/dev/null 2>&1 || { echo "Error: graphify not on PATH after install." >&2; exit 1; }
@@ -200,7 +212,12 @@ fi
 `graphifyy` is a CLI, not a library the project imports, so it must not land in a project venv or pollute the base Python.
 pipx gives each CLI its own venv; setting `PIPX_HOME=/usr/local/pipx` and `PIPX_BIN_DIR=/usr/local/bin` puts the shim on the global PATH for all users, matching the npm-global (`claude-code`) and `/usr/local` (`neovim`) precedent.
 This avoids the per-user PATH fragility of installing into one user's `~/.local/bin`, which is the failure mode called out in the [Verification Methodology](#verification-methodology).
-`uv tool install` is a viable alternative with the same isolation; pipx is chosen because the standard python feature already bundles it, avoiding a second toolchain dependency.
+`uv tool install` is a viable alternative with the same isolation; pipx is chosen because it is the devcontainer python feature's own utility installer, so the base image already carries the machinery to provision it.
+
+> WARN(opus/code-graph/graphify-lace-feature): pipx is NOT guaranteed on the build-time PATH just because `dependsOn python` is declared.
+> node provides `npm` on the build PATH for a later feature (which is why claude-code can rely on `command -v npm`), but the python feature installs pipx into an isolated `/usr/local/py-utils` venv whose bin dir is not guaranteed on a subsequent feature's `install.sh` PATH, and `python3 -m pipx` fails the same way (pipx is not in the base interpreter's site-packages).
+> This is the one assumption whose failure hard-fails the core install, so `install.sh` self-provisions pipx via `ensurepip`/`pip install pipx` when neither probe resolves, rather than betting on how the python feature exposes it.
+> The node→npm and python→pipx cases are therefore NOT equivalent, and the design does not treat them as such.
 
 **Exact version pin, no range.**
 graphify is pre-1.0 with 229 releases in ~5.5 months. A range would silently pull breaking CLI/MCP changes on every rebuild. The `version` option defaults to an exact pin and is passed as `graphifyy==<version>`.
@@ -215,10 +232,16 @@ The working tree is already the host-bind-mounted repo, so those artifacts would
 The lace mount instead persists graphify's incremental *cache* dir, keeping `--update` incremental across rebuilds without polluting the tree.
 The repo-level artifacts are a separate concern: consumers should gitignore them or redirect them if graphify supports it (unconfirmed, see [Open Questions](#open-questions)).
 
-**MCP server and skill are opt-in, default off, and arguably out of scope.**
+**MCP server is opt-in and default off; the `/graphify` skill is out of scope and NOT provided.**
 A code-index feature registering entries in Claude Code's config surface couples an infrastructure feature to an agent-config concern and introduces a cross-feature ordering dependency (`installsAfter` claude-code).
 The critical read: the MCP-server registration has a real in-loop use (the in-container reviewer/dev agent querying the graph headlessly), so a default-off boolean is defensible.
-The `/graphify` *skill* is weaker: skills are a Claude Code plugin/marketplace concern, and the sibling clauthier plugin layer is the more natural owner of a review-loop skill. It is included as an option for convenience but flagged as a candidate to defer.
+The `/graphify` *skill* is not: skills are a Claude Code plugin/marketplace concern, and the driving RFP names the clauthier `cdocs` plugin's `reviewer` surface as the review-loop owner.
+A devcontainer feature installing an agent skill would couple infrastructure provisioning to agent-plugin distribution with no clean ownership boundary, so the skill is deferred entirely to the clauthier plugin layer and this feature ships no skill option.
+The README instead points consumers to the clauthier plugin as the skill's install path.
+
+**MCP registration uses `claude mcp add`, not hand-edited config.**
+When `installMcpServer` is enabled, registration is performed via `claude mcp add graphify -s user -- <graphify mcp command>`, which is idempotent and version-tolerant.
+Hand-editing `~/.claude.json` or a `.mcp.json` schema is brittle across exactly the claude-code version churn the proposal warns about one layer up, so the mechanism is pinned to the CLI.
 
 **Git-hook refresh is opt-in, default off.**
 `graphify --update` on every commit keeps the index fresh but adds latency and surprise to a hot path.
@@ -240,6 +263,8 @@ The contract, stated in the README and the manifest description, is that the con
 
 - **pipx absent** (base image without the python feature): install.sh errors with a pointer to add the python feature, mirroring claude-code's npm check.
 - **Root vs non-root remote user**: cache dir and chown branch on `_REMOTE_USER`, following the blesh pattern. System-wide binary needs no per-user chown.
+  > NOTE(opus/code-graph/graphify-lace-feature): The mount `target` hardcodes `/home/${_REMOTE_USER}/.cache/graphify`, which resolves to `/home/root/...` for a root remote user, while `install.sh` branches `USER_HOME` to `/root`. This mirrors a pre-existing divergence in the claude-code manifest (same `/home/${_REMOTE_USER}` target, `/root` script branch) and is harmless in the normal non-root case; a root remote user is the edge where the mount target and the created dir diverge.
+- **pipx not on build-time PATH**: the install script self-provisions pipx via `ensurepip`/`pip install pipx` rather than failing, since `dependsOn python` does not guarantee pipx on a later feature's PATH (see the [Important Design Decisions](#important-design-decisions) WARN).
 - **claude-code absent but `installMcpServer=true`**: no-op with a warning, never a hard failure. The core install stands alone.
 - **Stale index at query time**: out of this feature's control by design. The consuming loop's contract is to fall back to grep. Documented, not coded here.
 - **Repo-artifact pollution**: `graph.json` etc. default to the working tree. The README must instruct consumers to gitignore them; this feature does not write them.
@@ -264,6 +289,7 @@ Checks (`test.sh`, run as the remote user where the harness allows):
 - For `mcp_without_claude`: the install exited 0 and did not write a broken Claude config.
 
 Functional smoke (in at least one scenario): run `graphify --update` (or the index command) on a tiny fixture tree and assert `graph.json` is produced, proving the CLI actually indexes, not merely resolves on PATH.
+The exact index invocation is provisional pending Phase 1's confirmation against the installed CLI, the same status as the verify command and cache path in the install.sh NOTE.
 
 ## Verification Methodology
 
@@ -288,24 +314,28 @@ Phases are independently verifiable. Phases 1, 2, and 6 are the core deliverable
 Constraint: modify only files under `devcontainers/features/src/graphify/` and `devcontainers/features/test/graphify/`. Do NOT edit sibling features, the CI workflow, or lace's `up` path.
 
 **Phase 1: Core install and verification.**
-Author `devcontainer-feature.json` (id, version, `version` option, `dependsOn` python) and `install.sh` (system-wide pipx pinned install, root/non-root handling, verify `graphify --version` at end).
+Author `devcontainer-feature.json` (id, version, `version` option, `dependsOn` python) and `install.sh` (pipx-bootstrap-then-install, system-wide pinned install, root/non-root handling, verify `graphify --version` at end).
+The pipx bootstrap (self-provision via `ensurepip`/`pip install pipx` when pipx is not on the build PATH) is part of this phase: verify it against a python-feature base image where pipx is in `/usr/local/py-utils`, not on PATH.
 Success: `default_install` scenario builds, `graphify --version` reports the pin as the remote user, functional smoke produces `graph.json`.
-This phase also RESOLVES the two [Open Questions](#open-questions) about the verify command and cache path by confirming them against the installed CLI, and corrects the manifest/script accordingly.
+This phase also RESOLVES the [Open Questions](#open-questions) about the verify command, the cache path, and whether graphify exposes an output-dir flag (which would let a consumer redirect `graph.json`/`graph.html`/`GRAPH_REPORT.md` rather than gitignore them), confirming each against the installed CLI and correcting the manifest/script/README accordingly.
 
 **Phase 2: Index persistence mount.**
 Add `customizations.lace.mounts.index` targeting the confirmed cache dir; create and chown it in install.sh.
 Success: harness confirms the dir exists and is remote-user-owned; a lace `up` rebuild (manual, per the Verification NOTE) confirms `--update` stays incremental.
 
 **Phase 3: Optional MCP server registration.**
-Implement `installMcpServer` (default false): when true and claude-code config is present, register the graphify MCP server for the remote user; when claude-code is absent, warn and no-op. Add `installsAfter` claude-code.
-Success: `mcp_without_claude` scenario exits 0 with a warning and no broken config; a with-claude scenario registers a valid MCP entry.
+Implement `installMcpServer` (default false): when true and the `claude` CLI is present, register the server via `claude mcp add graphify -s user -- <graphify mcp command>` (idempotent, version-tolerant), run as the remote user so it lands in that user's config; when `claude` is absent, warn and no-op. Add `installsAfter` claude-code.
+The stdio-vs-HTTP transport of the registered command is the deferred sub-decision (default stdio, per [Open Questions](#open-questions)).
+Success: `mcp_without_claude` scenario exits 0 with a warning and no broken config; a with-claude scenario registers a valid MCP entry that `claude mcp list` reports.
 
-**Phase 4: Optional skill and git hook.**
-Implement `installSkill` and `installGitHook` (both default false), each guarded and non-fatal.
-Success: enabling each in a scenario produces the expected artifact (skill installed; post-commit hook present and runnable) without affecting the default path.
+**Phase 4: Optional git hook.**
+Implement `installGitHook` (default false), guarded and non-fatal: install a post-commit hook running `graphify --update`.
+Success: enabling it in a scenario produces a present, runnable post-commit hook without affecting the default path.
+> NOTE(opus/code-graph/graphify-lace-feature): The `/graphify` skill is deliberately NOT installed by this feature; it is owned by the clauthier `cdocs` plugin layer. See [Important Design Decisions](#important-design-decisions).
 
 **Phase 5: README.**
 Author `README.md` following the neovim README structure: usage, options table, the lace mount table, dependencies, and an explicit "Graceful degradation" section stating the grep-fallback contract and the two WARN caveats (CRDT blindness, unmeasured cost).
+Include a pointer to the clauthier `cdocs` plugin as the install path for the `/graphify` skill (which this feature does not provide).
 Success: README documents every option and states the scoping-aid-not-guarantee contract prominently.
 
 **Phase 6: Test harness.**
@@ -318,12 +348,15 @@ Success: the devlog notes that the first merge to main publishes the feature (a 
 
 ## Open Questions
 
-Left for the reviewer / resolved in Phase 1:
+Empirically confirmable, resolved in Phase 1 against the installed CLI:
 - **Verify command**: is `graphify --version` the correct verification invocation, or is it `graphify --help` / another? Confirm against the pinned build.
 - **Cache directory path**: does graphify use `~/.cache/graphify`, `~/.graphify`, or a project-local `.graphify/`? The mount target depends on this. Confirm before finalizing the manifest.
-- **Redirecting repo artifacts**: can `graph.json`/`graph.html`/`GRAPH_REPORT.md` be redirected out of the working tree, or must consumers gitignore them? Affects the README contract.
-- **Skill scope**: should `installSkill` live in this feature at all, or defer entirely to the clauthier plugin layer that owns the review-loop skill? Reviewer judgment.
-- **MCP transport**: register the MCP server over stdio or the HTTP transport for the in-container agent? HTTP enables sharing but adds a port/process concern; stdio is simpler for a single in-container agent.
+- **Redirecting repo artifacts**: does graphify expose an output-dir flag so `graph.json`/`graph.html`/`GRAPH_REPORT.md` can be redirected out of the working tree, or must consumers gitignore them? A redirect is cleaner than a gitignore and would tighten the README contract.
+
+Deferred sub-decision (does not gate the design):
+- **MCP transport**: register the MCP server (via `claude mcp add`) over stdio or the HTTP transport for the in-container agent? HTTP enables sharing but adds a port/process concern; stdio is the default for a single in-container agent.
+
+> NOTE(opus/code-graph/graphify-lace-feature): The `installSkill` scope question is resolved: the `/graphify` skill is dropped from this feature and deferred to the clauthier `cdocs` plugin layer. See [Important Design Decisions](#important-design-decisions).
 
 ## Links
 
